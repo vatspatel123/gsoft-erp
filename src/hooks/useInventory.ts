@@ -1,0 +1,213 @@
+import { useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
+import toast from 'react-hot-toast'
+
+export function useInventory() {
+  const [products, setProducts] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [adjustments, setAdjustments] = useState<any[]>([])
+
+  const fetchProducts = async () => {
+    setLoading(true)
+    try {
+      const { data } = await supabase
+        .from('products')
+        .select('*, categories(name)')
+        .eq('is_active', true)
+        .order('name')
+      setProducts(data || [])
+    } catch (e) {
+      console.error('Error fetching products:', e)
+    }
+    setLoading(false)
+  }
+
+  const fetchAdjustments = async () => {
+    try {
+      const { data } = await supabase
+        .from('stock_damage_log')
+        .select(`
+          *,
+          products(name)
+        `)
+        .order('created_at', {
+          ascending: false
+        })
+        .limit(10)
+      setAdjustments(data || [])
+    } catch (e) {
+      console.error('Error fetching adjustments:', e)
+    }
+  }
+
+  useEffect(() => {
+    fetchProducts()
+    fetchAdjustments()
+  }, [])
+
+  const adjustStock = async (
+    productId: string,
+    type: 'add' | 'remove' | 'set',
+    qty: number,
+    reason: string,
+    notes: string
+  ) => {
+    const product = products.find(p => p.id === productId)
+    if (!product) return
+
+    let newQty = product.stock_qty
+    if (type === 'add') newQty = product.stock_qty + qty
+    else if (type === 'remove')
+      newQty = Math.max(0, product.stock_qty - qty)
+    else if (type === 'set') newQty = qty
+
+    try {
+      await supabase
+        .from('products')
+        .update({ stock_qty: newQty })
+        .eq('id', productId)
+
+      await supabase.from('stock_damage_log').insert({
+        product_id: productId,
+        qty_before: product.stock_qty,
+        qty_change:
+          type === 'add'
+            ? qty
+            : type === 'remove'
+              ? -qty
+              : qty - product.stock_qty,
+        qty_after: newQty,
+        reason: reason,
+        notes: notes || null,
+        adjustment_type: type
+      })
+
+      toast.success('Stock updated!')
+      fetchProducts()
+      fetchAdjustments()
+    } catch (e) {
+      console.error('Error adjusting stock:', e)
+      toast.error('Failed to update stock')
+    }
+  }
+
+  const quickAdjust = async (
+    productId: string,
+    change: number
+  ) => {
+    const product = products.find(p => p.id === productId)
+    if (!product) return
+
+    const newQty = Math.max(0, product.stock_qty + change)
+
+    try {
+      await supabase
+        .from('products')
+        .update({ stock_qty: newQty })
+        .eq('id', productId)
+
+      toast.success(
+        change > 0 ? '+' + change + ' added' : change + ' removed'
+      )
+      fetchProducts()
+    } catch (e) {
+      console.error('Error quick adjusting:', e)
+      toast.error('Failed to adjust stock')
+    }
+  }
+
+  const saveStockCount = async (
+    counts: {
+      productId: string
+      physicalQty: number
+      systemQty: number
+    }[]
+  ) => {
+    let updated = 0
+    let matched = 0
+
+    try {
+      for (const count of counts) {
+        await supabase
+          .from('products')
+          .update({
+            stock_qty: count.physicalQty
+          })
+          .eq('id', count.productId)
+
+        await supabase.from('physical_stock_counts').insert({
+          product_id: count.productId,
+          system_qty: count.systemQty,
+          physical_qty: count.physicalQty,
+          difference: count.physicalQty - count.systemQty,
+          counted_at: new Date().toISOString()
+        })
+
+        if (count.physicalQty === count.systemQty) matched++
+        updated++
+      }
+
+      toast.success(
+        updated +
+          ' products updated. ' +
+          matched +
+          ' matched perfectly!'
+      )
+      fetchProducts()
+    } catch (e) {
+      console.error('Error saving stock count:', e)
+      toast.error('Failed to save count')
+    }
+  }
+
+  const filteredProducts = products
+    .filter(p => {
+      if (search) {
+        const q = search.toLowerCase()
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.sku.toLowerCase().includes(q)
+        )
+      }
+      return true
+    })
+    .filter(p => {
+      if (filter === 'healthy')
+        return p.stock_qty > p.low_stock_alert
+      if (filter === 'low')
+        return p.stock_qty <= p.low_stock_alert && p.stock_qty > 0
+      if (filter === 'out') return p.stock_qty === 0
+      return true
+    })
+
+  const totalValue = products.reduce(
+    (sum, p) => sum + p.unit_price * p.stock_qty,
+    0
+  )
+
+  const lowStockProducts = products.filter(
+    p => p.stock_qty <= p.low_stock_alert && p.stock_qty > 0
+  )
+
+  const outOfStockProducts = products.filter(p => p.stock_qty === 0)
+
+  return {
+    products: filteredProducts,
+    allProducts: products,
+    loading,
+    search,
+    setSearch,
+    filter,
+    setFilter,
+    adjustments,
+    totalValue,
+    lowStockProducts,
+    outOfStockProducts,
+    adjustStock,
+    quickAdjust,
+    saveStockCount,
+    fetchProducts
+  }
+}

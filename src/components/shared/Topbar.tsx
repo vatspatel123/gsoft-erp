@@ -1,0 +1,128 @@
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { getPendingCount } from '../../utils/offlineCache';
+
+const pageNames: Record<string, string> = {
+  '/':                'POS Billing',
+  '/dashboard':       'Dashboard',
+  '/pos':             'POS Billing',
+  '/products':        'Products',
+  '/inventory':       'Inventory',
+  '/stock-damage':    'Stock Damage',
+  '/invoices':        'Invoices',
+  '/crm':             'Customers',
+  '/suppliers':       'Suppliers',
+  '/purchase-orders': 'Purchase Orders',
+  '/inward-challans': 'Inward Challans',
+  '/accounting':      'Accounting',
+  '/reports':         'Reports',
+};
+
+export function Topbar() {
+  const [time, setTime] = useState(new Date());
+  const [pendingCount, setPendingCount] = useState(getPendingCount());
+  const isOnline = useOnlineStatus();
+  const location = useLocation();
+
+  const currentPage = pageNames[location.pathname] || 'Dashboard';
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTime(new Date());
+      setPendingCount(getPendingCount());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <header style={{
+      height: '56px',
+      backgroundColor: '#ffffff',
+      color: '#1a0a2e',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 20px',
+      borderBottom: '1px solid #f3e8ff',
+      boxShadow: '0 1px 4px rgba(147,51,234,0.06)',
+      fontFamily: "'DM Sans', sans-serif"
+    }}>
+      <div style={{ fontWeight: 500, fontSize: '15px', color: '#1a0a2e' }}>
+        {currentPage}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '4px 12px',
+          borderRadius: '20px',
+          backgroundColor: isOnline ? '#f0fdf4' : '#fff7ed',
+          border: `1px solid ${isOnline ? '#bbf7d0' : '#fed7aa'}`
+        }}>
+          <div style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: isOnline ? '#16a34a' : '#f97316',
+            animation: isOnline ? 'none' : 'pulse 2s infinite'
+          }} />
+          <span style={{ 
+            fontSize: '12px', 
+            color: isOnline ? '#16a34a' : '#f97316',
+            fontWeight: 500
+          }}>
+            {isOnline ? 'Online' : 'Offline Mode'}
+          </span>
+        </div>
+        {isOnline && pendingCount > 0 && (
+          <div style={{
+            backgroundColor: '#f97316',
+            color: 'white',
+            border: '1px solid #f97316',
+            padding: '4px 10px',
+            borderRadius: '20px',
+            fontSize: '11px',
+            fontWeight: 600
+          }}>
+            Syncing {pendingCount}...
+          </div>
+        )}
+        {!isOnline && pendingCount > 0 && (
+          <div style={{
+            backgroundColor: '#ef4444',
+            color: 'white',
+            border: '1px solid #ef4444',
+            padding: '4px 10px',
+            borderRadius: '20px',
+            fontSize: '11px',
+            fontWeight: 600
+          }}>
+            {pendingCount} pending
+          </div>
+        )}
+        <div style={{
+          backgroundColor: '#f5f3ff',
+          color: '#9333ea',
+          border: '1px solid #e9d5ff',
+          padding: '4px 12px',
+          borderRadius: '20px',
+          fontSize: '12px',
+          fontWeight: 500
+        }}>
+          Counter 1
+        </div>
+        <div style={{ fontSize: '12px', fontFamily: "'DM Mono', monospace", color: '#94a3b8' }}>
+          {time.toLocaleTimeString()}
+        </div>
+      </div>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
+    </header>
+  );
+}

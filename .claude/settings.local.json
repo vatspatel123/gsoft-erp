@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(find /c/Projects/gsoft-erp/src/pages -type f -name *)",
+      "Bash(wc -l /c/Projects/gsoft-erp/src/pages/*.tsx)",
+      "Bash(grep -l \"export function\\\\|export const\" /c/Projects/gsoft-erp/src/hooks/*.ts)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(ls -la /c/Projects/gsoft-erp/*.md)",
+      "Bash(npx tsc:*)",
+      "Bash(code \"C:\\\\Projects\\\\ai-trading-web\")",
+      "Bash(cmd /c \"code C:\\\\Projects\\\\ai-trading-web\")"
+    ]
+  }
+}

@@ -1,0 +1,199 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-page:        #fdf8ff;
+  --bg-card:        #ffffff;
+  --bg-sidebar:     #2d1b4e;
+  --bg-sidebar-hover: #3d2464;
+  --border:         #f3e8ff;
+  --border-mid:     #e9d5ff;
+
+  --purple:         #9333ea;
+  --purple-light:   #f5f3ff;
+  --purple-mid:     #c084fc;
+  --purple-active:  #c084fc;
+
+  --pink:           #ec4899;
+  --pink-light:     #fdf2f8;
+
+  --teal:           #14b8a6;
+  --teal-light:     #f0fdfa;
+
+  --amber:          #f97316;
+  --amber-light:    #fff7ed;
+
+  --red:            #ef4444;
+  --red-light:      #fef2f2;
+
+  --green:          #22c55e;
+  --green-light:    #f0fdf4;
+
+  --text-1:         #1a0a2e;
+  --text-2:         #64748b;
+  --text-3:         #94a3b8;
+  --text-white:     #ffffff;
+  --text-sidebar:   #c4b5d4;
+
+  --shadow-sm: 0 1px 4px rgba(147,51,234,0.06);
+  --shadow-md: 0 4px 16px rgba(147,51,234,0.10);
+  --shadow-lg: 0 8px 32px rgba(147,51,234,0.12);
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+}
+
+body {
+  font-family: 'DM Sans', -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #e9d5ff;
+  border-radius: 4px;
+}
+
+input, button, select, textarea {
+  font-family: inherit;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* --- Shared UI Components --- */
+
+/* Modals & Dialogs */
+.modal-backdrop, .modal-overlay, .confirm-dialog {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(45, 27, 78, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal, .confirm-content {
+  background: var(--bg-card);
+  border-radius: var(--r-lg);
+  padding: 24px;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+  animation: modalSlideUp 0.3s ease-out;
+}
+
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title, .confirm-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-3);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.modal-close:hover {
+  background: var(--purple-light);
+  color: var(--purple);
+}
+
+.modal-content, .confirm-message {
+  padding: 0 0 20px 0;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.modal-footer, .confirm-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Form baselines */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.form-input, .form-select, .form-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--text-1);
+  background: var(--bg-card);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.15s;
+}
+
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.08);
+}
+

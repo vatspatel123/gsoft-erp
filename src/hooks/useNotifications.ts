@@ -1,0 +1,75 @@
+import { useEffect } from 'react'
+import toast from 'react-hot-toast'
+import { supabase } from '../lib/supabase'
+import { getCachedProducts } from '../utils/offlineCache'
+
+export function useNotifications() {
+  useEffect(() => {
+    const run = async () => {
+      // 1. Low stock alert from cache (fast, no network needed)
+      const cached = getCachedProducts()
+      if (cached) {
+        const lowStock = cached.filter(
+          p => p.is_active && p.stock_qty <= p.low_stock_alert && p.stock_qty > 0
+        )
+        if (lowStock.length > 0) {
+          const names = lowStock.slice(0, 3).map(p => p.name).join(', ')
+          const extra = lowStock.length > 3 ? ` +${lowStock.length - 3} more` : ''
+          toast(`⚠️ ${lowStock.length} product${lowStock.length > 1 ? 's' : ''} running low: ${names}${extra}`, {
+            duration: 6000,
+            style: { background: '#fff7ed', color: '#92400e', border: '1px solid #fed7aa' }
+          })
+        }
+      }
+
+      if (!navigator.onLine) return
+
+      try {
+        // 2. Birthday customers today
+        const today = new Date()
+        const mmdd = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+        const { data: bday } = await supabase
+          .from('customers')
+          .select('name, date_of_birth')
+          .not('date_of_birth', 'is', null)
+
+        if (bday) {
+          const todayBirthdays = bday.filter(c => {
+            if (!c.date_of_birth) return false
+            return c.date_of_birth.slice(5) === mmdd
+          })
+          if (todayBirthdays.length > 0) {
+            const names = todayBirthdays.slice(0, 2).map(c => c.name).join(', ')
+            toast(`🎂 Birthday today: ${names}${todayBirthdays.length > 2 ? ` +${todayBirthdays.length - 2} more` : ''}! Check Customers page.`, {
+              duration: 7000,
+              style: { background: '#fdf2f8', color: '#86198f', border: '1px solid #f0abfc' }
+            })
+          }
+        }
+
+        // 3. Credit sales pending in last 7 days
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+        const { data: creditSales } = await supabase
+          .from('sales')
+          .select('net_amount')
+          .eq('payment_mode', 'credit')
+          .gte('created_at', sevenDaysAgo)
+          .eq('is_return', false)
+
+        if (creditSales && creditSales.length > 0) {
+          const total = creditSales.reduce((sum, s) => sum + (s.net_amount || 0), 0)
+          toast(`💰 ₹${total.toLocaleString('en-IN')} in credit sales pending collection.`, {
+            duration: 6000,
+            style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }
+          })
+        }
+      } catch (e) {
+        // Silently fail — notifications are non-critical
+      }
+    }
+
+    // Run after a short delay so the app finishes loading first
+    const timer = setTimeout(run, 3000)
+    return () => clearTimeout(timer)
+  }, [])
+}

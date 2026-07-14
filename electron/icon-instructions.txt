@@ -1,0 +1,11 @@
+The icon should be:
+- Dark navy background #0f1923
+- Bold white letters "GS" centered
+- Amber bottom border strip #f59e0b
+- Rounded corners
+
+Install the sharp package:
+  npm install -D sharp
+Then create a script: electron/create-icon.js
+that uses sharp to generate the 256x256 icon.png
+Run it with: node electron/create-icon.js
