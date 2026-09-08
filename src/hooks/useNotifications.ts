@@ -47,22 +47,39 @@ export function useNotifications() {
           }
         }
 
-        // 3. Credit sales pending in last 7 days
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-        const { data: creditSales } = await supabase
+        // 3. Customer Credit Sales Overdue > 15 Days
+        const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
+        const { data: overdue15Days } = await supabase
           .from('sales')
           .select('net_amount')
           .eq('payment_mode', 'credit')
-          .gte('created_at', sevenDaysAgo)
+          .lte('created_at', fifteenDaysAgo)
           .eq('is_return', false)
 
-        if (creditSales && creditSales.length > 0) {
-          const total = creditSales.reduce((sum, s) => sum + (s.net_amount || 0), 0)
-          toast(`💰 ₹${total.toLocaleString('en-IN')} in credit sales pending collection.`, {
-            duration: 6000,
-            style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }
+        if (overdue15Days && overdue15Days.length > 0) {
+          const totalOverdue = overdue15Days.reduce((sum, s) => sum + (s.net_amount || 0), 0)
+          toast(`⚠️ ${overdue15Days.length} customer credit bill${overdue15Days.length > 1 ? 's' : ''} overdue (> 15 days) — Total ₹${totalOverdue.toLocaleString('en-IN')}. Check Invoices to send WhatsApp reminders.`, {
+            duration: 8000,
+            style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }
           })
         }
+
+        // 4. Supplier Purchase Bills Due > 30 Days
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+        try {
+          const { data: supplierDues } = await supabase
+            .from('inward_challans')
+            .select('total_amount, bill_amount')
+            .lte('created_at', thirtyDaysAgo)
+            .limit(10)
+
+          if (supplierDues && supplierDues.length > 0) {
+            toast(`🔔 Reminder: Supplier purchase bills older than 30 days pending review/payment.`, {
+              duration: 7000,
+              style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }
+            })
+          }
+        } catch {}
       } catch (e) {
         // Silently fail — notifications are non-critical
       }

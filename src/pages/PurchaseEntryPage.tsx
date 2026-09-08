@@ -357,47 +357,58 @@ function SuccessModal({
   const labelProducts = (purchaseComplete?.items || []).map((item: any) => ({
     id: item.product?.id || item.id,
     name: item.product?.name || item.productName,
-    design_no: item.design_no,
-    colour: item.colour,
-    size: item.size,
-    pcode: item.pcode,
-    mrp: item.mrp,
-    barcode: item.batch_no || item.product?.barcode || '',
-    batch_no: item.batch_no,
+    design_no: item.design_no || item.product?.design_no || '',
+    colour: item.colour || item.product?.colour || '',
+    size: item.size || item.product?.size || '',
+    pcode: item.pcode || item.product?.pcode || '',
+    mrp: item.mrp || item.product?.mrp || '',
+    unit_price: item.product?.unit_price || item.mrp || '',
+    barcode: item.product?.barcode || item.batch_no || item.product?.sku || '',
+    batch_no: item.batch_no || item.product?.batch_no || '',
     defaultCopies: typeof item.qty === 'number' ? item.qty : 1,
   }))
 
   return (
     <>
       <div style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 10000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(3px)'
       }}>
         <div style={{
-          background: 'white', borderRadius: '20px', padding: '32px',
-          width: '480px', maxWidth: '95vw', boxShadow: '0 24px 64px rgba(0,0,0,0.15)',
+          background: 'white', borderRadius: '20px', padding: '28px',
+          width: '480px', maxWidth: '95vw', boxShadow: '0 24px 64px rgba(0,0,0,0.2)',
         }}>
-          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <div style={{ fontSize: '48px', marginBottom: '8px' }}>✅</div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: '#1a0a2e' }}>Purchase Saved!</div>
-            <div style={{ fontSize: '14px', color: G.primary, fontWeight: 600, marginTop: '4px', fontFamily: 'DM Mono' }}>
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <div style={{ fontSize: '44px', marginBottom: '6px' }}>📦</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#1a0a2e' }}>Purchase Saved & Stock Inwarded!</div>
+            <div style={{ fontSize: '13px', color: G.primary, fontWeight: 700, marginTop: '4px', fontFamily: 'DM Mono' }}>
               {purchaseComplete?.purchaseNo}
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+              Items are added to inventory and barcodes have been generated.
             </div>
           </div>
 
-          <div style={{ background: G.hover, borderRadius: '12px', padding: '14px', marginBottom: '20px' }}>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: G.text, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Stock Updated
+          <div style={{ background: G.hover, borderRadius: '12px', padding: '12px 14px', marginBottom: '18px', border: `1px solid ${G.border}` }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: G.text, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Inwarded Stock Items
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '160px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
               {(purchaseComplete?.items || []).map((item: any, i: number) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                  <span style={{ color: '#1a0a2e' }}>
-                    {item.product?.name || item.productName}
-                    {item.size && <span style={{ color: G.muted }}> {item.size}</span>}
-                  </span>
-                  <span style={{ color: G.primary, fontWeight: 500 }}>
-                    ×{item.qty} ✅
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ color: '#1a0a2e', fontWeight: 600 }}>
+                      {item.product?.name || item.productName}
+                    </span>
+                    {item.size && <span style={{ color: G.muted }}> ({item.size})</span>}
+                    {item.product?.barcode && (
+                      <div style={{ fontSize: '10px', color: '#94a3b8', fontFamily: 'DM Mono' }}>
+                        Barcode: {item.product.barcode}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{ color: G.primary, fontWeight: 700, fontFamily: 'DM Mono' }}>
+                    +{item.qty} units
                   </span>
                 </div>
               ))}
@@ -405,17 +416,22 @@ function SuccessModal({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button onClick={() => setShowLabels(true)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                width: '100%', padding: '12px', background: '#9333ea', color: 'white',
+                border: 'none', borderRadius: '10px', fontSize: '13px', cursor: 'pointer',
+                fontFamily: 'DM Sans', fontWeight: 700, boxShadow: '0 4px 12px rgba(147,51,234,0.25)'
+              }}>
+              <Tag size={16} /> 🏷️ Print Barcode Labels Now
+            </button>
             <button onClick={printBill}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '11px', background: 'white', border: `1px solid ${G.border}`, borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500, color: G.text }}>
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '10px', background: 'white', border: `1px solid ${G.border}`, borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500, color: G.text }}>
               <Printer size={15} /> Print Purchase Bill (A4)
             </button>
-            <button onClick={() => setShowLabels(true)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '11px', background: 'white', border: `1px solid ${G.border}`, borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500, color: G.text }}>
-              <Tag size={15} /> Print Barcode Labels
-            </button>
             <button onClick={onNewPurchase}
-              style={{ width: '100%', padding: '11px', background: G.primary, color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 600 }}>
-              + New Purchase
+              style={{ width: '100%', padding: '10px', background: '#f0fdf4', color: G.primary, border: `1px solid ${G.border}`, borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 600 }}>
+              + New Purchase Entry
             </button>
           </div>
         </div>

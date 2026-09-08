@@ -317,9 +317,18 @@ export function printBill(saleData: any) {
       </div>
       <div>
         <span class="payment-badge">
-          ${paymentMode === 'upi' ? '✓ Paid via UPI' : paymentMode.toUpperCase()}
+          ${paymentMode === 'upi' ? '✓ Paid via UPI' : paymentMode === 'credit' ? '⚠️ CREDIT SALE (UDHAR)' : paymentMode.toUpperCase()}
         </span>
       </div>
+      ${paymentMode === 'credit' ? `
+        <div style="background:#fef2f2;border:1px dashed #ef4444;border-radius:6px;padding:6px 8px;margin-top:8px;text-align:center;">
+          <div style="color:#b91c1c;font-weight:700;font-size:11px;">⚠️ ઉધાર ખરીદી (CREDIT BILL)</div>
+          <div style="color:#7f1d1d;font-size:10px;margin-top:2px;">
+            Promised Due Date: <strong>${saleData.creditDueDate ? new Date(saleData.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'In 5 Days'}</strong>
+            ${saleData.creditDueDays ? ` (${saleData.creditDueDays} days)` : ''}
+          </div>
+        </div>
+      ` : ''}
       ${note ? `
         <div class="divider"></div>
         <div style="font-size:11px;color:#64748b;font-style:italic;">Note: ${note}</div>
@@ -342,3 +351,198 @@ export function printBill(saleData: any) {
     setTimeout(() => { win.print() }, 500)
   }
 }
+
+// ─── Credit Note Voucher Print ──────────────────────────────────────────────
+export function printCreditNote(noteData: {
+  creditNoteNo: string
+  customerName: string
+  customerPhone?: string
+  amount: number
+  balanceAmount: number
+  notes?: string
+  expiresAt?: string
+  createdAt: string
+}) {
+  const s = getSettings()
+  const shopName = s.shopName || 'Retail ERP'
+  const shopPhone = s.shopPhone || ''
+  const dateStr = new Date(noteData.createdAt).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  })
+  const expStr = noteData.expiresAt ? new Date(noteData.expiresAt).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  }) : '90 Days'
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Credit Note - ${noteData.creditNoteNo}</title>
+      <style>
+        body { font-family: 'DM Sans', system-ui, sans-serif; padding: 16px; max-width: 320px; margin: 0 auto; color: #1e293b; }
+        .header { text-align: center; border-bottom: 2px dashed #9333ea; padding-bottom: 12px; margin-bottom: 12px; }
+        .shop-name { font-size: 18px; font-weight: 800; color: #9333ea; }
+        .title-badge { display: inline-block; background: #9333ea; color: white; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 700; margin: 8px 0; letter-spacing: 0.05em; }
+        .row { display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0; }
+        .amount-box { background: #fdf4ff; border: 2px solid #e879f9; border-radius: 12px; padding: 12px; text-align: center; margin: 14px 0; }
+        .amount { font-size: 24px; font-weight: 800; color: #9333ea; }
+        .footer { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 16px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+        @media print { @page { margin: 4mm; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="shop-name">${shopName}</div>
+        ${shopPhone ? `<div style="font-size:11px;color:#64748b">📞 ${shopPhone}</div>` : ''}
+        <div class="title-badge">STORE CREDIT NOTE</div>
+        <div style="font-size:12px;font-weight:700">No: ${noteData.creditNoteNo}</div>
+        <div style="font-size:11px;color:#64748b">Date: ${dateStr}</div>
+      </div>
+      <div class="row"><span>Customer:</span><strong>${noteData.customerName}</strong></div>
+      ${noteData.customerPhone ? `<div class="row"><span>Phone:</span><span>${noteData.customerPhone}</span></div>` : ''}
+      <div class="amount-box">
+        <div style="font-size:11px;color:#701a75;font-weight:600">CREDIT BALANCE</div>
+        <div class="amount">₹${Number(noteData.balanceAmount).toFixed(2)}</div>
+        <div style="font-size:10px;color:#a21caf;margin-top:4px">Valid Until: ${expStr}</div>
+      </div>
+      ${noteData.notes ? `<div style="font-size:11px;color:#64748b;font-style:italic">Reason: ${noteData.notes}</div>` : ''}
+      <div class="footer">
+        <div>Please present this Credit Note number during your next purchase.</div>
+        <div style="margin-top:4px">Thank you for shopping with us!</div>
+      </div>
+    </body>
+    </html>
+  `
+  const win = window.open('', '_blank', 'width=380,height=500')
+  if (win) {
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print() }, 400)
+  }
+}
+
+export function sendCreditNoteWhatsApp(noteData: {
+  creditNoteNo: string
+  customerName: string
+  customerPhone?: string
+  amount: number
+  balanceAmount: number
+  expiresAt?: string
+}) {
+  if (!noteData.customerPhone) {
+    toast.error('Customer phone number not available')
+    return
+  }
+  const s = getSettings()
+  const shopName = s.shopName || 'Retail ERP'
+  const expStr = noteData.expiresAt ? new Date(noteData.expiresAt).toLocaleDateString('en-IN') : '90 Days'
+
+  const msg =
+    `*🎫 STORE CREDIT NOTE — ${shopName}*%0A%0A` +
+    `Dear *${noteData.customerName}*,%0A` +
+    `Your Store Credit Note has been generated successfully!%0A%0A` +
+    `• *Credit Note No:* ${noteData.creditNoteNo}%0A` +
+    `• *Credit Balance:* ₹${Number(noteData.balanceAmount).toFixed(2)}%0A` +
+    `• *Valid Until:* ${expStr}%0A%0A` +
+    `_You can redeem this balance on your next visit._%0A` +
+    `Thank you for choosing *${shopName}*!`
+
+  const cleanPhone = noteData.customerPhone.replace(/\D/g, '')
+  const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone
+  window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+}
+
+// ─── Purchase Return Slip Print ─────────────────────────────────────────────
+export function printPurchaseReturn(returnData: {
+  returnNo: string
+  supplierName: string
+  supplierPhone?: string
+  totalAmount: number
+  reason?: string
+  items: Array<{
+    productName: string
+    size?: string
+    colour?: string
+    qty: number
+    unitCost: number
+    lineTotal: number
+  }>
+  createdAt: string
+}) {
+  const s = getSettings()
+  const shopName = s.shopName || 'Retail ERP'
+  const dateStr = new Date(returnData.createdAt).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  })
+
+  const itemRows = returnData.items.map(item => `
+    <tr>
+      <td>${item.productName} ${item.size ? `<span style="color:#64748b">(${item.size})</span>` : ''}</td>
+      <td style="text-align:center">${item.qty}</td>
+      <td style="text-align:right">₹${Number(item.unitCost).toFixed(2)}</td>
+      <td style="text-align:right">₹${Number(item.lineTotal).toFixed(2)}</td>
+    </tr>
+  `).join('')
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Debit Note - ${returnData.returnNo}</title>
+      <style>
+        body { font-family: 'DM Sans', system-ui, sans-serif; padding: 16px; max-width: 400px; margin: 0 auto; color: #1e293b; }
+        .header { text-align: center; border-bottom: 2px solid #dc2626; padding-bottom: 10px; margin-bottom: 12px; }
+        .shop-name { font-size: 18px; font-weight: 800; color: #1e293b; }
+        .title-badge { display: inline-block; background: #dc2626; color: white; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 700; margin: 6px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+        th { text-align: left; border-bottom: 1px solid #cbd5e1; padding: 6px 2px; color: #64748b; font-size: 11px; }
+        td { padding: 6px 2px; border-bottom: 1px solid #f1f5f9; }
+        .total-box { display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; color: #dc2626; border-top: 2px solid #dc2626; padding-top: 8px; margin-top: 8px; }
+        @media print { @page { margin: 4mm; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="shop-name">${shopName}</div>
+        <div class="title-badge">PURCHASE RETURN / DEBIT NOTE</div>
+        <div style="font-size:12px;font-weight:700">Debit Note No: ${returnData.returnNo}</div>
+        <div style="font-size:11px;color:#64748b">Date: ${dateStr}</div>
+      </div>
+      <div style="font-size:12px;margin-bottom:8px">
+        <strong>Vendor:</strong> ${returnData.supplierName} ${returnData.supplierPhone ? `(${returnData.supplierPhone})` : ''}
+      </div>
+      ${returnData.reason ? `<div style="font-size:11px;color:#64748b;margin-bottom:8px">Reason: ${returnData.reason}</div>` : ''}
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th style="text-align:center">Qty</th>
+            <th style="text-align:right">Rate</th>
+            <th style="text-align:right">Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div class="total-box">
+        <span>Total Debit Amount</span>
+        <span>₹${Number(returnData.totalAmount).toFixed(2)}</span>
+      </div>
+      <div style="margin-top:24px;display:flex;justify-content:space-between;font-size:11px;color:#64748b">
+        <div>Authorized Signatory</div>
+        <div>Vendor Signature</div>
+      </div>
+    </body>
+    </html>
+  `
+  const win = window.open('', '_blank', 'width=450,height=600')
+  if (win) {
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print() }, 400)
+  }
+}
+

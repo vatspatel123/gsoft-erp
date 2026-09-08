@@ -5,7 +5,7 @@ import {
   FileText, Users, ArrowLeftRight,
   Truck, ClipboardList, FileDown,
   BookOpen, PieChart, Settings, Store,
-  ShoppingBag, Receipt,
+  ShoppingBag, Receipt, RotateCcw,
   type LucideIcon
 } from 'lucide-react';
 
@@ -57,6 +57,7 @@ const SECTIONS: NavSection[] = [
       { to: '/purchase-orders', label: 'Purchase Orders', icon: ClipboardList },
       { to: '/inward-challans', label: 'Inward Challans', icon: FileDown },
       { to: '/purchase-entry', label: 'Purchase Entry', icon: ShoppingBag },
+      { to: '/purchase-returns', label: 'Purchase Returns', icon: RotateCcw, badge: 'New', badgeColor: '#dc2626' },
     ]
   },
   {
@@ -104,7 +105,7 @@ export function Sidebar() {
         </div>
         <div>
           <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600, lineHeight: 1 }}>Retail ERP</div>
-          <div style={{ color: '#c4b5d4', fontSize: '10px', marginTop: '4px', lineHeight: 1 }}>Fashion Edition</div>
+          <div style={{ color: '#c4b5d4', fontSize: '10px', marginTop: '4px', lineHeight: 1 }}>General Edition</div>
         </div>
       </div>
       
@@ -184,9 +185,28 @@ export function Sidebar() {
           <Settings style={{ width: '16px', height: '16px', strokeWidth: 2, stroke: 'currentColor' }} />
           <span>Settings</span>
         </NavLink>
-        <div style={{ color: '#9b7db8', fontSize: '11px', padding: '8px 12px 4px' }}>
-          user@retailerp.com
-        </div>
+        <button
+          onClick={async () => {
+            if (confirm('Are you sure you want to log out? Offline data may be cleared.')) {
+              localStorage.clear()
+              const { supabase } = await import('../../lib/supabase')
+              await supabase.auth.signOut()
+              window.location.href = '/'
+            }
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', padding: '0 12px', marginTop: '4px',
+            height: '40px', textDecoration: 'none', border: 'none', width: '100%',
+            color: '#c4b5d4', backgroundColor: 'transparent', cursor: 'pointer',
+            fontWeight: 400, borderRadius: '8px', gap: '9px', fontSize: '13px',
+            transition: 'background-color 0.15s, color 0.15s'
+          }}
+          onMouseOver={e => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)' }}
+          onMouseOut={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+        >
+          <svg style={{ width: '16px', height: '16px', strokeWidth: 2, stroke: 'currentColor', fill: 'none' }} viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
+          <span>Log Out</span>
+        </button>
       </div>
     </aside>
   );

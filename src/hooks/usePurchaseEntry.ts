@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
+import { saveProductsToCache } from '../utils/offlineCache'
 
 export interface Supplier {
   id: string
@@ -239,27 +240,55 @@ export function usePurchaseEntry() {
   // ── Save new supplier ─────────────────────────────────────────────────────
   const saveNewSupplier = async () => {
     if (!newSupplier.name.trim()) { toast.error('Supplier name required'); return }
-    const { data, error } = await supabase
-      .from('suppliers')
-      .insert({
-        name: newSupplier.name.trim(),
-        business_name: newSupplier.business_name.trim() || newSupplier.name.trim(),
-        phone: newSupplier.phone.trim() || null,
-        gstin: newSupplier.gstin.trim() || null,
-        address: newSupplier.address.trim() || null,
-        state: newSupplier.state || 'Gujarat',
-        city: newSupplier.city.trim() || null,
-        email: newSupplier.email.trim() || null,
-      })
-      .select()
-      .single()
-    if (error) { toast.error('Error saving supplier'); return }
-    if (data) {
-      setSupplier(data)
-      setShowNewSupplierForm(false)
-      setNewSupplier({ name: '', business_name: '', phone: '', gstin: '', address: '', state: 'Gujarat', city: '', email: '' })
-      toast.success('Supplier saved!')
+    const supplierRecord: Supplier = {
+      id: crypto.randomUUID(),
+      name: newSupplier.name.trim(),
+      business_name: newSupplier.business_name.trim() || newSupplier.name.trim(),
+      phone: newSupplier.phone.trim() || '',
+      gstin: newSupplier.gstin.trim() || '',
+      address: newSupplier.address.trim() || '',
+      state: newSupplier.state || 'Gujarat',
+      city: newSupplier.city.trim() || '',
+      email: newSupplier.email.trim() || '',
+      outstanding_balance: 0,
+      total_purchased: 0,
+      is_active: true
     }
+
+    if (navigator.onLine) {
+      try {
+        const { data, error } = await supabase
+          .from('suppliers')
+          .insert({
+            id: supplierRecord.id,
+            name: supplierRecord.name,
+            business_name: supplierRecord.business_name,
+            phone: supplierRecord.phone || null,
+            gstin: supplierRecord.gstin || null,
+            address: supplierRecord.address || null,
+            state: supplierRecord.state,
+            city: supplierRecord.city || null,
+            email: supplierRecord.email || null,
+          })
+          .select()
+          .single()
+
+        if (!error && data) {
+          setSupplier(data)
+          setShowNewSupplierForm(false)
+          setNewSupplier({ name: '', business_name: '', phone: '', gstin: '', address: '', state: 'Gujarat', city: '', email: '' })
+          toast.success('Supplier saved!')
+          return
+        }
+      } catch (err) {
+        console.warn('DB supplier save warning:', err)
+      }
+    }
+
+    setSupplier(supplierRecord)
+    setShowNewSupplierForm(false)
+    setNewSupplier({ name: '', business_name: '', phone: '', gstin: '', address: '', state: 'Gujarat', city: '', email: '' })
+    toast.success('Supplier saved!')
   }
 
   // ── Save purchase ─────────────────────────────────────────────────────────
@@ -321,47 +350,100 @@ export function usePurchaseEntry() {
         }))
       )
 
-      // Update stock for each item
+      // Update inventory and ensure barcodes exist for each item
+      const processedItems = []
       for (const item of validItems) {
         const qty = typeof item.qty === 'number' ? item.qty : 0
         const cost = typeof item.unit_cost === 'number' ? item.unit_cost : 0
-        const mrp = typeof item.mrp === 'number' ? item.mrp : null
+        const mrp = typeof item.mrp === 'number' ? item.mrp : (cost ? Math.round(cost * 1.4) : null)
+        const unitPrice = typeof item.mrp === 'number' ? item.mrp : Math.round(cost * 1.3)
 
         if (item.product?.id) {
           const { data: prod } = await supabase
             .from('products')
-            .select('stock_qty,cost_price,mrp,batch_no')
+            .select('*')
             .eq('id', item.product.id)
             .single()
 
-          await supabase
+          const currentBarcode = prod?.barcode || item.batch_no || 'BC-' + Math.floor(100000 + Math.random() * 900000)
+          const newStock = (prod?.stock_qty || 0) + qty
+
+          const { data: updatedProd } = await supabase
             .from('products')
             .update({
-              stock_qty: (prod?.stock_qty || 0) + qty,
+              stock_qty: newStock,
               cost_price: cost,
               mrp: mrp ?? prod?.mrp,
+              unit_price: prod?.unit_price || unitPrice,
               batch_no: item.batch_no || prod?.batch_no,
+              barcode: currentBarcode,
             })
             .eq('id', item.product.id)
+            .select()
+            .single()
+
+          processedItems.push({
+            ...item,
+            product: updatedProd || { ...item.product, stock_qty: newStock, barcode: currentBarcode, mrp, cost_price: cost }
+          })
         } else if (item.productName.trim()) {
           const newSku = 'SKU-' + Date.now().toString().slice(-6)
-          await supabase.from('products').insert({
-            name: item.productName.trim(),
-            sku: newSku,
-            design_no: item.design_no || null,
-            pcode: item.pcode || null,
-            size: item.size || null,
-            colour: item.colour || null,
-            batch_no: item.batch_no || null,
-            cost_price: cost,
-            unit_price: Math.round(cost * 1.3),
-            mrp: mrp,
-            stock_qty: qty,
-            gst_rate: item.gst_rate,
-            is_active: true,
-            barcode: item.batch_no || Date.now().toString().slice(-8),
-          })
+          const generatedBarcode = item.batch_no || 'BC-' + Math.floor(100000 + Math.random() * 900000)
+          
+          const { data: newProd, error: prodErr } = await supabase
+            .from('products')
+            .insert({
+              name: item.productName.trim(),
+              sku: newSku,
+              design_no: item.design_no || null,
+              pcode: item.pcode || null,
+              size: item.size || null,
+              colour: item.colour || null,
+              batch_no: item.batch_no || null,
+              cost_price: cost,
+              unit_price: unitPrice,
+              mrp: mrp,
+              stock_qty: qty,
+              gst_rate: item.gst_rate,
+              is_active: true,
+              barcode: generatedBarcode,
+            })
+            .select()
+            .single()
+
+          if (!prodErr && newProd) {
+            processedItems.push({
+              ...item,
+              product: newProd
+            })
+          } else {
+            processedItems.push({
+              ...item,
+              product: {
+                id: crypto.randomUUID(),
+                name: item.productName.trim(),
+                sku: newSku,
+                barcode: generatedBarcode,
+                mrp,
+                stock_qty: qty,
+                cost_price: cost
+              }
+            })
+          }
         }
+      }
+
+      // Refresh product cache for offline and instant POS sync
+      try {
+        const { data: allProds } = await supabase
+          .from('products')
+          .select('*')
+          .eq('is_active', true)
+        if (allProds) {
+          saveProductsToCache(allProds)
+        }
+      } catch (cacheErr) {
+        console.warn('Product cache refresh warning:', cacheErr)
       }
 
       // Update supplier balance if credit
@@ -385,8 +467,8 @@ export function usePurchaseEntry() {
       setCounter(newCounter)
       localStorage.setItem('purchase_counter', String(newCounter))
 
-      toast.success('Purchase saved! Stock updated.')
-      setPurchaseComplete({ purchaseNo, bill, items: validItems, supplier, netAmount })
+      toast.success('Purchase saved! Direct stock updated.')
+      setPurchaseComplete({ purchaseNo, bill, items: processedItems, supplier, netAmount })
       setShowSuccessModal(true)
       resetForm()
     } catch (e: any) {

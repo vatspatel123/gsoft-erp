@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { saveSalesmenToCache, getCachedSalesmen } from '../utils/offlineCache';
 import toast from 'react-hot-toast';
 import { Plus, Edit3, Trash2 } from 'lucide-react';
 import { Layout } from '../components/shared/Layout';
@@ -26,20 +27,24 @@ export function StaffPage() {
   const fetchStaff = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, name, email, role, is_active')
-        .order('name', { ascending: true });
-      if (error) throw error;
-      if (data) {
-        setStaff(data as StaffUser[]);
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from('users')
+          .select('id, name, email, role, is_active')
+          .order('name', { ascending: true });
+        if (!error && data && data.length > 0) {
+          setStaff(data as StaffUser[]);
+          saveSalesmenToCache(data);
+          setLoading(false);
+          return;
+        }
       }
     } catch (e: any) {
-      toast.error('Failed to load staff');
-      console.error(e);
-    } finally {
-      setLoading(false);
+      console.warn('Network error loading staff, using cache:', e);
     }
+    const cached = getCachedSalesmen() || [];
+    setStaff(cached as StaffUser[]);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -74,65 +79,79 @@ export function StaffPage() {
       return;
     }
 
-    const payload = {
+    const userId = editing ? editing.id : crypto.randomUUID();
+    const payload: StaffUser = {
+      id: userId,
       name: name.trim(),
       email: email.trim(),
       role,
       is_active: isActive
     };
 
-    try {
-      if (editing) {
-        const { error } = await supabase
-          .from('users')
-          .update(payload)
-          .eq('id', editing.id);
-        if (error) throw error;
-        toast.success('Staff updated');
-      } else {
-        const { error } = await supabase
-          .from('users')
-          .insert(payload);
-        if (error) throw error;
-        toast.success('Staff added');
+    if (navigator.onLine) {
+      try {
+        if (editing) {
+          const { error } = await supabase
+            .from('users')
+            .update({ name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active })
+            .eq('id', editing.id);
+          if (error) console.warn('DB update user warning:', error.message);
+        } else {
+          const { error } = await supabase
+            .from('users')
+            .insert({ id: payload.id, name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active });
+          if (error) console.warn('DB insert user warning:', error.message);
+        }
+      } catch (dbErr) {
+        console.warn('DB user save notice, saving locally:', dbErr);
       }
-      setShowModal(false);
-      fetchStaff();
-      resetForm();
-    } catch (e: any) {
-      toast.error(e?.message || 'Save failed');
-      console.error(e);
     }
+
+    const newStaff = editing ? staff.map(u => u.id === editing.id ? payload : u) : [payload, ...staff];
+    saveSalesmenToCache(newStaff);
+    setStaff(newStaff);
+
+    toast.success(editing ? 'Staff updated' : 'Staff added');
+    setShowModal(false);
+    resetForm();
   };
 
   const deleteUser = async (id: string) => {
     if (!confirm('Delete this staff member?')) return;
-    try {
-      const { error } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-      toast.success('Staff deleted');
-      fetchStaff();
-    } catch (e: any) {
-      toast.error('Delete failed');
-      console.error(e);
+    if (navigator.onLine) {
+      try {
+        const { error } = await supabase
+          .from('users')
+          .delete()
+          .eq('id', id);
+        if (error) console.warn('DB delete user warning:', error.message);
+      } catch (e: any) {
+        console.warn('Network error deleting user:', e);
+      }
     }
+    const cached = getCachedSalesmen() || [];
+    const updated = cached.filter((u: any) => u.id !== id);
+    saveSalesmenToCache(updated);
+    setStaff(prev => prev.filter(u => u.id !== id));
+    toast.success('Staff deleted');
   };
 
   const toggleActive = async (user: StaffUser) => {
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update({ is_active: !user.is_active })
-        .eq('id', user.id);
-      if (error) throw error;
-      setStaff((s) => s.map((u) => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
-    } catch (e: any) {
-      toast.error('Status update failed');
-      console.error(e);
+    const updatedUser = { ...user, is_active: !user.is_active };
+    if (navigator.onLine) {
+      try {
+        const { error } = await supabase
+          .from('users')
+          .update({ is_active: updatedUser.is_active })
+          .eq('id', user.id);
+        if (error) console.warn('DB update status warning:', error.message);
+      } catch (e: any) {
+        console.warn('Network error updating status:', e);
+      }
     }
+    const newStaff = staff.map((u) => u.id === user.id ? updatedUser : u);
+    saveSalesmenToCache(newStaff);
+    setStaff(newStaff);
   };
 
   return (

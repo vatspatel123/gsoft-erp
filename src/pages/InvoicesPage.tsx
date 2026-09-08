@@ -93,6 +93,25 @@ export function InvoicesPage() {
     sendBillWhatsApp(saleData, invoice.customers?.phone)
   }
 
+  const send15DayOverdueReminder = (invoice: Invoice) => {
+    if (!invoice.customers?.phone) {
+      toast.error('Customer phone number not available')
+      return
+    }
+    const cleanPhone = invoice.customers.phone.replace(/\D/g, '')
+    const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone
+    const dateStr = new Date(invoice.created_at).toLocaleDateString('en-IN')
+
+    const msg =
+      `*🔔 PAYMENT REMINDER — OUTSTANDING BILL*%0A%0A` +
+      `નમસ્તે *${invoice.customers.name}*,%0A` +
+      `આપનું બિલ નંબર *#${invoice.invoice_no}* (તારીખ: ${dateStr}) નું બાકી રકમ *₹${Number(invoice.net_amount).toFixed(2)}* છે.%0A` +
+      `કૃપા કરીને વહેલી તકે ચુકવણી કરશો. આભાર!%0A%0A` +
+      `_Dear ${invoice.customers.name}, gentle reminder regarding your outstanding bill #${invoice.invoice_no} of ₹${Number(invoice.net_amount).toFixed(2)} dated ${dateStr}._`
+
+    window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+  }
+
   const handleExportCSV = () => {
     const exportData = invoices.map((inv) => ({
       ...inv,
@@ -272,12 +291,14 @@ export function InvoicesPage() {
               className="filter-select"
               value={paymentFilter}
               onChange={(e) => setPaymentFilter(e.target.value)}
+              style={paymentFilter === 'credit_overdue_15' ? { borderColor: '#ef4444', color: '#dc2626', fontWeight: 700 } : {}}
             >
               <option value="all">All Payment Modes</option>
               <option value="cash">Cash</option>
               <option value="card">Card</option>
               <option value="upi">UPI</option>
-              <option value="credit">Credit</option>
+              <option value="credit">Credit (All)</option>
+              <option value="credit_overdue_15">⚠️ Overdue Credit (&gt; 15 Days)</option>
             </select>
             <select
               className="filter-select"
@@ -447,11 +468,22 @@ export function InvoicesPage() {
                           <button
                             className="action-btn primary"
                             onClick={() => handleResendWhatsApp(invoice)}
-                            title="Send WhatsApp"
+                            title="Send WhatsApp Invoice"
                             disabled={!invoice.customers?.phone}
                           >
                             <MessageCircle size={16} />
                           </button>
+                          {invoice.payment_mode === 'credit' && !invoice.is_return && (
+                            <button
+                              className="action-btn"
+                              onClick={() => send15DayOverdueReminder(invoice)}
+                              title="Send 15-Day Payment Reminder WhatsApp"
+                              style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}
+                              disabled={!invoice.customers?.phone}
+                            >
+                              🔔
+                            </button>
+                          )}
                           {!invoice.is_return && (
                             <button
                               className="action-btn refund"

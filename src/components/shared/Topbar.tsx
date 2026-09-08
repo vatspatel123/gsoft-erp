@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { getPendingCount } from '../../utils/offlineCache';
+import toast from 'react-hot-toast';
 
 const pageNames: Record<string, string> = {
   '/':                'POS Billing',
@@ -76,31 +77,37 @@ export function Topbar() {
             {isOnline ? 'Online' : 'Offline Mode'}
           </span>
         </div>
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            backgroundColor: '#f97316',
-            color: 'white',
-            border: '1px solid #f97316',
-            padding: '4px 10px',
-            borderRadius: '20px',
-            fontSize: '11px',
-            fontWeight: 600
-          }}>
-            Syncing {pendingCount}...
-          </div>
-        )}
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            backgroundColor: '#ef4444',
-            color: 'white',
-            border: '1px solid #ef4444',
-            padding: '4px 10px',
-            borderRadius: '20px',
-            fontSize: '11px',
-            fontWeight: 600
-          }}>
-            {pendingCount} pending
-          </div>
+        {pendingCount > 0 && (
+          <button
+            onClick={async () => {
+              if ((window as any).syncPendingSales) {
+                toast.loading('Attempting cloud sync...', { id: 'manual-sync' })
+                await (window as any).syncPendingSales()
+                setPendingCount(getPendingCount())
+                if (getPendingCount() === 0) {
+                  toast.success('All sales synced to cloud! ✅', { id: 'manual-sync' })
+                } else {
+                  toast.success(`${getPendingCount()} bills saved safely in local storage`, { id: 'manual-sync' })
+                }
+              }
+            }}
+            title="Click to retry cloud sync for offline bills"
+            style={{
+              backgroundColor: '#f97316',
+              color: 'white',
+              border: 'none',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            ☁️ {pendingCount} Local Bill{pendingCount > 1 ? 's' : ''} (Sync)
+          </button>
         )}
         <div style={{
           backgroundColor: '#f5f3ff',

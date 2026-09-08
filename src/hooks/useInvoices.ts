@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
+import { getPendingSales } from '../utils/offlineCache'
 
 export interface Invoice {
   id: string
@@ -85,41 +86,98 @@ export function useInvoices() {
   const fetchInvoices = async () => {
     setLoading(true)
     const { from, to } = getDateFilter()
+    let fetchedInvoices: Invoice[] = []
 
     try {
-      let query = supabase
-        .from('sales')
-        .select(
-          `*,
-          customers(name, phone),
-          users(name),
-          sale_items(
-            id, qty, unit_price,
-            discount_pct, line_total, gst_rate,
-            products(id, name, gst_rate)
-          )`
-        )
-        .gte('created_at', from + 'T00:00:00')
-        .lte('created_at', to + 'T23:59:59')
-        .order('created_at', { ascending: false })
+      if (navigator.onLine) {
+        let query = supabase
+          .from('sales')
+          .select(
+            `*,
+            customers(name, phone),
+            users(name),
+            sale_items(
+              id, qty, unit_price,
+              discount_pct, line_total, gst_rate,
+              products(id, name, gst_rate)
+            )`
+          )
+          .order('created_at', { ascending: false })
 
-      if (paymentFilter !== 'all') {
-        query = query.eq('payment_mode', paymentFilter)
+        if (paymentFilter === 'credit_overdue_15') {
+          const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
+          query = query.eq('payment_mode', 'credit').lte('created_at', fifteenDaysAgo)
+        } else {
+          query = query
+            .gte('created_at', from + 'T00:00:00')
+            .lte('created_at', to + 'T23:59:59')
+
+          if (paymentFilter !== 'all') {
+            query = query.eq('payment_mode', paymentFilter)
+          }
+        }
+
+        if (salesmanFilter !== 'all') {
+          query = query.eq('salesman_id', salesmanFilter)
+        }
+
+        const { data, error } = await query
+        if (!error && data) {
+          fetchedInvoices = data as Invoice[]
+        }
       }
-
-      if (salesmanFilter !== 'all') {
-        query = query.eq('salesman_id', salesmanFilter)
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      setInvoices((data as Invoice[]) || [])
     } catch (e) {
-      console.error('Failed to fetch invoices:', e)
-      toast.error('Failed to load invoices')
-    } finally {
-      setLoading(false)
+      console.warn('Network invoice query error, using local sales:', e)
     }
+
+    // Merge pending/offline sales from local cache
+    const pending = getPendingSales() || []
+    const pendingMapped: Invoice[] = pending.map((p: any) => ({
+      id: p.saleId || 'local-' + p.pendingId,
+      invoice_no: p.invoiceNo || 'INV-LOCAL',
+      customer_id: p.customer?.id,
+      salesman_id: p.salesmanId,
+      counter_id: p.counterId,
+      total_amount: p.subtotal || p.total_amount || 0,
+      discount_amount: p.totalDiscount || p.discount_amount || 0,
+      net_amount: p.netAmount || p.net_amount || 0,
+      gst_amount: p.gstAmount || p.gst_amount || 0,
+      payment_mode: p.paymentMode || p.payment_mode || 'cash',
+      is_return: false,
+      created_at: p.createdAt || p.date || new Date().toISOString(),
+      customers: p.customer ? { name: p.customer.name, phone: p.customer.phone } : null,
+      users: p.salesmanName ? { name: p.salesmanName } : null,
+      sale_items: p.cart?.map((item: any, idx: number) => ({
+        id: 'item-' + idx,
+        qty: item.qty,
+        unit_price: item.unit_price,
+        discount_pct: item.discount_pct || 0,
+        line_total: item.line_total,
+        gst_rate: item.product?.gst_rate || 0,
+        products: {
+          id: item.product?.id || 'p-id',
+          name: item.product?.name || 'Product',
+          gst_rate: item.product?.gst_rate || 0
+        }
+      }))
+    }))
+
+    // Combine database invoices and local pending sales, avoiding duplicates by invoice_no
+    const combinedMap = new Map<string, Invoice>()
+    for (const inv of pendingMapped) {
+      if (paymentFilter !== 'all' && inv.payment_mode !== paymentFilter) continue
+      combinedMap.set(inv.invoice_no, inv)
+    }
+    for (const inv of fetchedInvoices) {
+      combinedMap.set(inv.invoice_no, inv)
+    }
+
+    const allMerged = Array.from(combinedMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    setInvoices(allMerged)
+    setLoading(false)
   }
 
   const fetchSalesmen = async () => {

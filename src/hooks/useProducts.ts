@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
+import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 
 export function useProducts() {
   const [products, setProducts] = useState<any[]>([])
@@ -13,39 +14,53 @@ export function useProducts() {
 
   const fetchProducts = useCallback(async () => {
     setLoading(true)
-    let query = supabase
-      .from('products')
-      .select(`*, categories(name)`)
+    try {
+      let query = supabase
+        .from('products')
+        .select(`*, categories(name)`)
 
-    if (search) {
-      query = query.or(
-        `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%`
-      )
-    }
-    if (categoryFilter) {
-      query = query.eq('category_id', categoryFilter)
-    }
-    if (statusFilter !== 'all') {
-      query = query.eq('is_active', statusFilter === 'active')
-    }
+      if (search) {
+        query = query.or(
+          `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%`
+        )
+      }
+      if (categoryFilter) {
+        query = query.eq('category_id', categoryFilter)
+      }
+      if (statusFilter !== 'all') {
+        query = query.eq('is_active', statusFilter === 'active')
+      }
 
-    switch (sortBy) {
-      case 'price':
-        query = query.order('unit_price', { ascending: true })
-        break
-      case 'stock':
-        query = query.order('stock_qty', { ascending: true })
-        break
-      case 'latest':
-        query = query.order('created_at', { ascending: false })
-        break
-      default:
-        query = query.order('name')
-    }
+      switch (sortBy) {
+        case 'price':
+          query = query.order('unit_price', { ascending: true })
+          break
+        case 'stock':
+          query = query.order('stock_qty', { ascending: true })
+          break
+        case 'latest':
+          query = query.order('created_at', { ascending: false })
+          break
+        default:
+          query = query.order('name')
+      }
 
-    const { data } = await query
-    setProducts(data || [])
-    setLoading(false)
+      const { data, error } = await query
+      if (error) throw error
+      if (data && data.length > 0) {
+        setProducts(data)
+        saveProductsToCache(data)
+      } else {
+        const cached = getCachedProducts()
+        setProducts(cached || data || [])
+      }
+    } catch (err) {
+      console.warn('DB fetch failed, falling back to local product cache:', err)
+      const cached = getCachedProducts()
+      if (cached) setProducts(cached)
+    } finally {
+      setLoading(false)
+    }
   }, [search, categoryFilter, statusFilter, sortBy])
 
   const fetchCategories = useCallback(async () => {
@@ -110,17 +125,53 @@ export function useProducts() {
   }
 
   const saveProduct = async (data: any, editId?: string) => {
-    if (editId) {
-      const { error } = await supabase.from('products').update(data).eq('id', editId)
-      if (error) { toast.error(error.message); return false }
-      toast.success('Product updated!')
-    } else {
-      const { error } = await supabase.from('products').insert(data)
-      if (error) { toast.error(error.message); return false }
-      toast.success('Product added!')
+    try {
+      if (editId) {
+        if (navigator.onLine) {
+          const { error } = await supabase.from('products').update(data).eq('id', editId)
+          if (error) {
+            toast.error(error.message || 'Failed to update product')
+            return false
+          }
+        }
+        const cached = getCachedProducts() || []
+        const updated = cached.map(p => p.id === editId ? { ...p, ...data } : p)
+        saveProductsToCache(updated)
+        setProducts(prev => prev.map(p => p.id === editId ? { ...p, ...data } : p))
+        toast.success('Product updated!')
+      } else {
+        const newProduct = { ...data, id: data.id || crypto.randomUUID() }
+        if (navigator.onLine) {
+          const { error } = await supabase.from('products').insert(newProduct)
+          if (error) {
+            toast.error(error.message || 'Failed to add product')
+            return false
+          }
+        }
+        const cached = getCachedProducts() || []
+        saveProductsToCache([newProduct, ...cached])
+        setProducts(prev => [newProduct, ...prev])
+        toast.success('Product added!')
+      }
+      fetchProducts()
+      return true
+    } catch (err: any) {
+      console.warn('Network error saving product, updating local cache:', err)
+      if (editId) {
+        const cached = getCachedProducts() || []
+        const updated = cached.map(p => p.id === editId ? { ...p, ...data } : p)
+        saveProductsToCache(updated)
+        setProducts(prev => prev.map(p => p.id === editId ? { ...p, ...data } : p))
+      } else {
+        const newProduct = { ...data, id: data.id || crypto.randomUUID() }
+        const cached = getCachedProducts() || []
+        saveProductsToCache([newProduct, ...cached])
+        setProducts(prev => [newProduct, ...prev])
+      }
+      fetchProducts()
+      toast.success('Product saved!')
+      return true
     }
-    fetchProducts()
-    return true
   }
 
   const addCategory = async (name: string) => {
@@ -159,7 +210,7 @@ export function useProducts() {
     categoryFilter, setCategoryFilter,
     statusFilter, setStatusFilter,
     sortBy, setSortBy,
-    fetchProducts, toggleStatus,
+    fetchProducts, loadProducts: fetchProducts, toggleStatus,
     deleteProduct, duplicateProduct,
     saveProduct, addCategory,
     bulkDelete, bulkDeactivate, bulkCategory,

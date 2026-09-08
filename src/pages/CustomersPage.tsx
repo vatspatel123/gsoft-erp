@@ -1,41 +1,12 @@
 import { useState } from 'react'
-import { Users, UserCheck, Star, Gift, Plus, Download, Heart, MessageCircle } from 'lucide-react'
+import { Users, UserCheck, Star, Gift, Plus, Download, Heart, MessageCircle, Crown, Gem, History } from 'lucide-react'
 import { Layout } from '../components/shared/Layout'
-import { useCustomers } from '../hooks/useCustomers'
+import { useCustomers, type Customer, type Sale } from '../hooks/useCustomers'
 import { exportToCSV } from '../utils/exportCSV'
+import { getTierInfo } from '../utils/customerTier'
+import { CustomerHistoryModal } from '../components/customers/CustomerHistoryModal'
 import toast from 'react-hot-toast'
 import '../styles/customers.css'
-
-// Type definitions
-interface Customer {
-  id: string
-  name: string
-  phone: string
-  email?: string
-  date_of_birth?: string
-  address?: string
-  notes?: string
-  loyalty_points: number
-  total_spent: number
-  referral_code: string
-  created_at: string
-}
-
-interface Sale {
-  id: string
-  customer_id: string
-  invoice_number: string
-  total_amount: number
-  payment_method: string
-  created_at: string
-  sale_items?: Array<{
-    qty: number
-    line_total: number
-    products: {
-      name: string
-    }
-  }>
-}
 
 function CustomersPageComponent() {
   const {
@@ -53,10 +24,16 @@ function CustomersPageComponent() {
     saveCustomer,
     deleteCustomer,
     addLoyaltyPoints,
-    getCustomerPurchases
+    getCustomerPurchases,
+    vvipCount,
+    vipCount,
+    regularCount,
+    newCount
   } = useCustomers()
 
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [historyCustomer, setHistoryCustomer] = useState<Customer | null>(null)
   const [showDetailPanel, setShowDetailPanel] = useState(false)
   const [showAddPointsModal, setShowAddPointsModal] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
@@ -288,30 +265,38 @@ function CustomersPageComponent() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="filter-buttons">
+          <div className="filter-buttons" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             <button
               className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
               onClick={() => setFilter('all')}
             >
-              All
+              All ({allCustomers.length})
+            </button>
+            <button
+              className={`filter-btn ${filter === 'vvip' ? 'active' : ''}`}
+              onClick={() => setFilter('vvip')}
+              style={filter === 'vvip' ? { background: '#eab308', color: '#713f12', border: '1px solid #ca8a04' } : {}}
+            >
+              👑 VVIP ({vvipCount})
             </button>
             <button
               className={`filter-btn ${filter === 'vip' ? 'active' : ''}`}
               onClick={() => setFilter('vip')}
+              style={filter === 'vip' ? { background: '#9333ea', color: 'white', border: '1px solid #7e22ce' } : {}}
             >
-              VIP
+              💎 VIP ({vipCount})
             </button>
             <button
               className={`filter-btn ${filter === 'regular' ? 'active' : ''}`}
               onClick={() => setFilter('regular')}
             >
-              Regular
+              ⭐ Regular ({regularCount})
             </button>
             <button
               className={`filter-btn ${filter === 'new' ? 'active' : ''}`}
               onClick={() => setFilter('new')}
             >
-              New
+              🌱 New ({newCount})
             </button>
           </div>
         </div>
@@ -349,18 +334,18 @@ function CustomersPageComponent() {
                     <input type="checkbox" className="checkbox" />
                   </th>
                   <th style={{ width: '50px' }}></th>
-                  <th>Name & Phone</th>
+                  <th>Customer & Tier</th>
                   <th>Email</th>
                   <th>Birthday</th>
                   <th>Loyalty Points</th>
                   <th>Total Spent</th>
-                  <th>Last Visit</th>
-                  <th style={{ width: '150px' }}>Actions</th>
+                  <th>Visits</th>
+                  <th style={{ width: '180px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredCustomers.map(customer => {
-                  const isVIP = customer.total_spent > 10000
+                  const tInfo = getTierInfo(customer.tier || 'New')
                   const hasBirthdayThisMonth = birthdayThisMonth.some(c => c.id === customer.id)
                   const formattedBirthday = customer.date_of_birth
                     ? new Date(customer.date_of_birth).toLocaleDateString('en-IN', {
@@ -375,14 +360,24 @@ function CustomersPageComponent() {
                         <input type="checkbox" className="checkbox" />
                       </td>
                       <td>
-                        <div className={`customer-avatar ${isVIP ? 'vip' : ''}`}>
-                          {isVIP && <div className="vip-crown">👑</div>}
+                        <div className={`customer-avatar ${customer.tier === 'VIP' || customer.tier === 'VVIP' ? 'vip' : ''}`}>
+                          {(customer.tier === 'VIP' || customer.tier === 'VVIP') && <div className="vip-crown">{tInfo.icon}</div>}
                           {customer.name.charAt(0).toUpperCase()}
                         </div>
                       </td>
                       <td>
                         <div className="customer-info">
-                          <div className="customer-name">{customer.name}</div>
+                          <div className="customer-name" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {customer.name}
+                            <span style={{
+                              background: tInfo.badgeBg, color: tInfo.badgeText,
+                              border: `1px solid ${tInfo.borderColor}`, fontSize: '10px',
+                              padding: '1px 6px', borderRadius: '99px', fontWeight: 700,
+                              display: 'inline-flex', alignItems: 'center', gap: '2px'
+                            }}>
+                              {tInfo.icon} {tInfo.label}
+                            </span>
+                          </div>
                           <div className="customer-phone">{customer.phone}</div>
                         </div>
                       </td>
@@ -408,12 +403,16 @@ function CustomersPageComponent() {
                         <div className="amount-spent">{formatCurrency(customer.total_spent)}</div>
                       </td>
                       <td>
-                        <div className="last-visit">{getLastVisitText(customer.created_at)}</div>
+                        <div className="last-visit">{customer.bills_count || 0} visits</div>
                       </td>
                       <td>
-                        <div className="action-buttons">
-                          <button className="icon-btn" onClick={() => handleViewCustomer(customer)} title="View">
-                            👁️
+                        <div className="action-buttons" style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            className="btn-outline"
+                            onClick={() => { setHistoryCustomer(customer); setShowHistoryModal(true); }}
+                            style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600, color: '#9333ea', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            title="360° Customer Ledger & History">
+                            <History size={12} /> History
                           </button>
                           <button className="icon-btn" onClick={() => handleEditCustomer(customer)} title="Edit">
                             ✏️
@@ -653,6 +652,14 @@ function CustomersPageComponent() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 360 Customer History Modal */}
+      {showHistoryModal && historyCustomer && (
+        <CustomerHistoryModal
+          customer={historyCustomer}
+          onClose={() => { setShowHistoryModal(false); setHistoryCustomer(null); }}
+        />
       )}
     </Layout>
   )

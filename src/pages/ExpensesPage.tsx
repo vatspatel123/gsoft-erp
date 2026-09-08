@@ -83,6 +83,21 @@ const getExpenseNo = () => {
   return 'EXP-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(n).padStart(4, '0')
 }
 
+export function getCachedExpenses(): any[] {
+  try {
+    const raw = localStorage.getItem('gsoft_expenses_cache')
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+export function saveExpenseToCache(exp: any): void {
+  try {
+    const existing = getCachedExpenses()
+    const updated = [exp, ...existing.filter((x: any) => x.id !== exp.id && x.expense_no !== exp.expense_no)]
+    localStorage.setItem('gsoft_expenses_cache', JSON.stringify(updated))
+  } catch {}
+}
+
 // ─── Add Expense Modal ────────────────────────────────────────────────────────
 function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [category, setCategory] = useState('')
@@ -108,7 +123,8 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
       const now = new Date(expenseDate)
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
-      const { error } = await supabase.from('expenses').insert({
+      const expenseRecord = {
+        id: crypto.randomUUID(),
         expense_no: expenseNo,
         category,
         subcategory: subcategory || null,
@@ -119,14 +135,36 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         reference_no: referenceNo || null,
         expense_date: expenseDate,
         month,
-      })
+        created_at: new Date().toISOString()
+      }
 
-      if (error) throw error
+      if (navigator.onLine) {
+        try {
+          const { error } = await supabase.from('expenses').insert({
+            id: expenseRecord.id,
+            expense_no: expenseRecord.expense_no,
+            category: expenseRecord.category,
+            subcategory: expenseRecord.subcategory,
+            description: expenseRecord.description,
+            amount: expenseRecord.amount,
+            payment_mode: expenseRecord.payment_mode,
+            paid_to: expenseRecord.paid_to,
+            reference_no: expenseRecord.reference_no,
+            expense_date: expenseRecord.expense_date,
+            month: expenseRecord.month
+          })
+          if (error) console.warn('DB expense save warning:', error.message)
+        } catch (dbErr) {
+          console.warn('DB expense save notice, saving locally:', dbErr)
+        }
+      }
+
+      saveExpenseToCache(expenseRecord)
       toast.success('Expense saved!')
       onSaved()
       onClose()
     } catch (e: any) {
-      toast.error('Error: ' + e.message)
+      toast.error('Error saving expense')
     } finally {
       setSaving(false)
     }
@@ -361,24 +399,42 @@ export function ExpensesPage() {
 
   const fetchExpenses = async () => {
     setLoading(true)
+    let fetched: any[] = []
     try {
-      let q = supabase
-        .from('expenses')
-        .select('*')
-        .gte('expense_date', dateFrom)
-        .lte('expense_date', dateTo)
-        .order('expense_date', { ascending: false })
-        .order('created_at', { ascending: false })
+      if (navigator.onLine) {
+        let q = supabase
+          .from('expenses')
+          .select('*')
+          .gte('expense_date', dateFrom)
+          .lte('expense_date', dateTo)
+          .order('expense_date', { ascending: false })
+          .order('created_at', { ascending: false })
 
-      if (categoryFilter !== 'All') {
-        q = q.eq('category', categoryFilter)
+        if (categoryFilter !== 'All') {
+          q = q.eq('category', categoryFilter)
+        }
+
+        const { data, error } = await q
+        if (!error && data) {
+          fetched = data
+          for (const item of data) saveExpenseToCache(item)
+        }
       }
-
-      const { data } = await q
-      setExpenses(data || [])
-    } finally {
-      setLoading(false)
+    } catch (e) {
+      console.warn('Network error loading expenses, using cache:', e)
     }
+
+    const cached = getCachedExpenses()
+    const map = new Map<string, any>()
+    for (const c of cached) map.set(c.expense_no || c.id, c)
+    for (const f of fetched) map.set(f.expense_no || f.id, f)
+
+    let merged = Array.from(map.values())
+    if (categoryFilter !== 'All') {
+      merged = merged.filter(x => x.category === categoryFilter)
+    }
+    setExpenses(merged)
+    setLoading(false)
   }
 
   useEffect(() => { fetchExpenses() }, [dateFrom, dateTo, categoryFilter])

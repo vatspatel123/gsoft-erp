@@ -57,7 +57,7 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
     const paymentEmoji =
       saleData.paymentMode === 'cash' ? '%F0%9F%92%B5' :
       saleData.paymentMode === 'card' ? '%F0%9F%92%B3' :
-      saleData.paymentMode === 'upi'  ? '%F0%9F%93%B1' : '%F0%9F%93%9D'
+      saleData.paymentMode === 'upi'  ? '%F0%9F%93%B1' : '%E2%9A%A0%EF%B8%8F'
 
     const discountLine = saleData.totalDiscount > 0
       ? `%0A%F0%9F%8F%B7%EF%B8%8F *Discount:* -%E2%82%B9${saleData.totalDiscount.toFixed(0)}`
@@ -69,7 +69,18 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
       ? `%0A%E2%AD%90 *Loyalty Points Earned:* ${saleData.loyaltyEarned} pts`
       : ''
 
-    const paymentLabel = saleData.paymentMode.charAt(0).toUpperCase() + saleData.paymentMode.slice(1)
+    const isCredit = saleData.paymentMode === 'credit'
+    const formattedDueDate = saleData.creditDueDate ? new Date(saleData.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Within 5 Days'
+    
+    const creditTermsMsg = isCredit
+      ? `%0A%E2%9A%A0%EF%B8%8F *UDHAR / CREDIT SALE*%0A` +
+        `%F0%9F%93%85 *Promised Payment Due:* ${encodeURIComponent(formattedDueDate)} (${saleData.creditDueDays || 5} days)%0A` +
+        `_આપનું બાકી બિલ ${encodeURIComponent(formattedDueDate)} સુધીમાં ચૂકવવાનું રહેશે._%0A`
+      : ''
+
+    const paymentLabel = isCredit
+      ? `Credit / Udhar (Due: ${formattedDueDate})`
+      : saleData.paymentMode.charAt(0).toUpperCase() + saleData.paymentMode.slice(1)
     const customerName = saleData.customer?.name || 'Customer'
 
     const message =
@@ -86,8 +97,9 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
       `${discountLine ? discountLine + '%0A' : ''}` +
       `${gstLine ? gstLine + '%0A' : ''}` +
       `${loyaltyLine ? loyaltyLine + '%0A' : ''}` +
-      `%F0%9F%92%B0 *Total: %E2%82%B9${saleData.netAmount.toFixed(0)}*%0A` +
-      `${paymentEmoji} *Paid via: ${encodeURIComponent(paymentLabel)}*%0A%0A` +
+      `${creditTermsMsg}` +
+      `%F0%9F%92%B0 *Total Amount: %E2%82%B9${saleData.netAmount.toFixed(0)}*%0A` +
+      `${paymentEmoji} *Payment Mode: ${encodeURIComponent(paymentLabel)}*%0A%0A` +
       `%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A` +
       `_Thank you for shopping at ${encodeURIComponent(shopName)}!_ %F0%9F%99%8F%0A` +
       (shopPhone ? `%F0%9F%93%9E ${encodeURIComponent(shopPhone)}%0A` : '') +
@@ -156,10 +168,19 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
           <div className="preview-row preview-net">
             <span>Net Payable:</span><span>₹{saleData.netAmount.toFixed(2)}</span>
           </div>
-          <div style={{ marginTop: '8px', textAlign: 'right' }}>
-            <span style={{ background: '#f5f3ff', color: '#9333ea', padding: '2px 8px', borderRadius: '12px', fontSize: '10px', textTransform: 'uppercase' }}>
-              {saleData.paymentMode}
+          <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{
+              background: saleData.paymentMode === 'credit' ? '#fef2f2' : '#f5f3ff',
+              color: saleData.paymentMode === 'credit' ? '#dc2626' : '#9333ea',
+              padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase'
+            }}>
+              {saleData.paymentMode === 'credit' ? '⚠️ CREDIT (UDHAR)' : saleData.paymentMode}
             </span>
+            {saleData.paymentMode === 'credit' && (
+              <span style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 600 }}>
+                Due: {saleData.creditDueDate ? new Date(saleData.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'in 5 days'}
+              </span>
+            )}
           </div>
         </div>
 

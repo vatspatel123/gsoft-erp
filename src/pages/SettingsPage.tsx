@@ -3,6 +3,7 @@ import { Layout } from '../components/shared/Layout'
 import { getSettings, saveSettings, DEFAULT_SETTINGS, type AppSettings } from '../utils/settings'
 import { supabase } from '../lib/supabase'
 import { printBill } from '../utils/printBill'
+import { getCachedSalesmen, saveSalesmenToCache } from '../utils/offlineCache'
 import toast from 'react-hot-toast'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -329,8 +330,15 @@ function StaffPINTab() {
 
   const load = async () => {
     setLoading(true)
-    const { data } = await supabase.from('users').select('*').order('name')
-    setStaff(data || [])
+    let fetched = []
+    if (navigator.onLine) {
+      const { data } = await supabase.from('users').select('*').order('name')
+      fetched = data || []
+      saveSalesmenToCache(fetched)
+    } else {
+      fetched = getCachedSalesmen() || []
+    }
+    setStaff(fetched)
     setLoading(false)
   }
   useEffect(() => { load() }, [])
@@ -348,38 +356,50 @@ function StaffPINTab() {
   }
 
   const toggleActive = async (id: string, current: boolean) => {
-    await supabase.from('users').update({ is_active: !current }).eq('id', id)
-    load()
+    if (navigator.onLine) await supabase.from('users').update({ is_active: !current }).eq('id', id)
+    const updated = staff.map(s => s.id === id ? { ...s, is_active: !current } : s)
+    setStaff(updated)
+    saveSalesmenToCache(updated)
   }
 
   const saveName = async (id: string) => {
     if (!newName.trim()) return
-    await supabase.from('users').update({ name: newName.trim() }).eq('id', id)
+    if (navigator.onLine) await supabase.from('users').update({ name: newName.trim() }).eq('id', id)
     toast.success('Name updated')
     setEditingName(null)
-    load()
+    const updated = staff.map(s => s.id === id ? { ...s, name: newName.trim() } : s)
+    setStaff(updated)
+    saveSalesmenToCache(updated)
   }
 
   const deleteStaff = async (id: string, name: string) => {
     if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return
-    await supabase.from('users').delete().eq('id', id)
+    if (navigator.onLine) await supabase.from('users').delete().eq('id', id)
     toast.success('Staff removed')
-    load()
+    const updated = staff.filter(s => s.id !== id)
+    setStaff(updated)
+    saveSalesmenToCache(updated)
   }
 
   const addStaff = async () => {
     if (!addForm.name.trim()) { toast.error('Name required'); return }
     if (addForm.pin.length !== 4) { toast.error('PIN must be 4 digits'); return }
     if (addForm.pin !== addForm.confirmPin) { toast.error('PINs do not match'); return }
-    const { error } = await supabase.from('users').insert({
-      name: addForm.name, email: addForm.email || null,
+    const newId = crypto.randomUUID()
+    const payload = {
+      id: newId, name: addForm.name, email: addForm.email || null,
       role: addForm.role, pin: addForm.pin, is_active: true
-    })
-    if (error) { toast.error(error.message); return }
+    }
+    if (navigator.onLine) {
+      const { error } = await supabase.from('users').insert(payload)
+      if (error) { toast.error(error.message); return }
+    }
     toast.success('Staff added!')
     setAddForm({ name: '', email: '', role: 'staff', pin: '', confirmPin: '' })
     setShowAddForm(false)
-    load()
+    const updated = [...staff, payload].sort((a, b) => a.name.localeCompare(b.name))
+    setStaff(updated)
+    saveSalesmenToCache(updated)
   }
 
   const ROLE_COLORS: Record<string, string> = { owner: '#9333ea', manager: '#2563eb', cashier: '#16a34a', staff: '#64748b' }

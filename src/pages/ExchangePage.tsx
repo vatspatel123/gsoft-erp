@@ -3,8 +3,10 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
-import { printExchangeBill, sendExchangeWhatsApp } from '../utils/printBill'
-import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw } from 'lucide-react'
+import { printExchangeBill, sendExchangeWhatsApp, printCreditNote, sendCreditNoteWhatsApp } from '../utils/printBill'
+import { getPendingSales } from '../utils/offlineCache'
+import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
+import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ReturnItem {
@@ -101,11 +103,14 @@ export function ExchangePage() {
 
   // Right panel
   const [paymentMode, setPaymentMode] = useState<'cash' | 'card' | 'upi'>('cash')
-  const [creditOption, setCreditOption] = useState<'loyalty' | 'cash' | 'store'>('loyalty')
+  const [creditOption, setCreditOption] = useState<'credit_note' | 'loyalty' | 'cash' | 'upi'>('credit_note')
   const [exchangeNotes, setExchangeNotes] = useState('')
   const [processing, setProcessing] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [exchangeComplete, setExchangeComplete] = useState<any>(null)
+  const [issuedCreditNote, setIssuedCreditNote] = useState<CreditNote | null>(null)
+
+  const { issueCreditNote } = useCreditNotes()
 
   // History tab
   const [history, setHistory] = useState<any[]>([])
@@ -124,59 +129,166 @@ export function ExchangePage() {
     if (pageTab === 'history') fetchHistory()
   }, [pageTab])
 
+  const ensureSynced = async () => {
+    const pending = getPendingSales()
+    if (pending.length > 0 && navigator.onLine && (window as any).syncPendingSales) {
+      toast.loading('Syncing recent bills to cloud...', { id: 'sync-bills' })
+      await (window as any).syncPendingSales()
+      toast.dismiss('sync-bills')
+    }
+  }
+
   // ── Invoice loaders ──────────────────────────────────────────────────────
   const loadInvoiceByNo = async (no: string) => {
     if (!no.trim()) return
     setLoadingInvoice(true)
+    await ensureSynced()
     try {
-      const { data, error } = await supabase
-        .from('sales')
-        .select('*, customers(*), users(*), sale_items(*, products(*))')
-        .ilike('invoice_no', no.trim())
-        .single()
-      if (error || !data) { toast.error('Invoice not found'); return }
-      setOriginalInvoice(data)
-      initItemSelections(data)
-    } catch { toast.error('Failed to load invoice') }
-    finally { setLoadingInvoice(false) }
+      const trimmed = no.trim()
+
+      if (navigator.onLine) {
+        // 1. Try exact match first
+        let { data, error } = await supabase
+          .from('sales')
+          .select('*, customers(*), users(*), sale_items(*, products(*))')
+          .eq('invoice_no', trimmed)
+          .maybeSingle()
+
+        // 2. If no exact match, try partial/ilike match
+        if (!data) {
+          const { data: partialData } = await supabase
+            .from('sales')
+            .select('*, customers(*), users(*), sale_items(*, products(*))')
+            .ilike('invoice_no', `%${trimmed}%`)
+            .order('created_at', { ascending: false })
+            .limit(1)
+          data = partialData?.[0] || null
+        }
+
+        if (data) {
+          setOriginalInvoice(data)
+          initItemSelections(data)
+          toast.success(`Loaded invoice ${data.invoice_no}`)
+          return
+        }
+      }
+
+      // 3. Fallback: search local/pending sales
+      try {
+        const localSalesStr = localStorage.getItem('gsoft_pending_sales')
+        if (localSalesStr) {
+          const localSales = JSON.parse(localSalesStr)
+          const found = localSales.find((s: any) =>
+            s.invoiceNo?.includes(trimmed) || s.invoice_no?.includes(trimmed)
+          )
+          if (found) {
+            if (navigator.onLine && (window as any).syncPendingSales) {
+              toast.loading('Syncing local bill to cloud...', { id: 'sync-bill' })
+              await (window as any).syncPendingSales()
+              toast.dismiss('sync-bill')
+              
+              // Retry fetching from Supabase now that it's synced
+              const { data: retryData } = await supabase
+                .from('sales')
+                .select('*, customers(*), users(*), sale_items(*, products(*))')
+                .eq('invoice_no', found.invoiceNo || found.invoice_no)
+                .maybeSingle()
+                
+              if (retryData) {
+                setOriginalInvoice(retryData)
+                initItemSelections(retryData)
+                toast.success(`Loaded invoice ${retryData.invoice_no}`)
+                return
+              }
+            }
+            toast.error('This invoice is saved locally. Please connect to internet to sync it before exchange.')
+            return
+          }
+        }
+      } catch {}
+
+      toast.error('Invoice not found. Check the invoice number and try again.')
+    } catch (e) {
+      console.error('Invoice search error:', e)
+      toast.error('Failed to load invoice — check your connection')
+    } finally {
+      setLoadingInvoice(false)
+    }
   }
 
   const loadInvoicesByPhone = async () => {
     if (!phoneInput.trim()) return
     setLoadingInvoice(true)
+    await ensureSynced()
     try {
-      const { data: cust } = await supabase
-        .from('customers').select('id').eq('phone', phoneInput.trim()).single()
-      if (!cust) { toast.error('Customer not found'); setLoadingInvoice(false); return }
+      if (!navigator.onLine) {
+        toast.error('Phone search requires internet connection')
+        setLoadingInvoice(false)
+        return
+      }
+      // Search customers by phone (partial match)
+      const { data: customers } = await supabase
+        .from('customers')
+        .select('id')
+        .ilike('phone', `%${phoneInput.trim()}%`)
+      if (!customers || customers.length === 0) {
+        toast.error('No customer found with this phone number')
+        setLoadingInvoice(false)
+        return
+      }
+      const customerIds = customers.map(c => c.id)
       const { data } = await supabase
         .from('sales')
         .select('*, customers(*), sale_items(*, products(*))')
-        .eq('customer_id', cust.id)
+        .in('customer_id', customerIds)
         .order('created_at', { ascending: false })
-        .limit(5)
+        .limit(10)
+      if (!data || data.length === 0) {
+        toast.error('No invoices found for this customer')
+      }
       setPhoneResults(data || [])
-    } catch { toast.error('Search failed') }
+    } catch { toast.error('Search failed — check your connection') }
     finally { setLoadingInvoice(false) }
   }
 
   const loadInvoiceByBarcode = async (barcode: string) => {
     if (!barcode.trim()) return
     setLoadingInvoice(true)
+    await ensureSynced()
     try {
+      if (!navigator.onLine) {
+        toast.error('Barcode search requires internet connection')
+        setLoadingInvoice(false)
+        return
+      }
       const { data: prod } = await supabase
-        .from('products').select('id').eq('barcode', barcode.trim()).single()
-      if (!prod) { toast.error('Product not found for this barcode'); return }
-      const { data: item } = await supabase
-        .from('sale_items').select('sale_id').eq('product_id', prod.id)
-        .order('created_at' as any, { ascending: false }).limit(1).single()
-      if (!item) { toast.error('No invoice found for this product'); return }
+        .from('products').select('id').eq('barcode', barcode.trim()).maybeSingle()
+      if (!prod) { toast.error('Product not found for this barcode'); setLoadingInvoice(false); return }
+      const { data: items } = await supabase
+        .from('sale_items').select('sale_id')
+        .eq('product_id', prod.id)
+        .order('created_at' as any, { ascending: false }).limit(1)
+      if (!items || items.length === 0) { toast.error('No invoice found for this product'); setLoadingInvoice(false); return }
       const { data } = await supabase
         .from('sales')
         .select('*, customers(*), users(*), sale_items(*, products(*))')
-        .eq('id', item.sale_id).single()
-      if (data) { setOriginalInvoice(data); initItemSelections(data) }
-    } catch { toast.error('Barcode search failed') }
+        .eq('id', items[0].sale_id).single()
+      if (data) {
+        setOriginalInvoice(data)
+        initItemSelections(data)
+        toast.success(`Loaded invoice ${data.invoice_no}`)
+      } else {
+        toast.error('Invoice not found')
+      }
+    } catch { toast.error('Barcode search failed — check your connection') }
     finally { setLoadingInvoice(false) }
+  }
+
+  const selectPhoneInvoice = (invoice: any) => {
+    setOriginalInvoice(invoice)
+    initItemSelections(invoice)
+    setPhoneResults([])
+    toast.success(`Loaded invoice ${invoice.invoice_no}`)
   }
 
   const initItemSelections = (invoice: any) => {
@@ -276,84 +388,133 @@ export function ExchangePage() {
   const processExchange = async () => {
     if (returnItems.length === 0) { toast.error('No return items selected'); return }
     if (newItems.length === 0) { toast.error('Add replacement items'); return }
+    if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
     setProcessing(true)
     try {
       const exchangeNo = 'EXC-' +
         new Date().toISOString().slice(0, 10).replace(/-/g, '') +
         '-' + String(Math.floor(Math.random() * 9000) + 1000)
 
-      const { data: exchange, error: excErr } = await supabase
-        .from('exchange_bills')
-        .insert({
-          exchange_no: exchangeNo,
-          original_sale_id: originalInvoice.id,
-          original_invoice_no: originalInvoice.invoice_no,
-          customer_id: originalInvoice.customer_id || null,
-          return_amount: returnTotal,
-          new_sale_amount: newTotal,
-          balance_amount: Math.abs(balance),
-          balance_type: balance === 0 ? 'nil' : balance > 0 ? 'customer_pays' : 'store_credit',
-          payment_mode: paymentMode,
-          notes: exchangeNotes || null,
-          status: 'completed'
-        })
-        .select().single()
+      // Try to create exchange record in DB
+      let exchangeId: string | null = null
+      try {
+        const { data: exchange, error: excErr } = await supabase
+          .from('exchange_bills')
+          .insert({
+            exchange_no: exchangeNo,
+            original_sale_id: originalInvoice.id,
+            original_invoice_no: originalInvoice.invoice_no,
+            customer_id: originalInvoice.customer_id || null,
+            return_amount: returnTotal,
+            new_sale_amount: newTotal,
+            balance_amount: Math.abs(balance),
+            balance_type: balance === 0 ? 'nil' : balance > 0 ? 'customer_pays' : 'store_credit',
+            payment_mode: paymentMode,
+            notes: exchangeNotes || null,
+            status: 'completed'
+          })
+          .select().single()
 
-      if (excErr || !exchange) throw new Error(excErr?.message || 'Exchange creation failed')
+        if (excErr) {
+          // Table might not exist — log warning but continue with stock adjustments
+          console.warn('Exchange record insert failed (table may not exist):', excErr.message)
+          if (excErr.message?.includes('relation') && excErr.message?.includes('does not exist')) {
+            toast.error('Exchange tables not set up yet. Please run EXCHANGE_SCHEMA.sql in your Supabase SQL Editor first.')
+            setProcessing(false)
+            return
+          }
+          throw excErr
+        }
+        exchangeId = exchange?.id || null
+      } catch (dbErr: any) {
+        if (dbErr?.message?.includes('relation') || dbErr?.message?.includes('does not exist')) {
+          toast.error('Exchange tables not set up. Run EXCHANGE_SCHEMA.sql in Supabase SQL Editor.')
+          setProcessing(false)
+          return
+        }
+        console.warn('Exchange DB error, continuing with stock adjustments:', dbErr)
+      }
 
-      // Insert return items
-      await supabase.from('exchange_return_items').insert(
-        returnItems.map(i => ({
-          exchange_id: exchange.id,
-          product_id: i.product.id,
-          qty: i.qty,
-          unit_price: i.unit_price,
-          line_total: i.line_total,
-          reason: i.reason
-        }))
-      )
+      // Insert return items (if exchange record was created)
+      if (exchangeId) {
+        try {
+          await supabase.from('exchange_return_items').insert(
+            returnItems.map(i => ({
+              exchange_id: exchangeId,
+              product_id: i.product.id,
+              qty: i.qty,
+              unit_price: i.unit_price,
+              line_total: i.line_total,
+              reason: i.reason
+            }))
+          )
+        } catch (e) { console.warn('Failed to insert return items:', e) }
 
-      // Insert new items
-      await supabase.from('exchange_new_items').insert(
-        newItems.map(i => ({
-          exchange_id: exchange.id,
-          product_id: i.product.id,
-          qty: i.qty,
-          unit_price: i.unit_price,
-          line_total: i.line_total
-        }))
-      )
+        // Insert new items
+        try {
+          await supabase.from('exchange_new_items').insert(
+            newItems.map(i => ({
+              exchange_id: exchangeId,
+              product_id: i.product.id,
+              qty: i.qty,
+              unit_price: i.unit_price,
+              line_total: i.line_total
+            }))
+          )
+        } catch (e) { console.warn('Failed to insert new items:', e) }
+      }
 
       // Restore stock for returned items
       for (const item of returnItems) {
-        const { data: p } = await supabase.from('products').select('stock_qty').eq('id', item.product.id).single()
-        if (p) await supabase.from('products').update({ stock_qty: p.stock_qty + item.qty }).eq('id', item.product.id)
+        try {
+          const { data: p } = await supabase.from('products').select('stock_qty').eq('id', item.product.id).single()
+          if (p) await supabase.from('products').update({ stock_qty: p.stock_qty + item.qty }).eq('id', item.product.id)
+        } catch (e) { console.warn('Stock restore failed for', item.product.name, e) }
       }
 
       // Deduct stock for new items
       for (const item of newItems) {
-        const { data: p } = await supabase.from('products').select('stock_qty').eq('id', item.product.id).single()
-        if (p) await supabase.from('products').update({ stock_qty: Math.max(0, p.stock_qty - item.qty) }).eq('id', item.product.id)
+        try {
+          const { data: p } = await supabase.from('products').select('stock_qty').eq('id', item.product.id).single()
+          if (p) await supabase.from('products').update({ stock_qty: Math.max(0, p.stock_qty - item.qty) }).eq('id', item.product.id)
+        } catch (e) { console.warn('Stock deduction failed for', item.product.name, e) }
       }
 
-      // Add loyalty points if store credit → loyalty option
-      if (balance < 0 && creditOption === 'loyalty' && originalInvoice.customer_id) {
-        const pointsToAdd = Math.floor(Math.abs(balance) * 4)
-        const { data: cust } = await supabase.from('customers').select('loyalty_points').eq('id', originalInvoice.customer_id).single()
-        if (cust) await supabase.from('customers').update({ loyalty_points: (cust.loyalty_points || 0) + pointsToAdd }).eq('id', originalInvoice.customer_id)
+      // Issue Credit Note or loyalty points if store refund
+      let cnResult: CreditNote | null = null
+      if (balance < 0) {
+        if (creditOption === 'credit_note') {
+          cnResult = await issueCreditNote({
+            customer_id: originalInvoice.customer_id || undefined,
+            customer_name: originalInvoice.customers?.name || 'Customer',
+            customer_phone: originalInvoice.customers?.phone || undefined,
+            original_sale_id: originalInvoice.id,
+            amount: Math.abs(balance),
+            notes: `Exchange Return Balance for Invoice ${originalInvoice.invoice_no}`
+          })
+          setIssuedCreditNote(cnResult)
+        } else if (creditOption === 'loyalty' && originalInvoice.customer_id) {
+          try {
+            const pointsToAdd = Math.floor(Math.abs(balance) * 4)
+            const { data: cust } = await supabase.from('customers').select('loyalty_points').eq('id', originalInvoice.customer_id).single()
+            if (cust) await supabase.from('customers').update({ loyalty_points: (cust.loyalty_points || 0) + pointsToAdd }).eq('id', originalInvoice.customer_id)
+          } catch (e) { console.warn('Loyalty points update failed:', e) }
+        }
       }
 
       const completeData = {
-        exchangeNo, exchange, returnItems, newItems,
+        exchangeNo, returnItems, newItems,
         returnTotal, newTotal, balance,
         customer: originalInvoice.customers,
-        originalInvoiceNo: originalInvoice.invoice_no
+        originalInvoiceNo: originalInvoice.invoice_no,
+        creditNote: cnResult
       }
       setExchangeComplete(completeData)
       setShowSuccessModal(true)
       toast.success('Exchange completed! ' + exchangeNo)
     } catch (e: any) {
-      toast.error(e.message || 'Exchange failed')
+      console.error('Exchange processing error:', e)
+      toast.error(e.message || 'Exchange failed — check your connection')
     } finally {
       setProcessing(false)
     }
@@ -539,7 +700,7 @@ export function ExchangePage() {
                         </button>
                       </div>
                       {phoneResults.map(inv => (
-                        <div key={inv.id} onClick={() => { setOriginalInvoice(inv); initItemSelections(inv) }}
+                        <div key={inv.id} onClick={() => selectPhoneInvoice(inv)}
                           style={{ padding: '12px', border: '1px solid #f3e8ff', borderRadius: '10px', cursor: 'pointer', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                           onMouseEnter={e => (e.currentTarget.style.background = '#fdf8ff')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
@@ -884,10 +1045,21 @@ export function ExchangePage() {
                           Store Owes ₹{Math.abs(balance).toFixed(2)}
                         </div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>Returned items cost more than new items</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {([['loyalty', `Add ${Math.floor(Math.abs(balance) * 4)} loyalty points`], ['cash', 'Cash refund'], ['store', 'Store credit']] as [string, string][]).map(([opt, label]) => (
-                            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#1a0a2e' }}>
-                              <input type="radio" name="credit" value={opt} checked={creditOption === opt as any} onChange={() => setCreditOption(opt as any)} style={{ accentColor: '#3b82f6' }} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {([
+                            ['credit_note', `🎫 Issue Credit Note Voucher (₹${Math.abs(balance).toFixed(2)})`],
+                            ['cash', '💵 Cash Refund'],
+                            ['upi', '📱 UPI / Bank Refund'],
+                            ['loyalty', `💎 Add ${Math.floor(Math.abs(balance) * 4)} Loyalty Points`]
+                          ] as [string, string][]).map(([opt, label]) => (
+                            <label key={opt} style={{
+                              display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
+                              fontSize: '12px', color: '#1a0a2e', padding: '6px 8px', borderRadius: '8px',
+                              background: creditOption === opt ? '#dbeafe' : 'white',
+                              border: creditOption === opt ? '1px solid #3b82f6' : '1px solid #e2e8f0',
+                              fontWeight: creditOption === opt ? 600 : 400
+                            }}>
+                              <input type="radio" name="credit" value={opt} checked={creditOption === opt as any} onChange={() => setCreditOption(opt as any)} style={{ accentColor: '#2563eb' }} />
                               {label}
                             </label>
                           ))}
@@ -974,7 +1146,47 @@ export function ExchangePage() {
                     💬 WhatsApp
                   </button>
                 </div>
-                <button onClick={() => { resetAll(); setPageTab('history') }} style={{ ...btnOutline, width: '100%' }}>
+
+                {issuedCreditNote && (
+                  <div style={{ background: '#fdf4ff', border: '1px solid #f0abfc', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#9333ea', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>🎫 Credit Note Issued: {issuedCreditNote.credit_note_no}</span>
+                      <span>₹{issuedCreditNote.amount.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => printCreditNote({
+                          creditNoteNo: issuedCreditNote.credit_note_no,
+                          customerName: issuedCreditNote.customer_name || 'Customer',
+                          customerPhone: issuedCreditNote.customer_phone,
+                          amount: issuedCreditNote.amount,
+                          balanceAmount: issuedCreditNote.balance_amount,
+                          notes: issuedCreditNote.notes,
+                          expiresAt: issuedCreditNote.expires_at,
+                          createdAt: issuedCreditNote.created_at
+                        })}
+                        style={{ flex: 1, padding: '8px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                        🖨️ Print Credit Note
+                      </button>
+                      {issuedCreditNote.customer_phone && (
+                        <button
+                          onClick={() => sendCreditNoteWhatsApp({
+                            creditNoteNo: issuedCreditNote.credit_note_no,
+                            customerName: issuedCreditNote.customer_name || 'Customer',
+                            customerPhone: issuedCreditNote.customer_phone,
+                            amount: issuedCreditNote.amount,
+                            balanceAmount: issuedCreditNote.balance_amount,
+                            expiresAt: issuedCreditNote.expires_at
+                          })}
+                          style={{ flex: 1, padding: '8px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                          💬 WhatsApp Voucher
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={() => { resetAll(); setIssuedCreditNote(null); setPageTab('history') }} style={{ ...btnOutline, width: '100%' }}>
                   <RotateCcw size={14} style={{ marginRight: '6px' }} /> New Transaction
                 </button>
               </div>

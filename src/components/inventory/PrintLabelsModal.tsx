@@ -9,16 +9,17 @@ interface Props {
   onClose: () => void
 }
 
-type Format = '38x38' | '50x25' | '50x30'
+type Format = '38x38' | '50x25' | '50x30' | '58mm'
 
 const FORMAT_OPTIONS: { value: Format; label: string; desc: string }[] = [
-  { value: '38x38', label: '38×38mm Double', desc: 'Standard fashion label (recommended)' },
+  { value: '58mm', label: '58mm Thermal', desc: '58mm Bluetooth/USB thermal printer (1 label per row)' },
+  { value: '38x38', label: '38×38mm Double', desc: 'Standard fashion label (2 per row)' },
   { value: '50x25', label: '50×25mm', desc: 'Small barcode label' },
   { value: '50x30', label: '50×30mm', desc: 'Medium label' },
 ]
 
 export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
-  const [format, setFormat] = useState<Format>('38x38')
+  const [format, setFormat] = useState<Format>('58mm')
   const [globalCopies, setGlobalCopies] = useState(1)
   const [rows, setRows] = useState(() =>
     products.map(p => ({
@@ -76,7 +77,7 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid #f3e8ff' }}>
           <div>
             <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#1a0a2e', margin: 0 }}>Print Barcode Labels</h2>
-            <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0' }}>TSC TTP-244 Pro · 38×38mm double format</p>
+            <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0' }}>Supports 58mm Bluetooth thermal printers</p>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#94a3b8', borderRadius: '8px' }}>
             <X size={20} />
@@ -88,31 +89,34 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
           <div style={{ marginBottom: '20px' }}>
             <div style={{ fontSize: '11px', fontWeight: 600, color: '#9333ea', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>Preview</div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              {[0, 1].map(i => (
+              {(format === '58mm' ? [0] : [0, 1]).map(i => (
                 <div key={i} style={{
-                  width: '144px', height: '144px', border: '1px solid #ccc',
-                  padding: '4px', fontFamily: 'Arial, sans-serif', background: 'white',
+                  width: format === '58mm' ? '200px' : '144px',
+                  height: format === '58mm' ? '120px' : '144px',
+                  border: '1px solid #ccc',
+                  padding: format === '58mm' ? '6px 8px' : '4px',
+                  fontFamily: 'Arial, sans-serif', background: 'white',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', overflow: 'hidden'
                 }}>
-                  <div style={{ fontSize: '7px', fontWeight: 700, textAlign: 'center', width: '100%' }}>{shopName}</div>
-                  <div style={{ fontSize: '8px', fontWeight: 600, textAlign: 'center', width: '100%', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: format === '58mm' ? '8px' : '7px', fontWeight: 700, textAlign: 'center', width: '100%' }}>{shopName}</div>
+                  <div style={{ fontSize: format === '58mm' ? '10px' : '8px', fontWeight: 600, textAlign: 'center', width: '100%', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     {selectedProduct?.name || 'Product Name'}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '6.5px', color: '#333', padding: '0 1px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: format === '58mm' ? '8px' : '6.5px', color: '#333', padding: '0 1px' }}>
                     <span>{selectedProduct?.design_no || 'D001'}</span>
                     <span>{selectedProduct?.colour || 'Blue'}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '6.5px', color: '#333', padding: '0 1px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: format === '58mm' ? '8px' : '6.5px', color: '#333', padding: '0 1px' }}>
                     <span>{selectedProduct?.pcode || ''}</span>
                     <span style={{ fontWeight: 600 }}>{selectedProduct?.size || 'XL'}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '1px', margin: '1px 0' }}>
-                    <span style={{ fontSize: '9px', fontWeight: 600 }}>₹</span>
-                    <span style={{ fontSize: '22px', fontWeight: 700, lineHeight: 1 }}>
+                    <span style={{ fontSize: format === '58mm' ? '11px' : '9px', fontWeight: 600 }}>₹</span>
+                    <span style={{ fontSize: format === '58mm' ? '24px' : '22px', fontWeight: 700, lineHeight: 1 }}>
                       {selectedProduct?.mrp || selectedProduct?.unit_price || '0'}
                     </span>
                   </div>
-                  <div style={{ background: '#f0f0f0', height: '30px', width: '130px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '7px', color: '#666' }}>
+                  <div style={{ background: '#f0f0f0', height: '28px', width: format === '58mm' ? '180px' : '130px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '7px', color: '#666' }}>
                     ▌▌▌▌▌▌▌▌▌▌▌▌▌▌▌
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '6px', marginTop: '2px', padding: '0 2px' }}>
@@ -122,7 +126,9 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
                 </div>
               ))}
             </div>
-            <p style={{ textAlign: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>38×38mm — 2 labels per row</p>
+            <p style={{ textAlign: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+              {format === '58mm' ? '58mm — 1 label per row (Bluetooth thermal)' : '38×38mm — 2 labels per row'}
+            </p>
           </div>
 
           {/* Format */}
@@ -190,6 +196,12 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
         </div>
 
         {/* Footer */}
+        {/* Bluetooth tip */}
+        {format === '58mm' && (
+          <div style={{ padding: '0 24px 10px', fontSize: '11px', color: '#7c3aed', background: '#fdf8ff', borderTop: '1px solid #f3e8ff', paddingTop: '10px' }}>
+            <strong>💡 Bluetooth Printer Tip:</strong> Make sure your 58mm thermal printer is paired in <strong>Windows Settings → Bluetooth & Devices</strong> first, then select it in the browser print dialog that appears.
+          </div>
+        )}
         <div style={{ padding: '16px 24px', borderTop: '1px solid #f3e8ff', display: 'flex', gap: '10px' }}>
           <button onClick={onClose} style={{ flex: 1, padding: '11px', border: '1px solid #f3e8ff', borderRadius: '12px', background: 'white', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
           <button

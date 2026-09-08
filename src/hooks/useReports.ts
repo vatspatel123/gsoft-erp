@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { getPendingSales } from '../utils/offlineCache'
 
 const IST_OFFSET = 5.5 * 60 * 60 * 1000
 
@@ -80,49 +81,107 @@ export function useReports() {
     setLoading(true)
     const { from, to } = getRange()
 
+    let dbSales: any[] = []
+    let dbItems: any[] = []
+    let dbProducts: any[] = []
+
     try {
-      const [salesRes, itemsRes, productsRes] = await Promise.all([
-        supabase
-          .from('sales')
-          .select(`
-            *,
-            customers(name, phone),
-            users(id, name, role),
-            sale_items(
-              id, qty, line_total,
+      if (navigator.onLine) {
+        const [salesRes, itemsRes, productsRes] = await Promise.all([
+          supabase
+            .from('sales')
+            .select(`
+              *,
+              customers(name, phone),
+              users(id, name, role),
+              sale_items(
+                id, qty, line_total,
+                unit_price, gst_rate,
+                products(id, name, cost_price, unit_price)
+              )
+            `)
+            .gte('created_at', from)
+            .lte('created_at', to)
+            .eq('is_return', false)
+            .order('created_at', { ascending: false }),
+
+          supabase
+            .from('sale_items')
+            .select(`
+              qty, line_total,
               unit_price, gst_rate,
-              products(id, name, cost_price, unit_price)
-            )
-          `)
-          .gte('created_at', from)
-          .lte('created_at', to)
-          .eq('is_return', false)
-          .order('created_at', { ascending: false }),
+              products(name, cost_price),
+              sales!inner(created_at, is_return)
+            `)
+            .gte('sales.created_at', from)
+            .lte('sales.created_at', to)
+            .eq('sales.is_return', false),
 
-        supabase
-          .from('sale_items')
-          .select(`
-            qty, line_total,
-            unit_price, gst_rate,
-            products(name, cost_price),
-            sales!inner(created_at, is_return)
-          `)
-          .gte('sales.created_at', from)
-          .lte('sales.created_at', to)
-          .eq('sales.is_return', false),
+          supabase
+            .from('products')
+            .select('*')
+            .eq('is_active', true)
+        ])
 
-        supabase
-          .from('products')
-          .select('*')
-          .eq('is_active', true)
-      ])
-
-      setSalesData(salesRes.data || [])
-      setSaleItems(itemsRes.data || [])
-      setProducts(productsRes.data || [])
+        dbSales = salesRes.data || []
+        dbItems = itemsRes.data || []
+        dbProducts = productsRes.data || []
+      }
     } catch (e) {
-      console.error('Failed to load report data', e)
+      console.warn('Network error loading report data, using local cache:', e)
     }
+
+    const pending = getPendingSales() || []
+    const pendingSalesMapped = pending.map((p: any) => ({
+      id: p.saleId || 'local-' + p.pendingId,
+      invoice_no: p.invoiceNo || 'INV-LOCAL',
+      net_amount: p.netAmount || p.net_amount || 0,
+      gst_amount: p.gstAmount || p.gst_amount || 0,
+      discount_amount: p.totalDiscount || p.discount_amount || 0,
+      total_amount: p.subtotal || p.total_amount || 0,
+      payment_mode: p.paymentMode || p.payment_mode || 'cash',
+      is_return: false,
+      created_at: p.createdAt || p.date || new Date().toISOString(),
+      customers: p.customer ? { name: p.customer.name, phone: p.customer.phone } : null,
+      users: p.salesmanName ? { name: p.salesmanName } : null,
+      sale_items: p.cart?.map((i: any) => ({
+        qty: i.qty,
+        unit_price: i.unit_price,
+        line_total: i.line_total,
+        gst_rate: i.product?.gst_rate || 0,
+        products: {
+          id: i.product?.id,
+          name: i.product?.name || 'Product',
+          cost_price: i.product?.cost_price || 0,
+          unit_price: i.unit_price
+        }
+      }))
+    }))
+
+    const pendingItemsMapped: any[] = []
+    for (const p of pending) {
+      for (const item of p.cart || []) {
+        pendingItemsMapped.push({
+          qty: item.qty,
+          line_total: item.line_total,
+          unit_price: item.unit_price,
+          gst_rate: item.product?.gst_rate || 0,
+          products: {
+            name: item.product?.name || 'Product',
+            cost_price: item.product?.cost_price || 0
+          }
+        })
+      }
+    }
+
+    // Combine DB sales and pending sales, avoiding duplicates by invoice_no
+    const combinedSalesMap = new Map<string, any>()
+    for (const s of pendingSalesMapped) combinedSalesMap.set(s.invoice_no, s)
+    for (const s of dbSales) combinedSalesMap.set(s.invoice_no, s)
+
+    setSalesData(Array.from(combinedSalesMap.values()))
+    setSaleItems([...dbItems, ...pendingItemsMapped])
+    setProducts(dbProducts)
 
     setLoading(false)
   }

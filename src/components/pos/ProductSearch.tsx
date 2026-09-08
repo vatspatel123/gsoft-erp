@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import toast from 'react-hot-toast'
-import { saveProductsToCache, searchCachedProducts, isCacheValid } from '../../utils/offlineCache'
+import { saveProductsToCache, searchCachedProducts, isCacheValid, getCachedProducts } from '../../utils/offlineCache'
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { colourToCSS as colourCSS } from '../../utils/design'
 
@@ -71,65 +71,80 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
   }
 
   const handleBarcodeSearch = async (code: string) => {
-    if (!code) return
-    console.log('=== SCANNER INPUT ===')
-    console.log('Scanned code:', code)
-    console.log('Code length:', code.length)
-    console.log('Code type:', typeof code)
+    if (!code || !code.trim()) return
+    const searchCode = code.trim()
+    const searchLower = searchCode.toLowerCase()
+    console.log('=== SEARCH / SCAN INPUT ===', searchCode)
 
     setLoading(true)
     try {
-      // Fetch all products for debug comparison
-      const { data: allProducts } = await supabase
-        .from('products')
-        .select('id, name, barcode, sku, batch_no')
+      let candidateList: any[] = []
 
-      console.log('All products barcodes:', allProducts?.map(p => ({
-        name: p.name,
-        barcode: p.barcode,
-        sku: p.sku,
-        batch_no: p.batch_no
-      })))
+      if (navigator.onLine) {
+        try {
+          const { data } = await supabase
+            .from('products')
+            .select('*')
+          if (data && data.length > 0) candidateList = data
+        } catch (dbErr) {
+          console.warn('DB fetch error during search, using cache:', dbErr)
+        }
+      }
 
-      // Client-side exact match (trims whitespace)
-      const exactMatch = allProducts?.find(p =>
-        p.barcode === code ||
-        p.sku === code ||
-        p.batch_no === code ||
-        p.barcode?.trim() === code.trim() ||
-        p.sku?.trim() === code.trim()
+      if (candidateList.length === 0) {
+        candidateList = getCachedProducts() || []
+      }
+
+      // 1. Case-insensitive exact match on barcode, SKU, design_no, batch_no, pcode
+      let match = candidateList.find(p =>
+        (p.barcode && String(p.barcode).trim().toLowerCase() === searchLower) ||
+        (p.sku && String(p.sku).trim().toLowerCase() === searchLower) ||
+        (p.design_no && String(p.design_no).trim().toLowerCase() === searchLower) ||
+        (p.batch_no && String(p.batch_no).trim().toLowerCase() === searchLower) ||
+        (p.pcode && String(p.pcode).trim().toLowerCase() === searchLower)
       )
 
-      console.log('Match found:', exactMatch)
+      // 2. Partial match on name, SKU, design_no if no exact code match
+      if (!match) {
+        const matches = candidateList.filter(p =>
+          p.is_active !== false && (
+            (p.name && p.name.toLowerCase().includes(searchLower)) ||
+            (p.sku && p.sku.toLowerCase().includes(searchLower)) ||
+            (p.design_no && p.design_no.toLowerCase().includes(searchLower))
+          )
+        )
 
-      if (exactMatch) {
-        console.log('SUCCESS - adding to cart')
-        // Fetch full product row for cart
-        const { data: fullProduct } = await supabase
-          .from('products')
-          .select('*')
-          .eq('id', exactMatch.id)
-          .single()
-        handleSelect(fullProduct || exactMatch)
+        if (matches.length === 1) {
+          match = matches[0]
+        } else if (matches.length > 1) {
+          setResults(matches)
+          setShow(true)
+          setLoading(false)
+          return
+        }
+      }
+
+      if (match) {
+        console.log('SUCCESS - selecting product:', match.name)
+        handleSelect(match)
         setScanFlash('success')
         setTimeout(() => setScanFlash(''), 500)
         playBeep(true)
-        toast.success(exactMatch.name + ' added!')
+        toast.success(`${match.name} scanned!`)
         return
       }
 
       // Nothing found
-      console.log('NOT FOUND - no match')
       setScanFlash('error')
       setTimeout(() => setScanFlash(''), 800)
       playBeep(false)
 
-      toast.error(`Not found: [${code}] Length: ${code.length}`, { duration: 4000 })
+      toast.error(`Not found: [${code}]`, { duration: 4000 })
 
       if (onOpenAddProduct) {
         toast((t) => (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontWeight: 500, fontSize: '13px' }}>Barcode not found: {code}</div>
+            <div style={{ fontWeight: 500, fontSize: '13px' }}>Product not found: {code}</div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 onClick={() => { toast.dismiss(t.id); onOpenAddProduct(code) }}
@@ -154,26 +169,35 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
 
   const search = async (q: string) => {
     if (!q || q.trim().length === 0) { setResults([]); setShow(false); return }
+    const searchStr = q.trim().toLowerCase()
     setLoading(true)
     try {
-      if (isOnline) {
-        const { data, error } = await supabase
-          .from('products')
-          .select('*')
-          .or(`name.ilike.%${q}%,sku.ilike.%${q}%,design_no.ilike.%${q}%,batch_no.ilike.%${q}%`)
-          .eq('is_active', true)
-          .limit(12)
-        if (error) { console.error('Supabase error:', error); return }
-        if (data) { saveProductsToCache(data); setResults(data) }
-        setShow(true)
-      } else {
-        const cached = searchCachedProducts(q, 12)
-        if (cached.length === 0 && !isCacheValid()) {
-          toast.error('No cached data. Connect internet once to sync.')
-          setResults([]); setShow(false); return
+      let fetched: Product[] = []
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .or(`name.ilike.%${searchStr}%,sku.ilike.%${searchStr}%,design_no.ilike.%${searchStr}%,batch_no.ilike.%${searchStr}%,barcode.ilike.%${searchStr}%`)
+            .eq('is_active', true)
+            .limit(12)
+          if (!error && data) {
+            fetched = data
+            saveProductsToCache(data)
+          }
+        } catch (dbErr) {
+          console.warn('DB search error, using cache:', dbErr)
         }
-        setResults(cached); setShow(true)
       }
+
+      const cached = searchCachedProducts(searchStr, 12)
+      const map = new Map<string, Product>()
+      for (const p of cached) map.set(p.id, p)
+      for (const p of fetched) map.set(p.id, p)
+
+      const merged = Array.from(map.values())
+      setResults(merged)
+      setShow(merged.length > 0)
     } catch (e) {
       console.error(e)
     } finally {

@@ -24,13 +24,45 @@ import { SettingsPage } from './pages/SettingsPage'
 import { ExchangePage } from './pages/ExchangePage'
 import { WholesalePage } from './pages/WholesalePage'
 import { PurchaseEntryPage } from './pages/PurchaseEntryPage'
+import { PurchaseReturnPage } from './pages/PurchaseReturnPage'
 import { ExpensesPage } from './pages/ExpensesPage'
-
+import type { Session } from '@supabase/supabase-js'
+import { LoginScreen } from './components/auth/LoginScreen'
+import { SubscriptionLockedScreen } from './components/auth/SubscriptionLockedScreen'
 // Inner component so useNavigate works (must be inside BrowserRouter)
 function AppContent() {
   const navigate = useNavigate()
   const isOnline = useOnlineStatus()
   const [showSplash, setShowSplash] = useState(true)
+  const [session, setSession] = useState<Session | null>(null)
+  const [authInitialized, setAuthInitialized] = useState(false)
+  const [storeStatus, setStoreStatus] = useState<string>('active')
+
+  // Auth state listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setAuthInitialized(true)
+      if (session) {
+        supabase.from('stores').select('subscription_status').single().then(({ data }) => {
+          if (data) setStoreStatus(data.subscription_status)
+        })
+      }
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      if (session) {
+        supabase.from('stores').select('subscription_status').single().then(({ data }) => {
+          if (data) setStoreStatus(data.subscription_status)
+        })
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   // Splash screen — 2 seconds
   useEffect(() => {
@@ -68,14 +100,13 @@ function AppContent() {
 
   // Sync pending offline sales when back online
   useEffect(() => {
-    if (!isOnline) return
-    const pending = getPendingSales()
-    if (pending.length === 0) return
     const sync = async () => {
+      const pending = getPendingSales()
+      if (pending.length === 0) return
       let synced = 0
       for (const sale of pending) {
         try {
-          const { data } = await supabase
+          const { data, error } = await supabase
             .from('sales')
             .insert({
               invoice_no: sale.invoiceNo,
@@ -91,28 +122,32 @@ function AppContent() {
             })
             .select()
             .single()
-          if (data) {
-            await supabase.from('sale_items').insert(
-              sale.cart.map((i: any) => ({
-                sale_id: data.id,
-                product_id: i.product.id,
-                qty: i.qty,
-                unit_price: i.unit_price,
-                discount_pct: i.discount_pct || 0,
-                gst_rate: i.product.gst_rate,
-                line_total: i.line_total
-              }))
-            )
+          if (!error && data) {
+            if (sale.cart && sale.cart.length > 0) {
+              await supabase.from('sale_items').insert(
+                sale.cart.map((i: any) => ({
+                  sale_id: data.id,
+                  product_id: i.product.id,
+                  qty: i.qty,
+                  unit_price: i.unit_price,
+                  discount_pct: i.discount_pct || 0,
+                  gst_rate: i.product?.gst_rate || 5,
+                  line_total: i.line_total
+                }))
+              )
+            }
             clearPendingSale(sale.pendingId)
             synced++
           }
         } catch (e) {
-          console.error('Sync error:', e)
+          console.warn('Sync notice:', e)
         }
       }
       if (synced > 0) toast.success(`${synced} offline bill${synced > 1 ? 's' : ''} synced to cloud!`)
     }
-    sync()
+
+    (window as any).syncPendingSales = sync
+    if (isOnline) sync()
   }, [isOnline])
 
   // Auto-updater notifications
@@ -157,7 +192,20 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyboard)
   }, [navigate])
 
-  if (showSplash) return <SplashScreen />
+  if (!authInitialized || showSplash) return <SplashScreen />
+  
+  if (!session) {
+    return (
+      <>
+        <Toaster position="top-right" />
+        <LoginScreen />
+      </>
+    )
+  }
+
+  if (storeStatus === 'locked' || storeStatus === 'past_due') {
+    return <SubscriptionLockedScreen />
+  }
 
   return (
     <>
@@ -181,6 +229,7 @@ function AppContent() {
         <Route path="/exchange" element={<ExchangePage />} />
         <Route path="/wholesale" element={<WholesalePage />} />
         <Route path="/purchase-entry" element={<PurchaseEntryPage />} />
+        <Route path="/purchase-returns" element={<PurchaseReturnPage />} />
         <Route path="/expenses" element={<ExpensesPage />} />
       </Routes>
     </>

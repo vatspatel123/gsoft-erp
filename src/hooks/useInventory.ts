@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
+import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 
 export function useInventory() {
   const [products, setProducts] = useState<any[]>([])
@@ -12,15 +13,24 @@ export function useInventory() {
   const fetchProducts = async () => {
     setLoading(true)
     try {
-      const { data } = await supabase
-        .from('products')
-        .select('*, categories(name)')
-        .eq('is_active', true)
-        .order('name')
-      setProducts(data || [])
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*, categories(name)')
+          .eq('is_active', true)
+          .order('name')
+        if (!error && data && data.length > 0) {
+          setProducts(data)
+          saveProductsToCache(data)
+          setLoading(false)
+          return
+        }
+      }
     } catch (e) {
-      console.error('Error fetching products:', e)
+      console.error('Error fetching inventory products, using cache:', e)
     }
+    const cached = getCachedProducts() || []
+    setProducts(cached.filter((p: any) => p.is_active !== false))
     setLoading(false)
   }
 
@@ -63,29 +73,58 @@ export function useInventory() {
       newQty = Math.max(0, product.stock_qty - qty)
     else if (type === 'set') newQty = qty
 
-    try {
-      await supabase
-        .from('products')
-        .update({ stock_qty: newQty })
-        .eq('id', productId)
+    // Update local state immediately for instant UI feedback
+    setProducts(prev => prev.map(p =>
+      p.id === productId ? { ...p, stock_qty: newQty } : p
+    ))
 
-      await supabase.from('stock_damage_log').insert({
-        product_id: productId,
-        qty_before: product.stock_qty,
-        qty_change:
-          type === 'add'
-            ? qty
-            : type === 'remove'
-              ? -qty
-              : qty - product.stock_qty,
-        qty_after: newQty,
-        reason: reason,
-        notes: notes || null,
-        adjustment_type: type
-      })
+    // Update local cache
+    try {
+      const cachedStr = localStorage.getItem('gsoft_products_cache')
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr)
+        const updatedData = (cached.data || cached.products || []).map((p: any) =>
+          p.id === productId ? { ...p, stock_qty: newQty } : p
+        )
+        localStorage.setItem('gsoft_products_cache', JSON.stringify({
+          ...cached,
+          data: updatedData,
+          products: updatedData,
+          savedAt: Date.now()
+        }))
+      }
+    } catch (e) {
+      console.warn('Failed to update local product cache:', e)
+    }
+
+    try {
+      if (navigator.onLine) {
+        try {
+          await supabase
+            .from('products')
+            .update({ stock_qty: newQty })
+            .eq('id', productId)
+
+          await supabase.from('stock_damage_log').insert({
+            product_id: productId,
+            qty_before: product.stock_qty,
+            qty_change:
+              type === 'add'
+                ? qty
+                : type === 'remove'
+                  ? -qty
+                  : qty - product.stock_qty,
+            qty_after: newQty,
+            reason: reason,
+            notes: notes || null,
+            adjustment_type: type
+          })
+        } catch (dbErr) {
+          console.warn('DB adjust stock warning, local cache already updated:', dbErr)
+        }
+      }
 
       toast.success('Stock updated!')
-      fetchProducts()
       fetchAdjustments()
     } catch (e) {
       console.error('Error adjusting stock:', e)
@@ -102,20 +141,46 @@ export function useInventory() {
 
     const newQty = Math.max(0, product.stock_qty + change)
 
-    try {
-      await supabase
-        .from('products')
-        .update({ stock_qty: newQty })
-        .eq('id', productId)
+    // Update local state immediately for instant UI feedback
+    setProducts(prev => prev.map(p =>
+      p.id === productId ? { ...p, stock_qty: newQty } : p
+    ))
 
-      toast.success(
-        change > 0 ? '+' + change + ' added' : change + ' removed'
-      )
-      fetchProducts()
+    // Update local cache
+    try {
+      const cachedStr = localStorage.getItem('gsoft_products_cache')
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr)
+        const updatedData = (cached.data || cached.products || []).map((p: any) =>
+          p.id === productId ? { ...p, stock_qty: newQty } : p
+        )
+        localStorage.setItem('gsoft_products_cache', JSON.stringify({
+          ...cached,
+          data: updatedData,
+          products: updatedData,
+          savedAt: Date.now()
+        }))
+      }
     } catch (e) {
-      console.error('Error quick adjusting:', e)
-      toast.error('Failed to adjust stock')
+      console.warn('Failed to update local product cache:', e)
     }
+
+    // Try syncing to DB
+    if (navigator.onLine) {
+      try {
+        const { error } = await supabase
+          .from('products')
+          .update({ stock_qty: newQty })
+          .eq('id', productId)
+        if (error) throw error
+      } catch (e) {
+        console.warn('DB quick adjust failed, local cache updated:', e)
+      }
+    }
+
+    toast.success(
+      change > 0 ? '+' + change + ' added' : change + ' removed'
+    )
   }
 
   const saveStockCount = async (

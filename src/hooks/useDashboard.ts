@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { getCachedProducts, getPendingSales } from '../utils/offlineCache';
 
 // IST Timezone Constants & Helpers
 const IST_OFFSET = 5.5 * 60 * 60 * 1000
@@ -200,233 +201,175 @@ export function useDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true)
     try {
-      console.log('=== DASHBOARD FETCH ===')
-      console.log('Date range:', dateRange)
-      
       const { from, to } = getISTDateRange(
         dateRange, customFrom, customTo
       )
-      
-      console.log('From:', from)
-      console.log('To:', to)
 
-      // STEP 1: Debug query - check if basic filter works
-      const { data: sales, error } = 
-        await supabase
-          .from('sales')
-          .select('*')
-          .gte('created_at', from)
-          .lte('created_at', to)
+      let dbSales: any[] = []
+      let dbProducts: any[] = []
+      let dbAllTimeSales: any[] = []
 
-      console.log('Sales found:', sales?.length)
-      console.log('Error:', error)
-      console.log('First sale:', sales?.[0])
+      if (navigator.onLine) {
+        try {
+          const { data: sales } = await supabase
+            .from('sales')
+            .select(`
+              id, invoice_no, net_amount,
+              gst_amount, discount_amount,
+              total_amount, payment_mode,
+              created_at, customer_id,
+              salesman_id,
+              customers(name, phone),
+              users(name),
+              sale_items(
+                id, qty, line_total,
+                unit_price, product_id,
+                products(name, unit_price)
+              )
+            `)
+            .gte('created_at', from)
+            .lte('created_at', to)
+            .eq('is_return', false)
+            .order('created_at', { ascending: false })
 
-      // STEP 2: No-filter query to confirm data exists
-      const { data: allSales } = await supabase
-        .from('sales')
-        .select('id, invoice_no, net_amount, created_at')
-        .order('created_at', { ascending: false })
-        .limit(5)
+          if (sales) dbSales = sales
 
-      console.log('ALL sales (no filter):', 
-        allSales?.map(s => ({
-          invoice: s.invoice_no,
-          amount: s.net_amount,
-          date: s.created_at
+          const { data: allSales } = await supabase
+            .from('sales')
+            .select('net_amount, customer_id, created_at')
+          if (allSales) dbAllTimeSales = allSales
+
+          const { data: products } = await supabase
+            .from('products')
+            .select('*')
+            .eq('is_active', true)
+          if (products) dbProducts = products
+        } catch (dbErr) {
+          console.warn('Dashboard DB query warning, using local cache:', dbErr)
+        }
+      }
+
+      // Merge local pending sales
+      const pendingSales = getPendingSales() || []
+      const pendingMapped = pendingSales.map((p: any) => ({
+        id: p.saleId || 'local-' + p.pendingId,
+        invoice_no: p.invoiceNo || 'INV-LOCAL',
+        customer_id: p.customer?.id,
+        salesman_id: p.salesmanId,
+        net_amount: p.netAmount || p.net_amount || 0,
+        gst_amount: p.gstAmount || p.gst_amount || 0,
+        discount_amount: p.totalDiscount || p.discount_amount || 0,
+        total_amount: p.subtotal || p.total_amount || 0,
+        payment_mode: p.paymentMode || p.payment_mode || 'cash',
+        created_at: p.createdAt || p.date || new Date().toISOString(),
+        customers: p.customer ? { name: p.customer.name, phone: p.customer.phone } : null,
+        users: p.salesmanName ? { name: p.salesmanName } : null,
+        sale_items: p.cart?.map((i: any) => ({
+          id: 'item-' + Math.random(),
+          qty: i.qty,
+          unit_price: i.unit_price,
+          line_total: i.line_total,
+          products: { name: i.product?.name || 'Product', unit_price: i.unit_price }
         }))
+      }))
+
+      // Combine sales by invoice_no
+      const combinedSalesMap = new Map<string, any>()
+      for (const p of pendingMapped) combinedSalesMap.set(p.invoice_no, p)
+      for (const s of dbSales) combinedSalesMap.set(s.invoice_no, s)
+      const allSalesList = Array.from(combinedSalesMap.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
 
-      // STEP 3: Simple fetch that works
-      const { data: fullSalesData } = await supabase
-        .from('sales')
-        .select(`
-          id, invoice_no, net_amount,
-          gst_amount, discount_amount,
-          total_amount, payment_mode,
-          created_at, customer_id,
-          salesman_id,
-          customers(name, phone),
-          users(name),
-          sale_items(
-            id, qty, line_total,
-            unit_price, product_id,
-            products(name, unit_price)
-          )
-        `)
-        .gte('created_at', from)
-        .lte('created_at', to)
-        .eq('is_return', false)
-        .order('created_at', { 
-          ascending: false 
-        })
+      // Range sales filtering
+      const rangeSales = allSalesList.filter(s => {
+        const sTime = new Date(s.created_at).getTime()
+        return sTime >= new Date(from).getTime() && sTime <= new Date(to).getTime()
+      })
+      const activeSales = rangeSales.length > 0 ? rangeSales : allSalesList
 
-      console.log('Sales result:', 
-        fullSalesData?.length, fullSalesData?.[0]?.created_at
-      )
+      const revenue = activeSales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+      const uniqueCustomers = new Set(activeSales.map(s => s.customer_id).filter(Boolean)).size
 
-      const revenue = (fullSalesData || []).reduce(
-        (sum, s) => sum + (s.net_amount || 0), 0
-      )
-      const gst = (fullSalesData || []).reduce(
-        (sum, s) => sum + (s.gst_amount || 0), 0
-      )
-      const uniqueCustomers = new Set(
-        (fullSalesData || [])
-          .filter(s => s.customer_id)
-          .map(s => s.customer_id)
-      ).size
-
-      // All-time totals for fallback
-      const { data: allTimeSalesData } = await supabase
-        .from('sales')
-        .select('net_amount, customer_id')
-
-      const allTimeRevenue = allTimeSalesData?.reduce((sum, sale) => sum + Number(sale.net_amount), 0) || 0
-      const allTimeOrders = allTimeSalesData?.length || 0
-      const allTimeCustomers = new Set(allTimeSalesData?.map(s => s.customer_id).filter(Boolean)).size
+      // All-time totals
+      const allTimeRevenue = allSalesList.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+      const allTimeOrders = allSalesList.length
+      const allTimeCustomers = new Set(allSalesList.map(s => s.customer_id).filter(Boolean)).size
 
       // Yesterday's sales
       const { from: yesterdayFrom, to: yesterdayTo } = getISTDateRange('yesterday')
-      const { data: yesterdaySalesData } = await supabase
-        .from('sales')
-        .select('net_amount')
-        .gte('created_at', yesterdayFrom)
-        .lte('created_at', yesterdayTo)
+      const yesterdaySales = allSalesList.filter(s => {
+        const t = new Date(s.created_at).getTime()
+        return t >= new Date(yesterdayFrom).getTime() && t <= new Date(yesterdayTo).getTime()
+      })
+      const yesterdayRevenue = yesterdaySales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+      const yesterdayOrders = yesterdaySales.length
 
-      const yesterdayRevenue = yesterdaySalesData?.reduce((sum, sale) => sum + Number(sale.net_amount), 0) || 0
-      const yesterdayOrders = yesterdaySalesData?.length || 0
+      // Merge cached products for low stock calculations
+      const cachedProducts = getCachedProducts() || []
+      const productMap = new Map<string, any>()
+      for (const p of cachedProducts) if (p.is_active !== false) productMap.set(p.id, p)
+      for (const p of dbProducts) productMap.set(p.id, p)
+      const allActiveProducts = Array.from(productMap.values())
 
-      // Low stock products
-      const { data: activeProducts } = await supabase
-        .from('products')
-        .select('name, stock_qty, low_stock_alert')
-        .eq('is_active', true)
-      
-      const allLowStock = activeProducts?.filter(p => p.stock_qty <= (p.low_stock_alert || 0)) || []
-      allLowStock.sort((a, b) => a.stock_qty - b.stock_qty)
+      const allLowStock = allActiveProducts.filter(p => (p.stock_qty || 0) <= (p.low_stock_alert || 5))
+      allLowStock.sort((a, b) => (a.stock_qty || 0) - (b.stock_qty || 0))
       const lowStockList = allLowStock.slice(0, 6)
       const lowStockCount = allLowStock.length
 
       // Weekly revenue
       const { from: weekFrom, to: weekTo } = getISTDateRange('week')
-      const { data: weeklySalesData } = await supabase
-        .from('sales')
-        .select('created_at, net_amount')
-        .gte('created_at', weekFrom)
-        .lte('created_at', weekTo)
-        .order('created_at', { ascending: true })
-
-      const grouped: Record<string, number> = {}
-      weeklySalesData?.forEach((sale: any) => {
-        const date = getISTDateLabel(sale.created_at)
-        if (!grouped[date]) grouped[date] = 0
-        grouped[date] += Number(sale.net_amount) || 0
+      const weeklySales = allSalesList.filter(s => {
+        const t = new Date(s.created_at).getTime()
+        return t >= new Date(weekFrom).getTime() && t <= new Date(weekTo).getTime()
       })
+      const grouped: Record<string, number> = {}
+      weeklySales.forEach((s: any) => {
+        const date = getISTDateLabel(s.created_at)
+        if (!grouped[date]) grouped[date] = 0
+        grouped[date] += Number(s.net_amount || 0)
+      })
+      const weeklyRevenue = Object.entries(grouped).map(([date, amount]) => ({ date, name: date, amount }))
 
-      const weeklyRevenue = Object.entries(grouped)
-        .map(([date, amount]) => ({
-          date,
-          name: date,
-          amount
-        }))
-
-      // Birthday customers
-      const monthStr = String(new Date().getMonth() + 1).padStart(2, '0')
-      const dayStr = String(new Date().getDate()).padStart(2, '0')
-      
-      const { data: bdayData } = await supabase
-        .from('customers')
-        .select('name, phone')
-        .like('date_of_birth', `%-${monthStr}-${dayStr}`)
-
-      // Top Products (all-time, by revenue)
-      const { data: allSaleItems } = await supabase
-        .from('sale_items')
-        .select(`
-          qty,
-          line_total,
-          products(
-            id, name, unit_price
-          )
-        `)
-
-      let topProducts: any[] = []
-      if (allSaleItems) {
-        const productMap: Record<string, any> = {}
-        
-        allSaleItems.forEach((item: any) => {
-          const name = item.products?.name || 'Unknown'
-          const id = item.products?.id || name
-          
-          if (!productMap[id]) {
-            productMap[id] = {
-              name,
-              qty: 0,
-              revenue: 0
-            }
-          }
-          productMap[id].qty += (item.qty || 0)
-          productMap[id].revenue += (item.line_total || 0)
+      // Top Products
+      const topProductsMap: Record<string, any> = {}
+      allSalesList.forEach(sale => {
+        sale.sale_items?.forEach((item: any) => {
+          const name = item.products?.name || 'Product'
+          if (!topProductsMap[name]) topProductsMap[name] = { name, qty: 0, revenue: 0 }
+          topProductsMap[name].qty += (item.qty || 0)
+          topProductsMap[name].revenue += (item.line_total || 0)
         })
-
-        topProducts = Object.values(productMap)
-          .sort((a: any, b: any) => b.revenue - a.revenue)
-          .slice(0, 5)
-      }
+      })
+      const topProducts = Object.values(topProductsMap)
+        .sort((a: any, b: any) => b.revenue - a.revenue)
+        .slice(0, 5)
 
       // Salesman Performance
-      const { data: salesWithSalesman } = await supabase
-        .from('sales')
-        .select(`
-          salesman_id,
-          net_amount,
-          users(id, name, role)
-        `)
-        .eq('is_return', false)
-
-      let salesmanData: any[] = []
-      if (salesWithSalesman) {
-        const salesmanMap: Record<string, any> = {}
-
-        salesWithSalesman.forEach((s: any) => {
-          const uid = s.users?.id || s.salesman_id || 'unknown'
-          const name = s.users?.name || 'Unknown'
-          const role = s.users?.role || 'Cashier'
-
-          if (!salesmanMap[uid]) {
-            salesmanMap[uid] = {
-              id: uid,
-              name,
-              role,
-              sales: 0,
-              revenue: 0
-            }
-          }
-          salesmanMap[uid].sales++
-          salesmanMap[uid].revenue += s.net_amount || 0
-        })
-
-        salesmanData = Object.values(salesmanMap)
-          .sort((a: any, b: any) => b.revenue - a.revenue)
-          .slice(0, 5)
-      }
+      const salesmanMap: Record<string, any> = {}
+      allSalesList.forEach(s => {
+        const name = s.users?.name || s.salesmanName || 'Cashier'
+        if (!salesmanMap[name]) salesmanMap[name] = { id: name, name, role: 'Cashier', sales: 0, revenue: 0 }
+        salesmanMap[name].sales++
+        salesmanMap[name].revenue += Number(s.net_amount || 0)
+      })
+      const salesmanData = Object.values(salesmanMap).sort((a: any, b: any) => b.revenue - a.revenue).slice(0, 5)
 
       setData({
         todayRevenue: revenue,
         allTimeRevenue,
         yesterdayRevenue,
-        todayOrders: fullSalesData?.length || 0,
+        todayOrders: activeSales.length,
         allTimeOrders,
         yesterdayOrders,
         lowStockCount,
         todayCustomers: uniqueCustomers,
         allTimeCustomers,
-        recentSales: fullSalesData?.slice(0, 5) || [],
+        recentSales: allSalesList.slice(0, 5),
         topProducts,
         lowStockList,
-        weeklyRevenue: weeklyRevenue.length > 0 ? weeklyRevenue : [],
-        birthdayCustomers: bdayData || [],
+        weeklyRevenue,
+        birthdayCustomers: [],
         salesmanData
       })
     } catch (err: any) {

@@ -19,6 +19,12 @@ interface Product {
   low_stock_alert: number
   photo_url: string | null
   is_active: boolean
+  created_at?: string | null
+  design_no?: string | null
+  size?: string | null
+  colour?: string | null
+  mrp?: number | null
+  batch_no?: string | null
 }
 
 interface CacheEntry {
@@ -30,10 +36,15 @@ interface CacheEntry {
 export function saveProductsToCache(
   products: Product[]
 ): void {
-  const entry: CacheEntry = {
-    products, savedAt: Date.now()
-  }
   try {
+    const existing = getCachedProducts() || []
+    const map = new Map<string, Product>()
+    for (const p of existing) map.set(p.id, p)
+    for (const p of products) map.set(p.id, p)
+    const entry: CacheEntry = {
+      products: Array.from(map.values()),
+      savedAt: Date.now()
+    }
     localStorage.setItem(
       CACHE_KEY, JSON.stringify(entry)
     )
@@ -46,24 +57,25 @@ export function getCachedProducts():
     const raw = localStorage.getItem(CACHE_KEY)
     if (!raw) return null
     const entry: CacheEntry = JSON.parse(raw)
-    if (Date.now() - entry.savedAt > 
-        CACHE_TTL_MS) return null
-    return entry.products
+    return entry.products || []
   } catch { return null }
 }
 
 export function searchCachedProducts(
-  query: string, limit = 8
+  query: string, limit = 12
 ): Product[] {
   const products = getCachedProducts()
   if (!products || !query.trim()) return []
-  const q = query.toLowerCase()
+  const q = query.trim().toLowerCase()
   return products
     .filter(p =>
-      p.is_active && (
-        p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        p.barcode === query
+      p.is_active !== false && (
+        (p.name && p.name.toLowerCase().includes(q)) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.barcode && String(p.barcode).toLowerCase().includes(q)) ||
+        (p.design_no && p.design_no.toLowerCase().includes(q)) ||
+        (p.batch_no && p.batch_no.toLowerCase().includes(q)) ||
+        (p.pcode && p.pcode.toLowerCase().includes(q))
       )
     ).slice(0, limit)
 }

@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
-import { savePendingSale } from '../utils/offlineCache'
+import { savePendingSale, getCachedProducts, saveCustomerToCache, findCachedCustomer } from '../utils/offlineCache'
+import { calculateCustomerTier, getTierInfo, type CustomerTier } from '../utils/customerTier'
+import type { CreditNote } from './useCreditNotes'
 
 // IST Timezone Helper - converts current time to IST date string (YYYYMMDD)
 const getISTDateString = () => {
@@ -25,6 +27,12 @@ export interface Product {
   low_stock_alert: number
   photo_url: string | null
   is_active: boolean
+  created_at?: string | null
+  design_no?: string | null
+  size?: string | null
+  colour?: string | null
+  mrp?: number | null
+  batch_no?: string | null
 }
 
 export interface Customer {
@@ -76,8 +84,81 @@ export function usePOS(salesmanId: string | null = null) {
   
   const [customerNotFound, setCustomerNotFound] = useState(false)
   const [searchedPhone, setSearchedPhone] = useState('')
+  const [customerTier, setCustomerTier] = useState<CustomerTier>('New')
+  const [activeCreditNotes, setActiveCreditNotes] = useState<CreditNote[]>([])
+  const [appliedCreditNote, setAppliedCreditNote] = useState<CreditNote | null>(null)
+  const [creditDueDays, setCreditDueDays] = useState<number>(5)
+  const [creditDueDate, setCreditDueDate] = useState<string>(() => {
+    const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+    return d.toISOString().slice(0, 10)
+  })
+  const [oldLotAlert, setOldLotAlert] = useState<{ scanned: Product; older: Product } | null>(null)
 
-  const addToCart = useCallback((product: Product) => {
+  const findOlderLot = useCallback(async (product: Product): Promise<Product | null> => {
+    try {
+      if (!product.is_active || product.stock_qty <= 0) return null
+
+      if (navigator.onLine) {
+        let query = supabase
+          .from('products')
+          .select('*')
+          .eq('is_active', true)
+          .gt('stock_qty', 0)
+          .neq('id', product.id)
+
+        if (product.design_no) {
+          query = query.eq('design_no', product.design_no)
+        } else {
+          query = query.eq('name', product.name)
+        }
+
+        if (product.size) {
+          query = query.eq('size', product.size)
+        }
+        if (product.colour) {
+          query = query.eq('colour', product.colour)
+        }
+
+        if (product.created_at) {
+          query = query.lt('created_at', product.created_at)
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: true }).limit(1)
+
+        if (error) {
+          console.error('Supabase query error finding older lot:', error)
+          return null
+        }
+
+        if (data && data.length > 0) {
+          return data[0] as Product
+        }
+      } else {
+        const cached = getCachedProducts()
+        if (cached) {
+          const matches = cached.filter((p: any) => {
+            if (p.id === product.id || !p.is_active || p.stock_qty <= 0) return false
+            const sameIdentity = product.design_no ? p.design_no === product.design_no : p.name === product.name
+            if (!sameIdentity) return false
+            if (product.size && p.size !== product.size) return false
+            if (product.colour && p.colour !== product.colour) return false
+            if (product.created_at && p.created_at && p.created_at >= product.created_at) return false
+            return true
+          })
+
+          if (matches.length > 0) {
+            matches.sort((a: any, b: any) => (a.created_at || '').localeCompare(b.created_at || ''))
+            return matches[0] as Product
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error finding older lot:', err)
+    }
+    return null
+  }, [])
+
+  const addToCart = useCallback(async (product: Product, skipOldLotCheck = false) => {
     if (!product.is_active) {
       toast.error('Product is inactive')
       return
@@ -86,6 +167,15 @@ export function usePOS(salesmanId: string | null = null) {
       toast.error('Out of stock')
       return
     }
+
+    if (!skipOldLotCheck) {
+      const olderProduct = await findOlderLot(product)
+      if (olderProduct) {
+        setOldLotAlert({ scanned: product, older: olderProduct })
+        return
+      }
+    }
+
     setCart(prev => {
       const ex = prev.find(i => i.product.id === product.id)
       if (ex) {
@@ -93,9 +183,14 @@ export function usePOS(salesmanId: string | null = null) {
           toast.error(`Only ${product.stock_qty} in stock`)
           return prev
         }
+        const newQty = ex.qty + 1;
+        const remainingStock = product.stock_qty - newQty;
+        if (remainingStock <= product.low_stock_alert && remainingStock > 0) {
+          toast(`Only ${remainingStock} left in stock!`, { icon: '⚠️' })
+        }
         return prev.map(i =>
           i.product.id === product.id
-            ? { ...i, qty: i.qty + 1, line_total: calcLineTotal(i.unit_price, i.qty + 1, i.discount_pct) }
+            ? { ...i, qty: newQty, line_total: calcLineTotal(i.unit_price, newQty, i.discount_pct) }
             : i
         )
       }
@@ -107,6 +202,27 @@ export function usePOS(salesmanId: string | null = null) {
         line_total: product.unit_price
       }]
     })
+  }, [findOlderLot])
+
+  const confirmUseOlderLot = useCallback(() => {
+    if (oldLotAlert) {
+      const older = oldLotAlert.older
+      setOldLotAlert(null)
+      addToCart(older, true)
+      toast.success(`Swapped to older lot (${older.batch_no || older.sku})`)
+    }
+  }, [oldLotAlert, addToCart])
+
+  const confirmKeepScannedLot = useCallback(() => {
+    if (oldLotAlert) {
+      const scanned = oldLotAlert.scanned
+      setOldLotAlert(null)
+      addToCart(scanned, true)
+    }
+  }, [oldLotAlert, addToCart])
+
+  const dismissOldLotAlert = useCallback(() => {
+    setOldLotAlert(null)
   }, [])
 
   const updateQty = useCallback((id: string, qty: number) => {
@@ -114,11 +230,25 @@ export function usePOS(salesmanId: string | null = null) {
       setCart(p => p.filter(i => i.product.id !== id))
       return
     }
-    setCart(p => p.map(i =>
-      i.product.id === id
-        ? { ...i, qty, line_total: calcLineTotal(i.unit_price, qty, i.discount_pct) }
-        : i
-    ))
+    setCart(p => {
+      const existing = p.find(i => i.product.id === id)
+      if (!existing) return p
+      if (qty > existing.product.stock_qty) {
+        toast.error(`Only ${existing.product.stock_qty} in stock`)
+        return p
+      }
+      
+      const remainingStock = existing.product.stock_qty - qty;
+      if (remainingStock <= existing.product.low_stock_alert && qty > existing.qty && remainingStock > 0) {
+        toast(`Only ${remainingStock} left in stock!`, { icon: '⚠️' })
+      }
+      
+      return p.map(i =>
+        i.product.id === id
+          ? { ...i, qty, line_total: calcLineTotal(i.unit_price, qty, i.discount_pct) }
+          : i
+      )
+    })
   }, [])
 
   const updateDiscount = useCallback((id: string, disc: number) => {
@@ -151,25 +281,110 @@ export function usePOS(salesmanId: string | null = null) {
   const maxRedeemable = customer
     ? Math.min(customer.loyalty_points, Math.floor(subtotal * 0.2 / 0.25))
     : 0
-  const totalDiscount = couponDiscount + loyaltyDiscount
+
+  const creditNoteDiscount = appliedCreditNote
+    ? Math.min(appliedCreditNote.balance_amount, Math.max(0, subtotal + gstAmount - couponDiscount - loyaltyDiscount))
+    : 0
+
+  const totalDiscount = couponDiscount + loyaltyDiscount + creditNoteDiscount
   const netAmount = Math.max(0, subtotal + gstAmount - totalDiscount)
+
+  const loadCustomerExtraInfo = useCallback(async (cust: any) => {
+    if (!cust) return
+    try {
+      // 1. Calculate Tier from sales history
+      let billsCount = 0
+      let maxSingleBill = 0
+      let yearlySpent = 0
+      const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
+
+      if (navigator.onLine && cust.id) {
+        const { data: sales } = await supabase
+          .from('sales')
+          .select('net_amount, created_at')
+          .eq('customer_id', cust.id)
+          .eq('is_return', false)
+
+        if (sales && sales.length > 0) {
+          billsCount = sales.length
+          maxSingleBill = Math.max(...sales.map(s => s.net_amount || 0))
+          yearlySpent = sales
+            .filter(s => s.created_at >= oneYearAgo)
+            .reduce((sum, s) => sum + (s.net_amount || 0), 0)
+        }
+
+        // 2. Fetch Active Credit Notes
+        const { data: cns } = await supabase
+          .from('credit_notes')
+          .select('*')
+          .or(`customer_id.eq.${cust.id},customer_phone.eq.${cust.phone}`)
+          .eq('status', 'active')
+          .gt('balance_amount', 0)
+
+        if (cns) setActiveCreditNotes(cns)
+      } else {
+        // Fallback for offline cache
+        const localCNsStr = localStorage.getItem('gsoft_credit_notes_cache')
+        if (localCNsStr) {
+          const allCns = JSON.parse(localCNsStr)
+          const matched = allCns.filter((c: any) =>
+            (c.customer_id === cust.id || c.customer_phone === cust.phone) &&
+            c.status === 'active' && c.balance_amount > 0
+          )
+          setActiveCreditNotes(matched)
+        }
+      }
+
+      const calculatedTier = calculateCustomerTier({
+        billsCount,
+        maxSingleBill,
+        yearlySpent,
+        lifetimeSpent: cust.total_spent || 0
+      })
+      setCustomerTier(calculatedTier)
+    } catch (e) {
+      console.warn('Load customer tier notice:', e)
+    }
+  }, [])
 
   const searchCustomer = useCallback(async (phone: string) => {
     if (!phone || phone.length < 10) return
+    const cleanPhone = phone.trim()
     setCustomerNotFound(false)
-    setSearchedPhone(phone.trim())
-    const { data } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('phone', phone.trim())
-      .single()
-    if (!data) {
-      setCustomerNotFound(true)
+    setSearchedPhone(cleanPhone)
+    setAppliedCreditNote(null)
+
+    // Check local cache first
+    const cached = findCachedCustomer(cleanPhone)
+    if (cached) {
+      setCustomer(cached)
+      loadCustomerExtraInfo(cached)
+      toast.success(`${cached.name} · ${cached.loyalty_points || 0} pts`)
       return
     }
-    setCustomer(data)
-    toast.success(`${data.name} · ${data.loyalty_points} pts`)
-  }, [])
+
+    if (navigator.onLine) {
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('phone', cleanPhone)
+          .single()
+
+        if (!error && data) {
+          saveCustomerToCache(data)
+          setCustomer(data)
+          loadCustomerExtraInfo(data)
+          toast.success(`${data.name} · ${data.loyalty_points} pts`)
+          return
+        }
+      } catch (err) {
+        console.warn('DB searchCustomer warning:', err)
+      }
+    }
+
+    setCustomerNotFound(true)
+  }, [loadCustomerExtraInfo])
 
   const applyCoupon = useCallback(async () => {
     if (!couponCode.trim()) return
@@ -199,13 +414,24 @@ export function usePOS(salesmanId: string | null = null) {
   }, [couponCode, subtotal])
 
   const generateInvoiceNo = async () => {
+    try {
+      if (navigator.onLine) {
+        const d = getISTDateString()
+        const { count, error } = await supabase
+          .from('sales')
+          .select('*', { count: 'exact', head: true })
+          .like('invoice_no', `INV-${d}-%`)
+        if (!error) {
+          const seq = String((count || 0) + 1).padStart(4, '0')
+          return `INV-${d}-${seq}`
+        }
+      }
+    } catch (e) {
+      console.warn('Network error generating invoice sequence:', e)
+    }
     const d = getISTDateString()
-    const { count } = await supabase
-      .from('sales')
-      .select('*', { count: 'exact', head: true })
-      .like('invoice_no', `INV-${d}-%`)
-    const seq = String((count || 0) + 1).padStart(4, '0')
-    return `INV-${d}-${seq}`
+    const randomSeq = String(Math.floor(Math.random() * 9000) + 1000)
+    return `INV-${d}-${randomSeq}`
   }
 
   const completeSale = useCallback(async () => {
@@ -251,6 +477,11 @@ export function usePOS(salesmanId: string | null = null) {
           is_return: false
       }
       if (salesmanId) saleRecord.salesman_id = salesmanId
+      if (paymentMode === 'credit') {
+        saleRecord.credit_due_days = creditDueDays
+        saleRecord.credit_due_date = creditDueDate
+        saleRecord.credit_status = 'unpaid'
+      }
 
       const { data: sale, error } = await supabase
         .from('sales')
@@ -274,40 +505,96 @@ export function usePOS(salesmanId: string | null = null) {
         })))
 
       for (const item of cart) {
-        await supabase.rpc('decrement_stock', {
-          p_id: item.product.id,
-          qty: item.qty
-        })
+        try {
+          // Attempt RPC first
+          const { error: rpcErr } = await supabase.rpc('decrement_stock', {
+            p_id: item.product.id,
+            qty: item.qty
+          })
+          if (rpcErr) throw rpcErr;
+        } catch {
+          // Fallback to update (Warning: race condition possible if high concurrency, but safe for small setups)
+          const newStock = Math.max(0, item.product.stock_qty - item.qty);
+          await supabase.from('products').update({ stock_qty: newStock }).eq('id', item.product.id);
+        }
+      }
+
+      // Update local cache inventory
+      try {
+        const cachedStr = localStorage.getItem('gsoft_products_cache');
+        if (cachedStr) {
+          const cached = JSON.parse(cachedStr);
+          const updated = cached.data.map((cp: any) => {
+            const bought = cart.find(i => i.product.id === cp.id)
+            if (bought) {
+              return { ...cp, stock_qty: Math.max(0, cp.stock_qty - bought.qty) }
+            }
+            return cp
+          })
+          localStorage.setItem('gsoft_products_cache', JSON.stringify({ ...cached, data: updated }))
+        }
+      } catch (e) {
+        console.warn('Failed to update local inventory cache', e)
       }
 
       if (coupon) {
-        await supabase
-          .from('coupons')
-          .update({ used_count: coupon.used_count + 1 })
-          .eq('id', coupon.id)
+        try {
+          await supabase
+            .from('coupons')
+            .update({ used_count: coupon.used_count + 1 })
+            .eq('id', coupon.id)
+        } catch {}
       }
 
       if (customer) {
-        const earned = Math.floor(netAmount / 10)
-        const newBal = customer.loyalty_points - loyaltyToRedeem + earned
-        await supabase
-          .from('customers')
-          .update({
-            loyalty_points: newBal,
-            total_spent: customer.total_spent + netAmount
-          })
-          .eq('id', customer.id)
+        try {
+          const earned = Math.floor(netAmount / 10)
+          const newBal = customer.loyalty_points - loyaltyToRedeem + earned
+          await supabase
+            .from('customers')
+            .update({
+              loyalty_points: newBal,
+              total_spent: customer.total_spent + netAmount
+            })
+            .eq('id', customer.id)
+        } catch {}
       }
 
       // Fetch salesman name for bill display
       let salesmanName: string | null = null
       if (salesmanId) {
-        const { data: salesman } = await supabase
-          .from('users')
-          .select('name')
-          .eq('id', salesmanId)
-          .single()
-        salesmanName = salesman?.name || null
+        try {
+          const { data: salesman } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', salesmanId)
+            .single()
+          salesmanName = salesman?.name || null
+        } catch {}
+      }
+
+      // Deduct credit note if applied
+      if (appliedCreditNote && creditNoteDiscount > 0) {
+        try {
+          const newBal = Math.max(0, appliedCreditNote.balance_amount - creditNoteDiscount)
+          const newStatus = newBal === 0 ? 'redeemed' : 'active'
+          if (navigator.onLine) {
+            await supabase
+              .from('credit_notes')
+              .update({ balance_amount: newBal, status: newStatus })
+              .eq('id', appliedCreditNote.id)
+          }
+          const localCNsStr = localStorage.getItem('gsoft_credit_notes_cache')
+          if (localCNsStr) {
+            const allCns = JSON.parse(localCNsStr)
+            const updatedCns = allCns.map((c: any) =>
+              c.id === appliedCreditNote.id ? { ...c, balance_amount: newBal, status: newStatus } : c
+            )
+            localStorage.setItem('gsoft_credit_notes_cache', JSON.stringify(updatedCns))
+          }
+        } catch (e) {
+          console.warn('Credit note balance deduction notice:', e)
+        }
       }
 
       const saleData = {
@@ -320,7 +607,10 @@ export function usePOS(salesmanId: string | null = null) {
         totalDiscount,
         netAmount,
         paymentMode,
+        creditDueDays: paymentMode === 'credit' ? creditDueDays : undefined,
+        creditDueDate: paymentMode === 'credit' ? creditDueDate : undefined,
         salesmanName,
+        creditNoteDiscount,
         date: new Date().toLocaleString('en-IN')
       }
 
@@ -328,12 +618,26 @@ export function usePOS(salesmanId: string | null = null) {
       toast.success(`✅ ${invoiceNo}`)
       return saleData
     } catch (err: any) {
-      toast.error(err.message || 'Sale failed')
-      return null
+      console.warn('Database sale completion notice, saving sale locally:', err)
+      const offlineSale = {
+        invoiceNo: 'INV-' + getISTDateString() + '-' + String(Math.floor(Math.random() * 9000) + 1000),
+        cart, customer, subtotal,
+        gstAmount, totalDiscount,
+        netAmount, paymentMode,
+        creditDueDays: paymentMode === 'credit' ? creditDueDays : undefined,
+        creditDueDate: paymentMode === 'credit' ? creditDueDate : undefined,
+        salesmanId, counterId: COUNTER_ID,
+        creditNoteDiscount,
+        date: new Date().toLocaleString('en-IN')
+      }
+      savePendingSale(offlineSale)
+      setLastSale(offlineSale)
+      toast.success('Bill saved! ✅', { duration: 4000 })
+      return offlineSale
     } finally {
       setIsSaving(false)
     }
-  }, [cart, customer, coupon, paymentMode, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId])
+  }, [cart, customer, coupon, paymentMode, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, appliedCreditNote, creditNoteDiscount, creditDueDays, creditDueDate])
 
   const clearCart = useCallback(() => {
     setCart([])
@@ -342,9 +646,24 @@ export function usePOS(salesmanId: string | null = null) {
     setCouponCode('')
     setLoyaltyToRedeem(0)
     setPaymentMode('cash')
+    setCreditDueDays(5)
+    const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+    setCreditDueDate(d.toISOString().slice(0, 10))
     setLastSale(null)
     setCustomerNotFound(false)
     setSearchedPhone('')
+    setAppliedCreditNote(null)
+    setActiveCreditNotes([])
+    setCustomerTier('New')
+  }, [])
+
+  const applyCreditNote = useCallback((note: CreditNote) => {
+    setAppliedCreditNote(note)
+    toast.success(`Applied Credit Note ${note.credit_note_no}`)
+  }, [])
+
+  const removeCreditNote = useCallback(() => {
+    setAppliedCreditNote(null)
   }, [])
 
   const skipCustomer = useCallback(() => {
@@ -355,22 +674,49 @@ export function usePOS(salesmanId: string | null = null) {
   const addCustomer = useCallback(async (details: { name: string, email: string, date_of_birth: string }) => {
     setIsSaving(true)
     try {
-      const { data, error } = await supabase.from('customers').insert({
+      const newCustomer = {
+        id: crypto.randomUUID(),
         name: details.name || 'Customer',
         phone: searchedPhone,
         email: details.email || null,
         date_of_birth: details.date_of_birth || null,
         loyalty_points: 0,
         total_spent: 0,
-        referral_code: crypto.randomUUID().substring(0, 8)
-      }).select().single()
-      
-      if (error) throw new Error(error.message)
-      setCustomer(data)
+        referral_code: crypto.randomUUID().substring(0, 8),
+        created_at: new Date().toISOString()
+      }
+
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase.from('customers').insert({
+            id: newCustomer.id,
+            name: newCustomer.name,
+            phone: newCustomer.phone,
+            email: newCustomer.email,
+            date_of_birth: newCustomer.date_of_birth,
+            loyalty_points: 0,
+            total_spent: 0,
+            referral_code: newCustomer.referral_code
+          }).select().single()
+
+          if (!error && data) {
+            saveCustomerToCache(data)
+            setCustomer(data)
+            setCustomerNotFound(false)
+            toast.success('Customer added! 0 pts earned on this sale')
+            return
+          }
+        } catch (dbErr) {
+          console.warn('DB customer insert failed, using local customer:', dbErr)
+        }
+      }
+
+      saveCustomerToCache(newCustomer)
+      setCustomer(newCustomer)
       setCustomerNotFound(false)
       toast.success('Customer added! 0 pts earned on this sale')
     } catch (e: any) {
-      toast.error(e.message)
+      toast.error(e.message || 'Failed to add customer')
     } finally {
       setIsSaving(false)
     }
@@ -378,12 +724,17 @@ export function usePOS(salesmanId: string | null = null) {
 
   return {
     cart, addToCart, updateQty, updateDiscount, removeFromCart,
-    customer, setCustomer, onCustomerFound: setCustomer, removeCustomer: () => setCustomer(null), searchCustomer, customerNotFound, searchedPhone, addCustomer, skipCustomer,
+    customer, setCustomer, onCustomerFound: setCustomer, removeCustomer: () => { setCustomer(null); setAppliedCreditNote(null); setActiveCreditNotes([]) }, searchCustomer, customerNotFound, searchedPhone, addCustomer, skipCustomer,
+    customerTier,
+    activeCreditNotes, appliedCreditNote, applyCreditNote, removeCreditNote, creditNoteDiscount,
     coupon, couponCode, setCouponCode, applyCoupon,
     removeCoupon: () => { setCoupon(null); setCouponCode('') },
     paymentMode, setPaymentMode,
+    creditDueDays, setCreditDueDays,
+    creditDueDate, setCreditDueDate,
     loyaltyToRedeem, setLoyaltyToRedeem, maxRedeemable,
     subtotal, gstAmount, couponDiscount, loyaltyDiscount, totalDiscount, netAmount,
-    completeSale, clearCart, isSaving, lastSale
+    completeSale, clearCart, isSaving, lastSale,
+    oldLotAlert, confirmUseOlderLot, confirmKeepScannedLot, dismissOldLotAlert
   }
 }

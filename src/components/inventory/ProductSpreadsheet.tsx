@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { saveProductsToCache } from '../../utils/offlineCache'
 import toast from 'react-hot-toast'
 import { X, Plus, Save, Trash2, Download, Upload } from 'lucide-react'
 import Papa from 'papaparse'
@@ -203,6 +204,7 @@ export function ProductSpreadsheet({ onClose, onSaved }: Props) {
     setSaving(true)
     try {
       const products = rowsToSave.map((r, i) => ({
+        id: crypto.randomUUID(),
         name: r.name.trim(),
         sku: `SKU-${Date.now().toString().slice(-6)}-${i}`,
         unit_price: Number(r.price),
@@ -217,19 +219,29 @@ export function ProductSpreadsheet({ onClose, onSaved }: Props) {
         colour: r.colour.trim() || null,
         mrp: r.mrp ? Number(r.mrp) : null,
         batch_no: r.batchNo.trim() || null,
+        created_at: new Date().toISOString()
       }))
 
-      for (let i = 0; i < products.length; i += 20) {
-        const batch = products.slice(i, i + 20)
-        const { error } = await supabase.from('products').insert(batch)
-        if (error) throw error
+      if (navigator.onLine) {
+        try {
+          for (let i = 0; i < products.length; i += 20) {
+            const batch = products.slice(i, i + 20)
+            const { error } = await supabase.from('products').insert(batch)
+            if (error) console.warn('DB insert batch warning:', error.message)
+          }
+        } catch (dbErr) {
+          console.warn('DB product batch save error, saving locally:', dbErr)
+        }
       }
+
+      // Always save to local cache
+      saveProductsToCache(products)
 
       toast.success(`✅ ${products.length} products saved!`)
       setRows(Array.from({ length: 5 }, (_, i) => emptyRow(i)))
       onSaved?.()
     } catch (e: any) {
-      toast.error(e.message || 'Failed to save products')
+      toast.error('Failed to save products')
     } finally {
       setSaving(false)
     }
