@@ -88,6 +88,7 @@ export function usePurchaseEntry() {
 
   // Items
   const [items, setItems] = useState<PurchaseItem[]>([EMPTY_ITEM()])
+  const [listOnWebsite, setListOnWebsite] = useState(true)
 
   // Loading / success
   const [loading, setLoading] = useState(false)
@@ -118,8 +119,7 @@ export function usePurchaseEntry() {
       const { data } = await supabase
         .from('suppliers')
         .select('*')
-        .or(`name.ilike.%${supplierQuery}%,business_name.ilike.%${supplierQuery}%,phone.ilike.%${supplierQuery}%`)
-        .eq('is_active', true)
+        .or(`name.ilike.%${supplierQuery}%,phone.ilike.%${supplierQuery}%,gstin.ilike.%${supplierQuery}%`)
         .limit(8)
       setSupplierResults(data || [])
       setShowSupplierDropdown(true)
@@ -137,7 +137,7 @@ export function usePurchaseEntry() {
     try {
       let q = supabase
         .from('purchase_bills')
-        .select(`*, suppliers(name,business_name,phone), purchase_items(id)`)
+        .select(`*, suppliers(name,phone,gstin), purchase_items(id)`)
         .order('created_at', { ascending: false })
         .limit(100)
 
@@ -239,56 +239,47 @@ export function usePurchaseEntry() {
 
   // ── Save new supplier ─────────────────────────────────────────────────────
   const saveNewSupplier = async () => {
-    if (!newSupplier.name.trim()) { toast.error('Supplier name required'); return }
-    const supplierRecord: Supplier = {
-      id: crypto.randomUUID(),
-      name: newSupplier.name.trim(),
-      business_name: newSupplier.business_name.trim() || newSupplier.name.trim(),
-      phone: newSupplier.phone.trim() || '',
-      gstin: newSupplier.gstin.trim() || '',
-      address: newSupplier.address.trim() || '',
-      state: newSupplier.state || 'Gujarat',
-      city: newSupplier.city.trim() || '',
-      email: newSupplier.email.trim() || '',
-      outstanding_balance: 0,
-      total_purchased: 0,
-      is_active: true
+    const rawName = newSupplier.name.trim()
+    const rawBusiness = newSupplier.business_name.trim()
+    if (!rawName && !rawBusiness) { toast.error('Supplier name required'); return }
+    
+    const displayName = rawBusiness && rawName && rawBusiness !== rawName
+      ? `${rawBusiness} (${rawName})`
+      : (rawBusiness || rawName)
+
+    const addressParts = [
+      newSupplier.address.trim(),
+      newSupplier.city.trim(),
+      newSupplier.state.trim()
+    ].filter(Boolean)
+
+    const payload = {
+      name: displayName,
+      phone: newSupplier.phone.trim() || null,
+      gstin: newSupplier.gstin.trim() || null,
+      address: addressParts.join(', ') || null,
+      email: newSupplier.email.trim() || null,
     }
 
-    if (navigator.onLine) {
-      try {
-        const { data, error } = await supabase
-          .from('suppliers')
-          .insert({
-            id: supplierRecord.id,
-            name: supplierRecord.name,
-            business_name: supplierRecord.business_name,
-            phone: supplierRecord.phone || null,
-            gstin: supplierRecord.gstin || null,
-            address: supplierRecord.address || null,
-            state: supplierRecord.state,
-            city: supplierRecord.city || null,
-            email: supplierRecord.email || null,
-          })
-          .select()
-          .single()
+    try {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .insert(payload)
+        .select()
+        .single()
 
-        if (!error && data) {
-          setSupplier(data)
-          setShowNewSupplierForm(false)
-          setNewSupplier({ name: '', business_name: '', phone: '', gstin: '', address: '', state: 'Gujarat', city: '', email: '' })
-          toast.success('Supplier saved!')
-          return
-        }
-      } catch (err) {
-        console.warn('DB supplier save warning:', err)
+      if (error) throw error
+
+      if (data) {
+        setSupplier(data)
+        setShowNewSupplierForm(false)
+        setNewSupplier({ name: '', business_name: '', phone: '', gstin: '', address: '', state: 'Gujarat', city: '', email: '' })
+        toast.success('Supplier saved!')
       }
+    } catch (err: any) {
+      console.error('Error saving supplier:', err)
+      toast.error('Failed to save supplier: ' + (err.message || 'Unknown error'))
     }
-
-    setSupplier(supplierRecord)
-    setShowNewSupplierForm(false)
-    setNewSupplier({ name: '', business_name: '', phone: '', gstin: '', address: '', state: 'Gujarat', city: '', email: '' })
-    toast.success('Supplier saved!')
   }
 
   // ── Save purchase ─────────────────────────────────────────────────────────
@@ -305,6 +296,43 @@ export function usePurchaseEntry() {
 
     setLoading(true)
     try {
+      // 1. Resolve valid supplier_id in database to avoid foreign key violations
+      let finalSupplierId: string | null = null
+      if (supplier) {
+        if (supplier.id) {
+          const { data: checkSup } = await supabase
+            .from('suppliers')
+            .select('id')
+            .eq('id', supplier.id)
+            .maybeSingle()
+
+          if (checkSup?.id) {
+            finalSupplierId = checkSup.id
+          }
+        }
+
+        // If supplier was not found in DB by id, try creating it or matching by phone/name
+        if (!finalSupplierId && (supplier.name || supplier.business_name)) {
+          const supName = supplier.name || supplier.business_name
+          const { data: createdSup } = await supabase
+            .from('suppliers')
+            .insert({
+              name: supName,
+              phone: supplier.phone || null,
+              gstin: supplier.gstin || null,
+              address: supplier.address || null,
+              email: supplier.email || null,
+            })
+            .select()
+            .single()
+
+          if (createdSup?.id) {
+            finalSupplierId = createdSup.id
+            setSupplier(createdSup)
+          }
+        }
+      }
+
       const purchaseNo = 'PO-' +
         new Date().toISOString().slice(0, 10).replace(/-/g, '') +
         '-' + String(counter).padStart(4, '0')
@@ -313,7 +341,7 @@ export function usePurchaseEntry() {
         .from('purchase_bills')
         .insert({
           purchase_no: purchaseNo,
-          supplier_id: supplier?.id || null,
+          supplier_id: finalSupplierId,
           supplier_invoice_no: supplierInvoiceNo || null,
           supplier_invoice_date: supplierInvoiceDate || null,
           subtotal,
@@ -406,6 +434,8 @@ export function usePurchaseEntry() {
               stock_qty: qty,
               gst_rate: item.gst_rate,
               is_active: true,
+              is_online: listOnWebsite,
+              online_price: unitPrice,
               barcode: generatedBarcode,
             })
             .select()
@@ -447,20 +477,26 @@ export function usePurchaseEntry() {
       }
 
       // Update supplier balance if credit
-      if (supplier?.id && paymentStatus === 'pending') {
-        const { data: sup } = await supabase
-          .from('suppliers')
-          .select('outstanding_balance,total_purchased')
-          .eq('id', supplier.id)
-          .single()
+      if (finalSupplierId && paymentStatus === 'pending') {
+        try {
+          const { data: sup } = await supabase
+            .from('suppliers')
+            .select('*')
+            .eq('id', finalSupplierId)
+            .single()
 
-        await supabase
-          .from('suppliers')
-          .update({
-            outstanding_balance: (sup?.outstanding_balance || 0) + netAmount,
-            total_purchased: (sup?.total_purchased || 0) + netAmount,
-          })
-          .eq('id', supplier.id)
+          if (sup && 'outstanding_balance' in sup) {
+            await supabase
+              .from('suppliers')
+              .update({
+                outstanding_balance: (sup?.outstanding_balance || 0) + netAmount,
+                total_purchased: (sup?.total_purchased || 0) + netAmount,
+              })
+              .eq('id', finalSupplierId)
+          }
+        } catch (supErr) {
+          console.warn('Supplier balance update notice:', supErr)
+        }
       }
 
       const newCounter = counter + 1
@@ -504,5 +540,6 @@ export function usePurchaseEntry() {
     purchaseComplete,
     history, historyLoading, historyFilter, setHistoryFilter, fetchHistory,
     counter,
+    listOnWebsite, setListOnWebsite,
   }
 }

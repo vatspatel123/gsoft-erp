@@ -61,6 +61,14 @@ const SECTIONS: NavSection[] = [
     ]
   },
   {
+    title: 'Online Store',
+    items: [
+      { to: '/online-listings', label: 'Website Listings', icon: Store, badge: 'Sync', badgeColor: '#9333ea' },
+      { to: '/online-orders', label: 'Online Orders', icon: ShoppingBag, badge: 'Live', badgeColor: '#10b981' },
+      { to: '/website-settings', label: 'Website CMS', icon: Settings },
+    ]
+  },
+  {
     title: 'Finance',
     items: [
       { to: '/accounting', label: 'Accounting', icon: BookOpen },

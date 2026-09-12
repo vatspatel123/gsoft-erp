@@ -48,6 +48,14 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
   const [batchNo, setBatchNo] = useState(product?.batch_no || '')
   const [hsnCode, setHsnCode] = useState(product?.hsn_code || '')
 
+  // Online Store fields
+  const [isOnline, setIsOnline] = useState(product?.is_online ?? true)
+  const [onlinePrice, setOnlinePrice] = useState(product?.online_price?.toString() || product?.unit_price?.toString() || '')
+  const [isFeatured, setIsFeatured] = useState(product?.is_featured ?? false)
+  const [isBestseller, setIsBestseller] = useState(product?.is_bestseller ?? false)
+  const [onlineDescription, setOnlineDescription] = useState(product?.online_description || '')
+  const [photosInput, setPhotosInput] = useState(product?.photos?.join(', ') || '')
+
   // If editing and size is not in standard list, pre-fill customSize
   useEffect(() => {
     if (product?.size && !SIZES.slice(0, -1).includes(product.size)) {
@@ -91,6 +99,10 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       sku.trim().replace(/\D/g, '').padStart(8, '0') ||
       Date.now().toString().slice(-8)
 
+    const photoList = photosInput
+      ? photosInput.split(',').map(s => s.trim()).filter(Boolean)
+      : photoUrl ? [photoUrl] : []
+
     const data: any = {
       name: name.trim(),
       sku: sku.trim(),
@@ -103,7 +115,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       low_stock_alert: parseInt(lowStockAlert) || 5,
       brand: brand.trim() || null,
       is_active: isActive,
-      photo_url: photoUrl || null,
+      photo_url: photoUrl || photoList[0] || null,
       design_no: designNo.trim() || null,
       pcode: pcode.trim() || null,
       size: finalSize.trim() || null,
@@ -111,6 +123,13 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       mrp: mrp ? parseFloat(mrp) : null,
       batch_no: batchNo.trim() || null,
       hsn_code: hsnCode.trim() || null,
+      is_online: isOnline,
+      online_price: onlinePrice ? parseFloat(onlinePrice) : parseFloat(unitPrice),
+      is_featured: isFeatured,
+      is_bestseller: isBestseller,
+      online_description: onlineDescription.trim() || null,
+      photos: photoList,
+      primary_photo_url: photoUrl || photoList[0] || null
     }
 
     const ok = await onSave(data, product?.id)
@@ -432,6 +451,89 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
               <label style={labelStyle}>Description</label>
               <input style={inputStyle} value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional" />
             </div>
+          </div>
+
+          {/* Online Store Listing Section */}
+          <div style={{ background: '#f5f3ff', border: '1px solid #e9d5ff', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                🌐 Website Store Listing
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={isOnline}
+                  onChange={e => setIsOnline(e.target.checked)}
+                  style={{ accentColor: '#7c3aed', width: '15px', height: '15px' }}
+                />
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#7c3aed' }}>
+                  {isOnline ? 'Active on Website' : 'Hidden from Website'}
+                </span>
+              </label>
+            </div>
+
+            {isOnline && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={gridTwoStyle}>
+                  <div>
+                    <label style={labelStyle}>Online Price ₹</label>
+                    <input
+                      style={inputStyle}
+                      type="number"
+                      value={onlinePrice}
+                      onChange={e => setOnlinePrice(e.target.value)}
+                      placeholder={unitPrice || '0.00'}
+                    />
+                    <div style={helperStyle}>Leave empty to use POS price (₹{unitPrice || '0'})</div>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Badges / Tags</label>
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#4b5563', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={isFeatured}
+                          onChange={e => setIsFeatured(e.target.checked)}
+                          style={{ accentColor: '#7c3aed' }}
+                        />
+                        Featured ⭐
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#4b5563', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={isBestseller}
+                          onChange={e => setIsBestseller(e.target.checked)}
+                          style={{ accentColor: '#7c3aed' }}
+                        />
+                        Bestseller 🔥
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Product Photos (URLs / Links)</label>
+                  <input
+                    style={inputStyle}
+                    value={photosInput}
+                    onChange={e => setPhotosInput(e.target.value)}
+                    placeholder="https://image1.jpg, https://image2.jpg (comma separated)"
+                  />
+                  <div style={helperStyle}>Multiple HD image URLs separated by commas for website gallery</div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Website Marketing Description</label>
+                  <textarea
+                    rows={2}
+                    style={{ ...inputStyle, resize: 'vertical' }}
+                    value={onlineDescription}
+                    onChange={e => setOnlineDescription(e.target.value)}
+                    placeholder="Fabric details, wash care, festive occasions styling tips..."
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Status Toggle */}

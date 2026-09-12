@@ -26,6 +26,9 @@ import { WholesalePage } from './pages/WholesalePage'
 import { PurchaseEntryPage } from './pages/PurchaseEntryPage'
 import { PurchaseReturnPage } from './pages/PurchaseReturnPage'
 import { ExpensesPage } from './pages/ExpensesPage'
+import { OnlineListingsPage } from './pages/OnlineListingsPage'
+import { OnlineOrdersPage } from './pages/OnlineOrdersPage'
+import { WebsiteSettingsPage } from './pages/WebsiteSettingsPage'
 import type { Session } from '@supabase/supabase-js'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { SubscriptionLockedScreen } from './components/auth/SubscriptionLockedScreen'
@@ -231,6 +234,9 @@ function AppContent() {
         <Route path="/purchase-entry" element={<PurchaseEntryPage />} />
         <Route path="/purchase-returns" element={<PurchaseReturnPage />} />
         <Route path="/expenses" element={<ExpensesPage />} />
+        <Route path="/online-listings" element={<OnlineListingsPage />} />
+        <Route path="/online-orders" element={<OnlineOrdersPage />} />
+        <Route path="/website-settings" element={<WebsiteSettingsPage />} />
       </Routes>
     </>
   )

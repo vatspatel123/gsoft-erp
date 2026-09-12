@@ -931,12 +931,23 @@ export function PurchaseEntryPage() {
                   ))}
                 </div>
 
-                {/* Notes */}
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={labelStyle}>Notes</label>
-                  <textarea value={hook.notes} onChange={e => hook.setNotes(e.target.value)}
-                    rows={2} placeholder="Optional notes about this purchase..."
-                    style={{ ...inputStyle, resize: 'vertical' }} />
+                {/* Website Listing Toggle */}
+                <div style={{ background: '#f5f3ff', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '10px 12px', marginBottom: '16px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '15px' }}>🌐</span>
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#6b21a8' }}>Also List on Website Store</div>
+                        <div style={{ fontSize: '10px', color: '#9333ea' }}>Auto-publish new items to online catalog</div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={hook.listOnWebsite}
+                      onChange={e => hook.setListOnWebsite(e.target.checked)}
+                      style={{ accentColor: '#9333ea', width: '16px', height: '16px' }}
+                    />
+                  </label>
                 </div>
 
                 {/* Save button */}
