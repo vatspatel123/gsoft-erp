@@ -1,3 +1,9 @@
+// The barcode library is bundled, not fetched from a CDN at print time: a shop
+// with no internet would otherwise print labels with an empty space where the
+// barcode should be, and nothing would say why.
+import JSBARCODE_SRC from 'jsbarcode/dist/JsBarcode.all.min.js?raw'
+
+import { printHTML } from './printHTML'
 export interface LabelData {
   shopName: string
   productName: string
@@ -97,24 +103,39 @@ export function printBarcodeLabels(
     }).join('')
   }
 
-  // Page size for @page CSS
-  const pageSize = is58mm ? '58mm auto' : format === '38x38' ? '78mm auto' : '105mm auto'
+  // Stationery size in mm. `size` needs TWO lengths — "105mm auto" is invalid
+  // CSS and is dropped silently, which sent one label onto a full sheet of
+  // paper and left it sitting in the bottom-left corner.
+  const labelWmm = is58mm ? 58 : format === '38x38' ? 38 : 50
+  const labelHmm = is58mm ? 32 : format === '38x38' ? 38 : format === '50x25' ? 25 : 30
+  const gapMm = is58mm ? 0 : 1
+  // one printed page = one ROW of labels, so printing a single label advances
+  // the roll by one row instead of ejecting a whole sheet
+  const pageWmm = is58mm ? labelWmm : labelsPerRow * labelWmm + (labelsPerRow - 1) * gapMm
+  const pageHmm = labelHmm
 
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>Barcode Labels</title>
-  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script>${typeof JSBARCODE_SRC === 'string' && JSBARCODE_SRC.length > 1000
+    ? JSBARCODE_SRC
+    : ''}</script>
+  ${typeof JSBARCODE_SRC === 'string' && JSBARCODE_SRC.length > 1000
+    ? ''
+    : '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>'}
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; background: white; }
-    .page { display: flex; flex-wrap: wrap; padding: ${is58mm ? '0' : '2mm'}; gap: 1mm; ${is58mm ? 'flex-direction: column; align-items: center;' : ''} }
-    .label-row { margin-bottom: 0; }
-    .label-pair { display: flex; gap: 1mm; margin-bottom: 1mm; }
+    /* No outer padding: labels must start hard against the top-left corner or
+       they drift onto the next label position on the roll. */
+    .page { display: flex; flex-wrap: wrap; padding: 0; gap: 0; ${is58mm ? 'flex-direction: column; align-items: center;' : ''} }
+    .label-row { margin: 0; }
+    .label-pair { display: flex; gap: ${gapMm}mm; margin: 0; }
     .label {
-      width: ${labelWidth}px;
-      height: ${labelHeight}px;
+      width: ${labelWmm}mm;
+      height: ${labelHmm}mm;
       border: ${is58mm ? 'none' : '0.5px solid #ccc'};
       padding: ${is58mm ? '3px 6px' : '2px 3px'};
       display: flex;
@@ -134,7 +155,9 @@ export function printBarcodeLabels(
     .batch-row { display: flex; justify-content: space-between; width: 100%; font-size: 6px; color: #555; padding: 0 2px; }
     @media print {
       body { margin: 0; padding: 0; }
-      @page { margin: ${is58mm ? '0' : '2mm'}; size: ${pageSize}; }
+      /* Width and height are injected at print time from the measured content,
+         so this only clears the margin. */
+      @page { margin: 0; }
       .label { border: none !important; page-break-inside: avoid; }
     }
   </style>
@@ -169,9 +192,6 @@ export function printBarcodeLabels(
 </body>
 </html>`
 
-  const win = window.open('', '_blank', 'width=900,height=700')
-  if (win) {
-    win.document.write(html)
-    win.document.close()
-  }
+  // Longer settle so JsBarcode has drawn every SVG before printing.
+  printHTML(html, { target: 'label', widthMm: pageWmm, settleMs: 700 })
 }

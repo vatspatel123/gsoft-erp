@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Printer } from 'lucide-react'
 import { printBarcodeLabels } from '../../utils/printLabels'
+import toast from 'react-hot-toast'
 import { getSettings } from '../../utils/settings'
 
 interface Props {
@@ -47,6 +48,10 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
   const updateCopies = (id: string, val: number) =>
     setRows(prev => prev.map(r => r.id === id ? { ...r, copies: Math.max(1, val) } : r))
 
+  // One sheet of stickers is a normal print; hundreds is someone having held an
+  // arrow down. Ask rather than commit a roll of labels to it.
+  const MAX_LABELS = 200
+
   const handlePrint = () => {
     const toPrint: any[] = []
     includedRows.forEach(row => {
@@ -56,6 +61,10 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
       }
     })
     if (toPrint.length === 0) return
+    if (toPrint.length > MAX_LABELS) {
+      toast.error(`That is ${toPrint.length} labels. Reduce the copies to ${MAX_LABELS} or fewer.`)
+      return
+    }
     printBarcodeLabels(toPrint, 1, format)
     onClose()
   }

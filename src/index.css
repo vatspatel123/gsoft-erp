@@ -197,3 +197,20 @@ input, button, select, textarea {
   box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.08);
 }
 
+
+/* Number fields: no up/down spinners, portal-wide.
+   They are easy to nudge by accident on a touchscreen till, holding one runs a
+   quantity up fast, and they eat the right-hand side of a narrow field. The
+   field still takes typed numbers and keeps its min/max validation.
+   Two rules already did this for the POS cart and order summary; this replaces
+   the need to remember it on each new screen. */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

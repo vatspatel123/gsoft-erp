@@ -1,5 +1,7 @@
 import type { GstType } from '../hooks/useWholesale'
 import { getSettings } from './settings'
+import { sendWhatsApp } from './whatsapp'
+import { printHTML } from './printHTML'
 
 function numToWords(n: number): string {
   const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
@@ -235,12 +237,10 @@ export function printWholesaleBill(saleData: any) {
   </div>
 
 </div>
-<script>window.onload = function() { window.print(); }</script>
 </body>
 </html>`
 
-  const win = window.open('', '_blank', 'width=900,height=700')
-  if (win) { win.document.write(html); win.document.close() }
+  printHTML(html)
 }
 
 export function sendWholesaleWhatsApp(saleData: any) {
@@ -266,5 +266,5 @@ export function sendWholesaleWhatsApp(saleData: any) {
     `Payment: ${encodeURIComponent(saleData.paymentMode)}%0A%0A` +
     `_Thank you for your business!_`
 
-  window.open(`https://wa.me/${withCountry}?text=${msg}`, '_blank', 'width=600,height=700')
+  sendWhatsApp(withCountry, msg, { encoded: true, features: 'width=600,height=700' })
 }
