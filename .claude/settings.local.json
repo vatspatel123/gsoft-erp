@@ -10,7 +10,8 @@
       "Bash(ls -la /c/Projects/gsoft-erp/*.md)",
       "Bash(npx tsc:*)",
       "Bash(code \"C:\\\\Projects\\\\ai-trading-web\")",
-      "Bash(cmd /c \"code C:\\\\Projects\\\\ai-trading-web\")"
+      "Bash(cmd /c \"code C:\\\\Projects\\\\ai-trading-web\")",
+      "Bash(npm run *)"
     ]
   }
 }

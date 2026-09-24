@@ -1,7 +1,7 @@
 {
   "name": "gsoft-erp",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.7",
   "author": "GSoft Ahmedabad",
   "description": "Retail ERP Fashion Edition",
   "main": "electron/main.js",
@@ -11,15 +11,21 @@
     "build": "tsc && vite build",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "relay": "node --env-file=.env.local server/index.js",
+    "typecheck": "tsc -b --force",
+    "start": "concurrently -n relay,app -c magenta,cyan \"npm:relay\" \"npm:dev\"",
+    "release": "npm run build && electron-builder --win --x64 --publish always"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.3",
-    "better-sqlite3": "^12.8.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "electron-updater": "^6.8.3",
     "jsbarcode": "^3.12.3",
     "lucide-react": "^0.577.0",
     "papaparse": "^5.5.3",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
     "react": "^19.2.4",
     "react-barcode": "^1.6.1",
     "react-dom": "^19.2.4",
@@ -58,13 +64,18 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "node_modules/**/*",
       "package.json"
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -79,13 +90,19 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Retail ERP",
       "installerIcon": "electron/icon.ico",
-      "uninstallerIcon": "electron/icon.ico"
+      "uninstallerIcon": "electron/icon.ico",
+      "artifactName": "RetailERP-Setup-${version}.${ext}"
     },
     "publish": {
       "provider": "github",
-      "owner": "vatspatel123",
-      "repo": "gsoft-erp",
-      "private": true
+      "owner": "VastkinInc",
+      "repo": "retailerp-updates",
+      "private": false,
+      "releaseType": "release"
+    },
+    "asar": true,
+    "portable": {
+      "artifactName": "RetailERP-Portable-${version}.${ext}"
     }
   }
 }
