@@ -1,0 +1,59 @@
+:root {
+  --navy: #333B47;
+  --pink: #C42A78;
+  --pink-dark: #9E1E5C;
+  --cream: #FBF7F4;
+  --blush: #FAE3EF;
+  --radius-pill: 999px;
+  --radius-lg: 22px;
+  --font-serif: 'Playfair Display', serif;
+  --font-sans: 'Jost', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--navy);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--navy); text-decoration: none; }
+a:hover { color: var(--pink); }
+
+button { font-family: var(--font-sans); }
+
+.container {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.btn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  padding: 15px 30px;
+  font-size: 13px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-family: var(--font-sans);
+  transition: background .2s, color .2s;
+}
+
+.btn-primary {
+  background: var(--pink);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--navy); color: #fff; }
+
+.btn-dark {
+  background: var(--navy);
+  color: var(--cream);
+}
+.btn-dark:hover { background: var(--pink); color: #fff; }
