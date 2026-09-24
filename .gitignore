@@ -15,6 +15,11 @@ release
 .env
 .env.*
 
+# WhatsApp linked-device credentials — anyone with these controls the shop's
+# WhatsApp account. Never commit them.
+server/sessions/
+sessions/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -25,3 +30,9 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Data backups — contain customer PII
+backups/
+
+# Sales collateral — commercial positioning, not for a public repo
+sales/
