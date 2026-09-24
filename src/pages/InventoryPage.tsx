@@ -1072,9 +1072,9 @@ function InventoryPageComponent() {
                             className={`adj-badge adj-${adj.adjustment_type}`}
                           >
                             {adj.adjustment_type === 'add' &&
-                              `+ ${adj.qty_change}`}
+                              `+ ${Math.abs(adj.qty || 0)}`}
                             {adj.adjustment_type === 'remove' &&
-                              `- ${Math.abs(adj.qty_change)}`}
+                              `- ${Math.abs(adj.qty || 0)}`}
                             {adj.adjustment_type === 'set' &&
                               `= ${adj.qty_after}`}
                           </span>

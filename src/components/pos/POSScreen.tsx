@@ -45,11 +45,6 @@ export default function POSScreen() {
 
       const merged = Array.from(map.values())
       setSalesmen(merged)
-
-      // Auto-select first salesman if none selected
-      if (merged.length > 0) {
-        setSelectedSalesman(prev => prev || merged[0])
-      }
     }
     fetchSalesmen()
   }, [])
@@ -62,6 +57,10 @@ export default function POSScreen() {
   const [billNote, setBillNote] = useState('');
 
   const handleCompleteSale = async () => {
+    if (!selectedSalesman) {
+      toast.error('⚠️ Please select a salesperson before completing the sale', { duration: 3000 });
+      return;
+    }
     const saleData = await pos.completeSale();
     if (saleData) {
       if (billNote.trim()) saleData.note = billNote.trim();
@@ -193,7 +192,7 @@ export default function POSScreen() {
                 cursor: 'pointer'
               }}
             >
-              <option value="">Select salesman...</option>
+              <option value="">No Salesman</option>
               {salesmen.map((s: any) => (
                 <option key={s.id} value={s.id}>
                   {s.name} — {s.role}

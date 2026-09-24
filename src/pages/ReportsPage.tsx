@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import { exportToCSV } from '../utils/exportCSV'
+import { useCashPosition } from '../hooks/useCashPosition'
 import {
   BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, Cell
@@ -125,6 +126,13 @@ export default function ReportsPage() {
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Cash / bank actually on hand — cumulative, so it is an "as at today" figure
+  // rather than something filtered by the report's date range.
+  const cashPos = useCashPosition()
+  const [showFloatEditor, setShowFloatEditor] = useState(false)
+  const [floatCash, setFloatCash] = useState<number | ''>('')
+  const [floatBank, setFloatBank] = useState<number | ''>('')
 
   useEffect(() => {
     const fetch = async () => {
@@ -1357,6 +1365,146 @@ export default function ReportsPage() {
                     '₹' + Math.round(totalDiscount)
                       .toLocaleString('en-IN'),
                     undefined, '#f97316')}
+                </div>
+
+                {/* ── Cash & Bank on hand ─────────────────────────────── */}
+                <div style={card}>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px'
+                  }}>
+                    <div style={{ fontSize: '14px', fontWeight: 500, color: '#1a0a2e' }}>
+                      Cash &amp; Bank On Hand
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 400, marginLeft: '8px' }}>
+                        as at today, after expenses
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setFloatCash(cashPos.position.openingCash)
+                        setFloatBank(cashPos.position.openingBank)
+                        setShowFloatEditor(v => !v)
+                      }}
+                      style={{
+                        background: 'white', border: '1px solid #c084fc', color: '#9333ea',
+                        borderRadius: '8px', padding: '6px 12px', fontSize: '12px',
+                        fontWeight: 600, cursor: 'pointer'
+                      }}>
+                      {showFloatEditor ? 'Close' : 'Set opening balance'}
+                    </button>
+                  </div>
+
+                  {showFloatEditor && (
+                    <div style={{
+                      background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '12px',
+                      padding: '14px', marginBottom: '14px'
+                    }}>
+                      <div style={{ fontSize: '11px', color: '#7e22ce', marginBottom: '10px' }}>
+                        Money already in the drawer / bank before the system started tracking.
+                        Everything below is added on top of these.
+                      </div>
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <input
+                          type="number" placeholder="Opening cash"
+                          value={floatCash === '' ? '' : floatCash}
+                          onChange={e => setFloatCash(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                          style={{
+                            flex: 1, minWidth: '130px', border: '1px solid #e9d5ff', borderRadius: '8px',
+                            padding: '9px 12px', fontSize: '13px', fontFamily: 'DM Mono, monospace', outline: 'none'
+                          }}
+                        />
+                        <input
+                          type="number" placeholder="Opening bank"
+                          value={floatBank === '' ? '' : floatBank}
+                          onChange={e => setFloatBank(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                          style={{
+                            flex: 1, minWidth: '130px', border: '1px solid #e9d5ff', borderRadius: '8px',
+                            padding: '9px 12px', fontSize: '13px', fontFamily: 'DM Mono, monospace', outline: 'none'
+                          }}
+                        />
+                        <button
+                          onClick={async () => {
+                            const ok = await cashPos.saveOpeningFloat(Number(floatCash) || 0, Number(floatBank) || 0)
+                            if (ok) setShowFloatEditor(false)
+                          }}
+                          disabled={cashPos.saving}
+                          style={{
+                            background: '#9333ea', color: 'white', border: 'none', borderRadius: '8px',
+                            padding: '9px 18px', fontSize: '13px', fontWeight: 600, cursor: 'pointer'
+                          }}>
+                          {cashPos.saving ? 'Saving...' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '12px' }}>
+                    {([
+                      {
+                        label: '💵 Cash In Hand', value: cashPos.position.cashOnHand, bg: '#f0fdf4', fg: '#16a34a',
+                        rows: [
+                          ['Opening float', cashPos.position.openingCash],
+                          ['Cash from sales', cashPos.position.salesCash],
+                          ['Udhar collected in cash', cashPos.position.udharCollectedCash],
+                          ['Cash expenses', -cashPos.position.expensesCash],
+                          ['Paid to suppliers in cash', -cashPos.position.supplierPaidCash]
+                        ] as [string, number][]
+                      },
+                      {
+                        label: '📱 Bank / UPI Balance', value: cashPos.position.bankOnHand, bg: '#eff6ff', fg: '#2563eb',
+                        rows: [
+                          ['Opening balance', cashPos.position.openingBank],
+                          ['UPI from sales', cashPos.position.salesUpi],
+                          ['Card from sales', cashPos.position.salesCard],
+                          ['Udhar collected digitally', cashPos.position.udharCollectedBank],
+                          ['Bank / UPI expenses', -cashPos.position.expensesBank],
+                          ['Paid to suppliers digitally', -cashPos.position.supplierPaidBank]
+                        ] as [string, number][]
+                      }
+                    ]).map(box => (
+                      <div key={box.label} style={{ background: box.bg, borderRadius: '12px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: box.fg, fontWeight: 600, marginBottom: '4px' }}>
+                          {box.label}
+                        </div>
+                        <div style={{
+                          fontSize: '24px', fontWeight: 700, fontFamily: 'DM Mono, monospace',
+                          color: box.value < 0 ? '#ef4444' : box.fg, marginBottom: '10px'
+                        }}>
+                          ₹{Math.round(box.value).toLocaleString('en-IN')}
+                        </div>
+                        {box.rows.map(([label, amt]) => (
+                          <div key={label} style={{
+                            display: 'flex', justifyContent: 'space-between',
+                            fontSize: '11.5px', color: '#64748b', padding: '2px 0'
+                          }}>
+                            <span>{label}</span>
+                            <span style={{
+                              fontFamily: 'DM Mono, monospace',
+                              color: amt < 0 ? '#ef4444' : '#16a34a'
+                            }}>
+                              {amt < 0 ? '−' : '+'}₹{Math.abs(Math.round(amt)).toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+
+                  {cashPos.position.untaggedSupplierPayments > 0 && (
+                    <div style={{
+                      marginTop: '12px', background: '#fff7ed', border: '1px solid #fed7aa',
+                      borderRadius: '10px', padding: '10px 12px', fontSize: '11.5px', color: '#b45309'
+                    }}>
+                      ₹{Math.round(cashPos.position.untaggedSupplierPayments).toLocaleString('en-IN')} of supplier
+                      payments were settled before payment methods were tracked, so they are excluded above.
+                      Re-record them from Accounts if you want them reflected.
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '10px', fontSize: '11px', color: '#94a3b8' }}>
+                    Based on the actual tender split of each bill, so a part-cash / part-UPI sale counts
+                    in both columns — unlike Payment Collection above, which groups a bill under one mode.
+                  </div>
                 </div>
 
                 <div style={card}>

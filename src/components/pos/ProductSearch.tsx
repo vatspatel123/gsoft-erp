@@ -84,7 +84,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
         try {
           const { data } = await supabase
             .from('products')
-            .select('*')
+            .select('*, categories(name)')
           if (data && data.length > 0) candidateList = data
         } catch (dbErr) {
           console.warn('DB fetch error during search, using cache:', dbErr)
@@ -177,7 +177,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
         try {
           const { data, error } = await supabase
             .from('products')
-            .select('*')
+            .select('*, categories(name)')
             .or(`name.ilike.%${searchStr}%,sku.ilike.%${searchStr}%,design_no.ilike.%${searchStr}%,batch_no.ilike.%${searchStr}%,barcode.ilike.%${searchStr}%`)
             .eq('is_active', true)
             .limit(12)

@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout } from '../components/shared/Layout'
 import { useInvoices, type Invoice } from '../hooks/useInvoices'
-import { printBill } from '../utils/printBill'
-import { sendBillWhatsApp } from '../utils/whatsappBill'
+import { printBill, buildBillHTML, buildBillMessage } from '../utils/printBill'
 import { exportToCSV } from '../utils/exportCSV'
 import {
   ShoppingBag,
@@ -20,6 +19,8 @@ import {
   Loader2
 } from 'lucide-react'
 import '../styles/invoices.css'
+import { sendWhatsApp, sendWhatsAppDocument } from '../utils/whatsapp'
+import toast from 'react-hot-toast'
 
 export function InvoicesPage() {
   const {
@@ -47,50 +48,58 @@ export function InvoicesPage() {
   const [refundConfirm, setRefundConfirm] = useState<Invoice | null>(null)
   const [isRefunding, setIsRefunding] = useState(false)
 
-  const handleReprint = (invoice: Invoice) => {
-    const saleData = {
-      invoiceNo: invoice.invoice_no,
-      cart: invoice.sale_items?.map((item) => ({
-        product: {
-          name: item.products?.name || 'Product',
-          gst_rate: item.products?.gst_rate || 0
-        },
-        qty: item.qty,
-        unit_price: item.unit_price,
-        discount_pct: item.discount_pct || 0,
-        line_total: item.line_total
-      })) || [],
-      customer: invoice.customers || null,
-      subtotal: invoice.total_amount,
-      gstAmount: invoice.gst_amount,
-      totalDiscount: invoice.discount_amount || 0,
-      netAmount: invoice.net_amount,
-      paymentMode: invoice.payment_mode,
-      salesmanName: invoice.users?.name,
-      date: new Date(invoice.created_at).toLocaleString('en-IN')
-    }
-    printBill(saleData)
-  }
+  // Rebuild the sale exactly as the POS had it, so a reprint or a re-send
+  // produces the same bill the customer was originally handed.
+  const saleDataFrom = (invoice: Invoice) => ({
+    invoiceNo: invoice.invoice_no,
+    cart: invoice.sale_items?.map((item) => ({
+      product: {
+        name: item.products?.name || 'Product',
+        gst_rate: item.products?.gst_rate || 0,
+        design_no: item.products?.design_no,
+        size: item.products?.size,
+        colour: item.products?.colour,
+        barcode: item.products?.barcode,
+        category: item.products?.categories?.name,
+      },
+      qty: item.qty,
+      unit_price: item.unit_price,
+      discount_pct: item.discount_pct || 0,
+      line_total: item.line_total,
+    })) || [],
+    customer: invoice.customers || null,
+    subtotal: invoice.total_amount,
+    gstAmount: invoice.gst_amount,
+    totalDiscount: invoice.discount_amount || 0,
+    netAmount: invoice.net_amount,
+    paymentMode: invoice.payment_mode,
+    tenders: {
+      cash: invoice.cash_amount || 0,
+      card: invoice.card_amount || 0,
+      upi: invoice.upi_amount || 0,
+    },
+    creditRemainder: invoice.credit_amount || 0,
+    creditDueDate: invoice.credit_due_date,
+    creditDueDays: invoice.credit_due_days,
+    salesmanName: invoice.users?.name,
+    date: invoice.created_at,
+  })
 
-  const handleResendWhatsApp = (invoice: Invoice) => {
-    const saleData = {
-      invoiceNo: invoice.invoice_no,
-      cart: invoice.sale_items?.map((item) => ({
-        product: {
-          name: item.products?.name || 'Product'
-        },
-        qty: item.qty,
-        unit_price: item.unit_price,
-        line_total: item.line_total
-      })) || [],
-      customer: invoice.customers || null,
-      subtotal: invoice.total_amount,
-      gstAmount: invoice.gst_amount,
-      totalDiscount: invoice.discount_amount || 0,
-      netAmount: invoice.net_amount,
-      paymentMode: invoice.payment_mode
+  const handleReprint = (invoice: Invoice) => printBill(saleDataFrom(invoice))
+
+  const handleResendWhatsApp = async (invoice: Invoice) => {
+    const phone = invoice.customers?.phone
+    if (!phone) {
+      toast.error('Customer phone number not available')
+      return
     }
-    sendBillWhatsApp(saleData, invoice.customers?.phone)
+    const saleData = saleDataFrom(invoice)
+    const how = await sendWhatsAppDocument(phone, {
+      html: buildBillHTML(saleData),
+      caption: buildBillMessage(saleData),
+      fileName: `Invoice-${invoice.invoice_no}.pdf`,
+    })
+    if (how === 'browser') toast.success('WhatsApp opened')
   }
 
   const send15DayOverdueReminder = (invoice: Invoice) => {
@@ -109,7 +118,7 @@ export function InvoicesPage() {
       `કૃપા કરીને વહેલી તકે ચુકવણી કરશો. આભાર!%0A%0A` +
       `_Dear ${invoice.customers.name}, gentle reminder regarding your outstanding bill #${invoice.invoice_no} of ₹${Number(invoice.net_amount).toFixed(2)} dated ${dateStr}._`
 
-    window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+    sendWhatsApp(fullPhone, msg, { encoded: true })
   }
 
   const handleExportCSV = () => {

@@ -3,7 +3,7 @@ import {
   LayoutDashboard, ShoppingCart,
   Package, Boxes, XOctagon,
   FileText, Users, ArrowLeftRight,
-  Truck, ClipboardList, FileDown,
+  Truck,
   BookOpen, PieChart, Settings, Store,
   ShoppingBag, Receipt, RotateCcw,
   type LucideIcon
@@ -54,8 +54,6 @@ const SECTIONS: NavSection[] = [
     title: 'Procurement',
     items: [
       { to: '/suppliers', label: 'Suppliers', icon: Truck },
-      { to: '/purchase-orders', label: 'Purchase Orders', icon: ClipboardList },
-      { to: '/inward-challans', label: 'Inward Challans', icon: FileDown },
       { to: '/purchase-entry', label: 'Purchase Entry', icon: ShoppingBag },
       { to: '/purchase-returns', label: 'Purchase Returns', icon: RotateCcw, badge: 'New', badgeColor: '#dc2626' },
     ]

@@ -1,8 +1,9 @@
 import { Check } from 'lucide-react';
 import { useState } from 'react';
-import { printBill } from '../../utils/printBill';
+import { printBill, buildBillHTML, buildBillMessage } from '../../utils/printBill';
 import toast from 'react-hot-toast';
 import { getSettings } from '../../utils/settings';
+import { sendWhatsAppDocument } from '../../utils/whatsapp';
 
 interface BillModalProps {
   saleData: any;
@@ -17,97 +18,21 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
     printBill(saleData)
   }
 
-  const handleWhatsApp = () => {
+  const handleWhatsApp = async () => {
     const phone = saleData?.customer?.phone
     if (!phone) {
       toast.error('No phone number for this customer')
       return
     }
 
-    const settings = getSettings()
-    const shopName = settings.shopName || 'Retail ERP'
-    const shopPhone = settings.shopPhone || ''
-    const shopAddress = settings.shopAddress || ''
-
-    const clean = phone.replace(/\D/g, '')
-    const withCountry = clean.startsWith('91') ? clean : '91' + clean
-
-    const date = new Date(saleData.date || Date.now()).toLocaleString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
+    // Short confirmation text; the PDF attachment carries the itemised bill.
+    const how = await sendWhatsAppDocument(phone, {
+      html: buildBillHTML(saleData),
+      caption: buildBillMessage(saleData),
+      fileName: `Invoice-${saleData.invoiceNo}.pdf`,
     })
-
-    const itemsList = saleData.cart.map((item: any) => {
-      const details = [
-        item.product.design_no,
-        item.product.size,
-        item.product.colour
-      ].filter(Boolean).join(' | ')
-
-      return (
-        `  %E2%80%A2 ${encodeURIComponent(item.product.name)}` +
-        (details ? ` _(${encodeURIComponent(details)})_` : '') +
-        `%0A` +
-        `    Qty: ${item.qty} %C3%97 ` +
-        `%E2%82%B9${item.unit_price.toFixed(0)}` +
-        ` = *%E2%82%B9${item.line_total.toFixed(0)}*`
-      )
-    }).join('%0A')
-
-    const paymentEmoji =
-      saleData.paymentMode === 'cash' ? '%F0%9F%92%B5' :
-      saleData.paymentMode === 'card' ? '%F0%9F%92%B3' :
-      saleData.paymentMode === 'upi'  ? '%F0%9F%93%B1' : '%E2%9A%A0%EF%B8%8F'
-
-    const discountLine = saleData.totalDiscount > 0
-      ? `%0A%F0%9F%8F%B7%EF%B8%8F *Discount:* -%E2%82%B9${saleData.totalDiscount.toFixed(0)}`
-      : ''
-    const gstLine = saleData.gstAmount > 0
-      ? `%0A%F0%9F%A7%BE *GST:* %E2%82%B9${saleData.gstAmount.toFixed(0)}`
-      : ''
-    const loyaltyLine = saleData.loyaltyEarned > 0
-      ? `%0A%E2%AD%90 *Loyalty Points Earned:* ${saleData.loyaltyEarned} pts`
-      : ''
-
-    const isCredit = saleData.paymentMode === 'credit'
-    const formattedDueDate = saleData.creditDueDate ? new Date(saleData.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Within 5 Days'
-    
-    const creditTermsMsg = isCredit
-      ? `%0A%E2%9A%A0%EF%B8%8F *UDHAR / CREDIT SALE*%0A` +
-        `%F0%9F%93%85 *Promised Payment Due:* ${encodeURIComponent(formattedDueDate)} (${saleData.creditDueDays || 5} days)%0A` +
-        `_આપનું બાકી બિલ ${encodeURIComponent(formattedDueDate)} સુધીમાં ચૂકવવાનું રહેશે._%0A`
-      : ''
-
-    const paymentLabel = isCredit
-      ? `Credit / Udhar (Due: ${formattedDueDate})`
-      : saleData.paymentMode.charAt(0).toUpperCase() + saleData.paymentMode.slice(1)
-    const customerName = saleData.customer?.name || 'Customer'
-
-    const message =
-      `%F0%9F%9B%8D%EF%B8%8F *${encodeURIComponent(shopName)}*%0A` +
-      (shopAddress ? `%F0%9F%93%8D ${encodeURIComponent(shopAddress)}%0A` : '') +
-      `%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A` +
-      `*INVOICE: ${saleData.invoiceNo}*%0A` +
-      `%F0%9F%93%85 ${date}%0A` +
-      `%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A%0A` +
-      `%F0%9F%91%A4 *${encodeURIComponent(customerName)}*%0A%0A` +
-      `*Items Purchased:*%0A` +
-      `${itemsList}%0A%0A` +
-      `%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A` +
-      `${discountLine ? discountLine + '%0A' : ''}` +
-      `${gstLine ? gstLine + '%0A' : ''}` +
-      `${loyaltyLine ? loyaltyLine + '%0A' : ''}` +
-      `${creditTermsMsg}` +
-      `%F0%9F%92%B0 *Total Amount: %E2%82%B9${saleData.netAmount.toFixed(0)}*%0A` +
-      `${paymentEmoji} *Payment Mode: ${encodeURIComponent(paymentLabel)}*%0A%0A` +
-      `%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A` +
-      `_Thank you for shopping at ${encodeURIComponent(shopName)}!_ %F0%9F%99%8F%0A` +
-      (shopPhone ? `%F0%9F%93%9E ${encodeURIComponent(shopPhone)}%0A` : '') +
-      `%0A_For exchanges within 7 days, please bring this message or invoice number._`
-
-    window.open(`https://wa.me/${withCountry}?text=${message}`, '_blank', 'width=600,height=700,scrollbars=yes,resizable=yes')
     setSent(true)
-    toast.success('WhatsApp opened! ✅')
+    if (how === 'browser') toast.success('WhatsApp opened! ✅')
   }
 
   return (
@@ -159,7 +84,6 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
           ))}
           <div className="preview-divider" />
           <div className="preview-row"><span>Subtotal:</span> <span>₹{saleData.subtotal.toFixed(2)}</span></div>
-          <div className="preview-row"><span>GST:</span> <span>₹{saleData.gstAmount.toFixed(2)}</span></div>
           {saleData.totalDiscount > 0 && (
             <div className="preview-row" style={{ color: '#16a34a' }}>
               <span>Discount:</span><span>-₹{saleData.totalDiscount.toFixed(2)}</span>

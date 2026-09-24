@@ -7,6 +7,7 @@ import {
   Building2, MessageCircle, ArrowLeft, PackageCheck, AlertCircle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { sendWhatsApp } from '../utils/whatsapp'
 
 interface ReturnItem {
   product: any
@@ -267,7 +268,7 @@ export function PurchaseReturnPage() {
       `%0A_Please adjust this debit note amount in our next statement._%0A` +
       `Thank you!`
 
-    window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+    sendWhatsApp(fullPhone, msg, { encoded: true })
   }
 
   return (

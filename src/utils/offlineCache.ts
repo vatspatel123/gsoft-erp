@@ -20,7 +20,8 @@ interface Product {
   photo_url: string | null
   is_active: boolean
   created_at?: string | null
-  design_no?: string | null
+  design_no?: string
+  pcode?: string | null
   size?: string | null
   colour?: string | null
   mrp?: number | null
@@ -34,10 +35,16 @@ interface CacheEntry {
 
 // ── Products Cache ──────────────────────
 export function saveProductsToCache(
-  products: Product[]
+  products: Product[],
+  opts: { replace?: boolean } = {}
 ): void {
   try {
-    const existing = getCachedProducts() || []
+    // `replace` means "this IS the whole catalogue" — anything absent from it has
+    // been deleted and must leave the cache too. Merging unconditionally (the old
+    // behaviour) kept deleted products alive in the browser forever: they kept
+    // appearing in lists, in low-stock alerts, and as barcode-scan candidates
+    // long after they were gone from the database.
+    const existing = opts.replace ? [] : (getCachedProducts() || [])
     const map = new Map<string, Product>()
     for (const p of existing) map.set(p.id, p)
     for (const p of products) map.set(p.id, p)

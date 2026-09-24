@@ -14,6 +14,12 @@ export interface Invoice {
   net_amount: number
   gst_amount: number
   payment_mode: 'cash' | 'card' | 'upi' | 'credit'
+  cash_amount?: number
+  card_amount?: number
+  upi_amount?: number
+  credit_amount?: number
+  credit_due_date?: string
+  credit_due_days?: number
   is_return: boolean
   created_at: string
   customers?: {
@@ -34,6 +40,11 @@ export interface Invoice {
       id: string
       name: string
       gst_rate: number
+      design_no?: string
+      size?: string
+      colour?: string
+      barcode?: string
+      categories?: { name: string } | null
     } | null
   }> | null
 }
@@ -99,7 +110,7 @@ export function useInvoices() {
             sale_items(
               id, qty, unit_price,
               discount_pct, line_total, gst_rate,
-              products(id, name, gst_rate)
+              products(id, name, gst_rate, design_no, size, colour, barcode, categories(name))
             )`
           )
           .order('created_at', { ascending: false })

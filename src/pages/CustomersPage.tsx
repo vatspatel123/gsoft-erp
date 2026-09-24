@@ -7,6 +7,7 @@ import { getTierInfo } from '../utils/customerTier'
 import { CustomerHistoryModal } from '../components/customers/CustomerHistoryModal'
 import toast from 'react-hot-toast'
 import '../styles/customers.css'
+import { sendWhatsApp } from '../utils/whatsapp'
 
 function CustomersPageComponent() {
   const {
@@ -130,10 +131,7 @@ function CustomersPageComponent() {
       `%0A_Retail ERP Fashion Edition_`
 
     const phone = customer.phone.replace(/\D/g, '')
-    window.open(
-      'https://wa.me/91' + phone + '?text=' + birthdayMsg,
-      '_blank'
-    )
+    sendWhatsApp(phone, birthdayMsg, { encoded: true })
   }
 
   const getLoyaltyTier = (points: number) => {

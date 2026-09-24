@@ -77,7 +77,9 @@ export function usePOS(salesmanId: string | null = null) {
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [coupon, setCoupon] = useState<Coupon | null>(null)
   const [couponCode, setCouponCode] = useState('')
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('cash')
+  // Multi-tender: the biller allocates an amount per tender. Anything left unallocated
+  // becomes udhar (credit) on the customer's account.
+  const [tenders, setTenders] = useState<{ cash: number; card: number; upi: number }>({ cash: 0, card: 0, upi: 0 })
   const [loyaltyToRedeem, setLoyaltyToRedeem] = useState(0)
   const [isSaving, setIsSaving] = useState(false)
   const [lastSale, setLastSale] = useState<any>(null)
@@ -86,7 +88,9 @@ export function usePOS(salesmanId: string | null = null) {
   const [searchedPhone, setSearchedPhone] = useState('')
   const [customerTier, setCustomerTier] = useState<CustomerTier>('New')
   const [activeCreditNotes, setActiveCreditNotes] = useState<CreditNote[]>([])
-  const [appliedCreditNote, setAppliedCreditNote] = useState<CreditNote | null>(null)
+  const [creditToApply, setCreditToApply] = useState(0)
+  const [manualDiscount, setManualDiscount] = useState(0)
+  const [manualDiscountMode, setManualDiscountMode] = useState<'flat' | 'pct'>('flat')
   const [creditDueDays, setCreditDueDays] = useState<number>(5)
   const [creditDueDate, setCreditDueDate] = useState<string>(() => {
     const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
@@ -101,7 +105,7 @@ export function usePOS(salesmanId: string | null = null) {
       if (navigator.onLine) {
         let query = supabase
           .from('products')
-          .select('*')
+          .select('*, categories(name)')
           .eq('is_active', true)
           .gt('stock_qty', 0)
           .neq('id', product.id)
@@ -265,7 +269,13 @@ export function usePOS(salesmanId: string | null = null) {
   }, [])
 
   const subtotal = cart.reduce((s, i) => s + i.line_total, 0)
-  const gstAmount = cart.reduce((s, i) => s + (i.line_total * i.product.gst_rate / 100), 0)
+  // Prices are GST-INCLUSIVE. GST is therefore extracted from the price for reporting
+  // and filing, never added on top — adding it would overcharge by the tax rate.
+  //   tax = gross - gross / (1 + rate)
+  const gstAmount = cart.reduce((s, i) => {
+    const rate = (i.product.gst_rate || 0) / 100
+    return s + (rate > 0 ? i.line_total - i.line_total / (1 + rate) : 0)
+  }, 0)
 
   const couponDiscount = (() => {
     if (!coupon) return 0
@@ -282,12 +292,57 @@ export function usePOS(salesmanId: string | null = null) {
     ? Math.min(customer.loyalty_points, Math.floor(subtotal * 0.2 / 0.25))
     : 0
 
-  const creditNoteDiscount = appliedCreditNote
-    ? Math.min(appliedCreditNote.balance_amount, Math.max(0, subtotal + gstAmount - couponDiscount - loyaltyDiscount))
-    : 0
+  // The biller types how much store credit to use; it is spread across that customer's
+  // notes oldest-first. Allocation stays the single source of truth for the deduction,
+  // so what is shown can never drift from what gets debited.
+  // Manual bill-level discount, capped so it can never exceed what is left after the coupon.
+  const manualDiscountAmount = (() => {
+    const base = Math.max(0, subtotal - couponDiscount - loyaltyDiscount)
+    const raw = manualDiscountMode === 'pct' ? base * (manualDiscount / 100) : manualDiscount
+    return Math.max(0, Math.min(raw, base))
+  })()
 
-  const totalDiscount = couponDiscount + loyaltyDiscount + creditNoteDiscount
-  const netAmount = Math.max(0, subtotal + gstAmount - totalDiscount)
+  const payableBeforeCredit = Math.max(0, subtotal - couponDiscount - loyaltyDiscount - manualDiscountAmount)
+  const availableCredit = activeCreditNotes.reduce((s, n) => s + (n.balance_amount || 0), 0)
+  const maxApplicableCredit = Math.min(availableCredit, payableBeforeCredit)
+  const creditNoteDiscount = Math.max(0, Math.min(creditToApply, maxApplicableCredit))
+  const creditAllocations = (() => {
+    let remaining = creditNoteDiscount
+    return [...activeCreditNotes]
+      .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+      .map(note => {
+        const applied = Math.min(note.balance_amount, remaining)
+        remaining -= applied
+        return { note, applied }
+      })
+      .filter(a => a.applied > 0)
+  })()
+
+  const totalDiscount = couponDiscount + loyaltyDiscount + manualDiscountAmount + creditNoteDiscount
+  // No + gstAmount: the tax is already inside subtotal.
+  const netAmount = Math.max(0, subtotal - totalDiscount)
+
+  const setTender = useCallback((kind: 'cash' | 'card' | 'upi', amount: number) => {
+    setTenders(prev => ({ ...prev, [kind]: Math.max(0, amount || 0) }))
+  }, [])
+
+  const tenderTotal = tenders.cash + tenders.card + tenders.upi
+  // Sub-rupee slack so floating point never leaves a stray ₹0.001 as "udhar".
+  const creditRemainder = Math.max(0, Math.round((netAmount - tenderTotal) * 100) / 100)
+  const changeDue = Math.max(0, Math.round((tenderTotal - netAmount) * 100) / 100)
+
+  // payment_mode must remain one of the four legacy values: udhar is detected app-wide
+  // by payment_mode === 'credit', so an unpaid remainder must keep that value.
+  const derivedPaymentMode: PaymentMode =
+    creditRemainder > 0.009 ? 'credit'
+      : tenderTotal <= 0 ? 'cash'
+        : tenders.upi >= tenders.cash && tenders.upi >= tenders.card ? 'upi'
+          : tenders.card >= tenders.cash ? 'card'
+            : 'cash'
+
+  const payFullBy = useCallback((kind: 'cash' | 'card' | 'upi') => {
+    setTenders({ cash: 0, card: 0, upi: 0, [kind]: netAmount } as any)
+  }, [netAmount])
 
   const loadCustomerExtraInfo = useCallback(async (cust: any) => {
     if (!cust) return
@@ -316,7 +371,7 @@ export function usePOS(salesmanId: string | null = null) {
         // 2. Fetch Active Credit Notes
         const { data: cns } = await supabase
           .from('credit_notes')
-          .select('*')
+          .select('*, categories(name)')
           .or(`customer_id.eq.${cust.id},customer_phone.eq.${cust.phone}`)
           .eq('status', 'active')
           .gt('balance_amount', 0)
@@ -352,7 +407,9 @@ export function usePOS(salesmanId: string | null = null) {
     const cleanPhone = phone.trim()
     setCustomerNotFound(false)
     setSearchedPhone(cleanPhone)
-    setAppliedCreditNote(null)
+    // Clear the previous customer's credit before looking up the next one.
+    setActiveCreditNotes([])
+    setCreditToApply(0)
 
     // Check local cache first
     const cached = findCachedCustomer(cleanPhone)
@@ -367,7 +424,7 @@ export function usePOS(salesmanId: string | null = null) {
       try {
         const { data, error } = await supabase
           .from('customers')
-          .select('*')
+          .select('*, categories(name)')
           .eq('phone', cleanPhone)
           .single()
 
@@ -386,12 +443,25 @@ export function usePOS(salesmanId: string | null = null) {
     setCustomerNotFound(true)
   }, [loadCustomerExtraInfo])
 
+  // Selecting a customer must also pull their credit notes and tier — not just set state,
+  // otherwise the POS shows zero store credit for customers who actually have some.
+  const selectCustomer = useCallback((cust: Customer | null) => {
+    setCustomer(cust)
+    setCreditToApply(0)
+    if (!cust) {
+      setActiveCreditNotes([])
+      setCustomerTier('New')
+      return
+    }
+    loadCustomerExtraInfo(cust)
+  }, [loadCustomerExtraInfo])
+
   const applyCoupon = useCallback(async () => {
     if (!couponCode.trim()) return
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('coupons')
-      .select('*')
+      .select('*, categories(name)')
       .eq('code', couponCode.trim().toUpperCase())
       .eq('is_active', true)
       .lte('valid_from', today)
@@ -450,7 +520,7 @@ export function usePOS(salesmanId: string | null = null) {
         invoiceNo: 'OFF-' + Date.now(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
-        netAmount, paymentMode,
+        netAmount, paymentMode: derivedPaymentMode, tenders, creditRemainder,
         salesmanId, counterId: COUNTER_ID,
         date: new Date().toLocaleString('en-IN')
       }
@@ -472,15 +542,21 @@ export function usePOS(salesmanId: string | null = null) {
           coupon_code: coupon?.code ?? null,
           net_amount: netAmount,
           gst_amount: gstAmount,
-          payment_mode: paymentMode,
+          payment_mode: derivedPaymentMode,
+          cash_amount: tenders.cash,
+          card_amount: tenders.card,
+          upi_amount: tenders.upi,
+          credit_amount: creditRemainder,
           loyalty_points_used: loyaltyToRedeem,
           is_return: false
       }
       if (salesmanId) saleRecord.salesman_id = salesmanId
-      if (paymentMode === 'credit') {
+      // Always set explicitly: relying on the column default left fully-paid bills
+      // reading as 'unpaid', which Receivables would have counted as money owed.
+      saleRecord.credit_status = creditRemainder > 0 ? 'unpaid' : 'paid'
+      if (creditRemainder > 0) {
         saleRecord.credit_due_days = creditDueDays
         saleRecord.credit_due_date = creditDueDate
-        saleRecord.credit_status = 'unpaid'
       }
 
       const { data: sale, error } = await supabase
@@ -573,22 +649,23 @@ export function usePOS(salesmanId: string | null = null) {
         } catch {}
       }
 
-      // Deduct credit note if applied
-      if (appliedCreditNote && creditNoteDiscount > 0) {
+      // Deduct each applied credit note by exactly what was allocated to this bill
+      for (const { note, applied } of creditAllocations) {
+        if (applied <= 0) continue
         try {
-          const newBal = Math.max(0, appliedCreditNote.balance_amount - creditNoteDiscount)
+          const newBal = Math.max(0, note.balance_amount - applied)
           const newStatus = newBal === 0 ? 'redeemed' : 'active'
           if (navigator.onLine) {
             await supabase
               .from('credit_notes')
               .update({ balance_amount: newBal, status: newStatus })
-              .eq('id', appliedCreditNote.id)
+              .eq('id', note.id)
           }
           const localCNsStr = localStorage.getItem('gsoft_credit_notes_cache')
           if (localCNsStr) {
             const allCns = JSON.parse(localCNsStr)
             const updatedCns = allCns.map((c: any) =>
-              c.id === appliedCreditNote.id ? { ...c, balance_amount: newBal, status: newStatus } : c
+              c.id === note.id ? { ...c, balance_amount: newBal, status: newStatus } : c
             )
             localStorage.setItem('gsoft_credit_notes_cache', JSON.stringify(updatedCns))
           }
@@ -606,9 +683,12 @@ export function usePOS(salesmanId: string | null = null) {
         gstAmount,
         totalDiscount,
         netAmount,
-        paymentMode,
-        creditDueDays: paymentMode === 'credit' ? creditDueDays : undefined,
-        creditDueDate: paymentMode === 'credit' ? creditDueDate : undefined,
+        paymentMode: derivedPaymentMode,
+        tenders,
+        creditRemainder,
+        changeDue,
+        creditDueDays: creditRemainder > 0 ? creditDueDays : undefined,
+        creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanName,
         creditNoteDiscount,
         date: new Date().toLocaleString('en-IN')
@@ -623,9 +703,9 @@ export function usePOS(salesmanId: string | null = null) {
         invoiceNo: 'INV-' + getISTDateString() + '-' + String(Math.floor(Math.random() * 9000) + 1000),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
-        netAmount, paymentMode,
-        creditDueDays: paymentMode === 'credit' ? creditDueDays : undefined,
-        creditDueDate: paymentMode === 'credit' ? creditDueDate : undefined,
+        netAmount, paymentMode: derivedPaymentMode, tenders, creditRemainder,
+        creditDueDays: creditRemainder > 0 ? creditDueDays : undefined,
+        creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanId, counterId: COUNTER_ID,
         creditNoteDiscount,
         date: new Date().toLocaleString('en-IN')
@@ -637,7 +717,7 @@ export function usePOS(salesmanId: string | null = null) {
     } finally {
       setIsSaving(false)
     }
-  }, [cart, customer, coupon, paymentMode, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, appliedCreditNote, creditNoteDiscount, creditDueDays, creditDueDate])
+  }, [cart, customer, coupon, tenders, derivedPaymentMode, creditRemainder, changeDue, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, creditToApply, creditAllocations, creditNoteDiscount, creditDueDays, creditDueDate])
 
   const clearCart = useCallback(() => {
     setCart([])
@@ -645,26 +725,21 @@ export function usePOS(salesmanId: string | null = null) {
     setCoupon(null)
     setCouponCode('')
     setLoyaltyToRedeem(0)
-    setPaymentMode('cash')
+    setTenders({ cash: 0, card: 0, upi: 0 })
     setCreditDueDays(5)
     const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
     setCreditDueDate(d.toISOString().slice(0, 10))
     setLastSale(null)
     setCustomerNotFound(false)
     setSearchedPhone('')
-    setAppliedCreditNote(null)
+    setCreditToApply(0)
+    setManualDiscount(0)
+    setManualDiscountMode('flat')
     setActiveCreditNotes([])
     setCustomerTier('New')
   }, [])
 
-  const applyCreditNote = useCallback((note: CreditNote) => {
-    setAppliedCreditNote(note)
-    toast.success(`Applied Credit Note ${note.credit_note_no}`)
-  }, [])
-
-  const removeCreditNote = useCallback(() => {
-    setAppliedCreditNote(null)
-  }, [])
+  const clearCredit = useCallback(() => setCreditToApply(0), [])
 
   const skipCustomer = useCallback(() => {
     setCustomerNotFound(false)
@@ -724,12 +799,15 @@ export function usePOS(salesmanId: string | null = null) {
 
   return {
     cart, addToCart, updateQty, updateDiscount, removeFromCart,
-    customer, setCustomer, onCustomerFound: setCustomer, removeCustomer: () => { setCustomer(null); setAppliedCreditNote(null); setActiveCreditNotes([]) }, searchCustomer, customerNotFound, searchedPhone, addCustomer, skipCustomer,
+    customer, setCustomer, onCustomerFound: selectCustomer, selectCustomer, removeCustomer: () => selectCustomer(null), searchCustomer, customerNotFound, searchedPhone, addCustomer, skipCustomer,
     customerTier,
-    activeCreditNotes, appliedCreditNote, applyCreditNote, removeCreditNote, creditNoteDiscount,
+    activeCreditNotes, creditToApply, setCreditToApply, clearCredit,
+    creditNoteDiscount, creditAllocations, availableCredit, maxApplicableCredit,
+    manualDiscount, setManualDiscount, manualDiscountMode, setManualDiscountMode, manualDiscountAmount,
     coupon, couponCode, setCouponCode, applyCoupon,
     removeCoupon: () => { setCoupon(null); setCouponCode('') },
-    paymentMode, setPaymentMode,
+    paymentMode: derivedPaymentMode,
+    tenders, setTender, payFullBy, tenderTotal, creditRemainder, changeDue,
     creditDueDays, setCreditDueDays,
     creditDueDate, setCreditDueDate,
     loyaltyToRedeem, setLoyaltyToRedeem, maxRedeemable,

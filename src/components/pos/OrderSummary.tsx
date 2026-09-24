@@ -18,10 +18,16 @@ interface OrderSummaryProps {
   skipCustomer: () => void;
   customerTier?: CustomerTier;
   activeCreditNotes?: CreditNote[];
-  appliedCreditNote?: CreditNote | null;
-  applyCreditNote?: (note: CreditNote) => void;
-  removeCreditNote?: () => void;
+  creditToApply?: number;
+  setCreditToApply?: (amount: number) => void;
   creditNoteDiscount?: number;
+  availableCredit?: number;
+  maxApplicableCredit?: number;
+  manualDiscount?: number;
+  setManualDiscount?: (amount: number) => void;
+  manualDiscountMode?: 'flat' | 'pct';
+  setManualDiscountMode?: (mode: 'flat' | 'pct') => void;
+  manualDiscountAmount?: number;
   onViewHistory?: (customer: Customer) => void;
   couponCode: string;
   setCouponCode: (c: string) => void;
@@ -32,7 +38,12 @@ interface OrderSummaryProps {
   setLoyaltyToRedeem: (pts: number) => void;
   maxRedeemable: number;
   paymentMode: PaymentMode;
-  setPaymentMode: (m: PaymentMode) => void;
+  tenders?: { cash: number; card: number; upi: number };
+  setTender?: (kind: 'cash' | 'card' | 'upi', amount: number) => void;
+  payFullBy?: (kind: 'cash' | 'card' | 'upi') => void;
+  tenderTotal?: number;
+  creditRemainder?: number;
+  changeDue?: number;
   creditDueDays?: number;
   setCreditDueDays?: (days: number) => void;
   creditDueDate?: string;
@@ -56,17 +67,13 @@ export function OrderSummary(props: OrderSummaryProps) {
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newBirthday, setNewBirthday] = useState('')
-  const [cashReceived, setCashReceived] = useState('')
+  const remaining = Number(props.creditRemainder || 0)
+  const changeDue = Number(props.changeDue || 0)
 
-  const change = props.paymentMode === 'cash' && cashReceived
-    ? parseFloat(cashReceived) - props.netAmount
-    : null
-
-  const PAYMENT_MODES = [
-    { mode: 'cash',   label: 'Cash',   icon: Banknote },
-    { mode: 'card',   label: 'Card',   icon: CreditCard },
-    { mode: 'upi',    label: 'UPI',    icon: Smartphone },
-    { mode: 'credit', label: 'Credit', icon: BookOpen },
+  const TENDERS = [
+    { kind: 'cash' as const, label: 'Cash', icon: Banknote },
+    { kind: 'card' as const, label: 'Card', icon: CreditCard },
+    { kind: 'upi'  as const, label: 'UPI',  icon: Smartphone },
   ]
 
   const searchCustomers = async (query: string) => {
@@ -471,136 +478,135 @@ export function OrderSummary(props: OrderSummaryProps) {
           )}
         </div>
 
-        {/* Coupon Section */}
-        <div className="summary-section">
-          <div className="section-label">Coupon</div>
-          {!props.coupon ? (
-            <div className="coupon-input">
-              <input
-                placeholder="Enter Code"
-                value={props.couponCode}
-                onChange={e => props.setCouponCode(e.target.value)}
-              />
-              <button onClick={props.applyCoupon}>Apply</button>
-            </div>
-          ) : (
-            <div className="coupon-active">
-              <div>
-                <div className="code">{props.coupon.code} APPLIED</div>
-                <div className="saving" style={{ fontFamily: "'DM Mono', monospace" }}>Saving ₹{props.totalDiscount.toFixed(2)}</div>
-              </div>
-              <button className="remove-coupon" onClick={props.removeCoupon}><X size={16}/></button>
-            </div>
-          )}
-        </div>
+        {/* Coupon section hidden at client request. The coupon logic in usePOS is
+            left intact, so restoring this block is all that's needed to re-enable it. */}
 
-        {/* Credit Note Section */}
-        {props.customer && (props.activeCreditNotes && props.activeCreditNotes.length > 0 || props.appliedCreditNote) && (
+        {/* Credit Control Section */}
+        {props.customer && (
           <div className="summary-section">
             <div className="section-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#9333ea' }}>
-              <Ticket size={12} /> Store Credit Note
+              <Ticket size={12} /> Credit Control
             </div>
 
-            {props.appliedCreditNote ? (
-              <div style={{
-                background: '#fdf4ff', border: '1px solid #f0abfc', borderRadius: '10px',
-                padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-              }}>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#9333ea' }}>
-                    {props.appliedCreditNote.credit_note_no}
+            {(() => {
+              const available = Number(props.availableCredit || 0)
+              const maxUsable = Number(props.maxApplicableCredit || 0)
+              const applied = Number(props.creditNoteDiscount || 0)
+              const typed = Number(props.creditToApply || 0)
+
+              if (available <= 0) {
+                return (
+                  <div style={{ fontSize: '11px', color: '#94a3b8', padding: '4px 2px' }}>
+                    No store credit available for this customer
                   </div>
-                  <div style={{ fontSize: '11px', color: '#701a75' }}>
-                    Applying ₹{Number(props.creditNoteDiscount || 0).toFixed(2)} of ₹{props.appliedCreditNote.balance_amount.toFixed(2)}
+                )
+              }
+
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', marginBottom: '6px' }}>
+                    <span style={{ color: '#16a34a', fontWeight: 700 }}>Available: ₹{available.toFixed(2)}</span>
+                    <span style={{ color: '#94a3b8' }}>Usable here ₹{maxUsable.toFixed(2)}</span>
                   </div>
-                </div>
-                <button
-                  onClick={props.removeCreditNote}
-                  style={{ background: 'none', border: 'none', color: '#a21caf', cursor: 'pointer', padding: '4px' }}>
-                  <X size={16} />
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {props.activeCreditNotes?.map(cn => (
-                  <div key={cn.id} style={{
-                    background: '#f8fafc', border: '1px dashed #c084fc', borderRadius: '10px',
-                    padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                  }}>
-                    <div>
-                      <div style={{ fontSize: '12px', fontWeight: 600, color: '#1e293b' }}>
-                        {cn.credit_note_no}
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 700 }}>
-                        Available: ₹{cn.balance_amount.toFixed(2)}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => props.applyCreditNote?.(cn)}
+
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min={0}
+                      value={typed > 0 ? typed : ''}
+                      onChange={e => props.setCreditToApply?.(e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0))}
+                      placeholder="Credit to use"
                       style={{
-                        background: '#9333ea', color: 'white', border: 'none',
-                        borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer'
-                      }}>
-                      Apply
+                        flex: 1, minWidth: 0, border: '1px solid #f3e8ff', borderRadius: '8px',
+                        padding: '8px 10px', fontSize: '13px', fontFamily: "'DM Mono', monospace",
+                        outline: 'none', color: '#1a0a2e', background: 'white'
+                      }}
+                    />
+                    <button
+                      onClick={() => props.setCreditToApply?.(maxUsable)}
+                      style={{ background: '#9333ea', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                      Use max
                     </button>
+                    {typed > 0 && (
+                      <button
+                        onClick={() => props.setCreditToApply?.(0)}
+                        style={{ background: 'none', border: 'none', color: '#a21caf', cursor: 'pointer', padding: '4px' }}>
+                        <X size={16} />
+                      </button>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Loyalty Section */}
-        {props.customer && props.customer.loyalty_points > 0 && props.maxRedeemable > 0 && (
-          <div className="summary-section">
-            <div className="section-label">Redeem Loyalty Points</div>
-            <div className="loyalty-slider-wrap">
-              <label>
-                <span>Redeeming {props.loyaltyToRedeem} pts</span>
-                <span style={{ color: '#9333ea', fontWeight: 600, fontFamily: "'DM Mono', monospace" }}>-₹{(props.loyaltyToRedeem * 0.25).toFixed(2)}</span>
-              </label>
-              <input
-                type="range"
-                min="0"
-                max={props.maxRedeemable}
-                step="1"
-                value={props.loyaltyToRedeem}
-                onChange={e => props.setLoyaltyToRedeem(parseInt(e.target.value))}
-              />
-            </div>
+                  {applied > 0 && (
+                    <div style={{ marginTop: '6px', fontSize: '11px', fontWeight: 700, color: '#9333ea', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Credit applied to this bill</span>
+                      <span style={{ fontFamily: "'DM Mono', monospace" }}>-₹{applied.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {typed > maxUsable && (
+                    <div style={{ marginTop: '4px', fontSize: '11px', color: '#f59e0b' }}>
+                      Only ₹{maxUsable.toFixed(2)} can be used on this bill
+                    </div>
+                  )}
+                </>
+              )
+            })()}
           </div>
         )}
 
         {/* Payment Mode */}
         <div className="summary-section">
           <div className="section-label">Payment Mode</div>
-          <div className="payment-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-            {PAYMENT_MODES.map(({ mode, label, icon: Icon }) => {
-              const isActive = props.paymentMode === mode
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {TENDERS.map(({ kind, label, icon: Icon }) => {
+              const amt = Number(props.tenders?.[kind] || 0)
               return (
-                <button
-                  key={mode}
-                  onClick={() => props.setPaymentMode(mode as PaymentMode)}
-                  style={isActive ? {
-                    background: '#9333ea', color: 'white', border: 'none',
-                    height: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(147,51,234,0.2)'
-                  } : {
-                    background: 'white', border: '1px solid #f3e8ff', color: '#64748b',
-                    height: '38px', borderRadius: '8px', fontSize: '12px', fontWeight: 500,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer'
-                  }}
-                >
-                  <Icon size={14} />
-                  {label}
-                </button>
+                <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '74px', flexShrink: 0, fontSize: '12px', color: '#64748b' }}>
+                    <Icon size={14} /> {label}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={amt > 0 ? amt : ''}
+                    onChange={e => props.setTender?.(kind, e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0.00"
+                    style={{
+                      flex: 1, minWidth: 0, border: '1px solid #f3e8ff', borderRadius: '8px',
+                      padding: '8px 10px', fontSize: '13px', fontFamily: "'DM Mono', monospace",
+                      outline: 'none', color: '#1a0a2e', background: 'white'
+                    }}
+                  />
+                  <button
+                    onClick={() => props.payFullBy?.(kind)}
+                    title={`Put the whole bill on ${label}`}
+                    style={{
+                      border: '1px solid #e9d5ff', background: '#faf5ff', color: '#9333ea', borderRadius: '8px',
+                      padding: '8px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap'
+                    }}>
+                    Full
+                  </button>
+                </div>
               )
             })}
           </div>
 
+          {/* Allocation status — anything unallocated becomes udhar */}
+          <div style={{
+            marginTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            fontSize: '12px', fontWeight: 700, padding: '8px 10px', borderRadius: '8px',
+            background: remaining > 0 ? '#fff7ed' : changeDue > 0 ? '#eff6ff' : '#f0fdf4',
+            color: remaining > 0 ? '#b45309' : changeDue > 0 ? '#3b82f6' : '#16a34a'
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              {remaining > 0 ? <><BookOpen size={13} /> Remaining on udhar</> : changeDue > 0 ? 'Change to return' : '✓ Fully paid'}
+            </span>
+            <span style={{ fontFamily: "'DM Mono', monospace" }}>
+              ₹{(remaining > 0 ? remaining : changeDue).toFixed(2)}
+            </span>
+          </div>
+
           {/* Credit Sale (Udhar / Pay Later) Due Date Terms */}
-          {props.paymentMode === 'credit' && (
+          {remaining > 0 && (
             <div style={{
               marginTop: '10px', background: '#faf5ff', border: '1px solid #e9d5ff',
               borderRadius: '10px', padding: '10px 12px'
@@ -681,10 +687,6 @@ export function OrderSummary(props: OrderSummaryProps) {
           <span>Subtotal</span>
           <span style={{ fontFamily: "'DM Mono', monospace" }}>₹{props.subtotal.toFixed(2)}</span>
         </div>
-        <div className="tot-row">
-          <span>GST</span>
-          <span style={{ fontFamily: "'DM Mono', monospace" }}>₹{props.gstAmount.toFixed(2)}</span>
-        </div>
         {props.totalDiscount > 0 && (
           <div className="tot-row discount-row">
             <span>Discount</span>
@@ -696,39 +698,57 @@ export function OrderSummary(props: OrderSummaryProps) {
           <span style={{ fontFamily: "'DM Mono', monospace" }}>₹{props.netAmount.toFixed(2)}</span>
         </div>
 
-        {/* Cash change calculator */}
-        {props.paymentMode === 'cash' && (
-          <div style={{ marginTop: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <input
-                type="number"
-                placeholder="Cash received"
-                value={cashReceived}
-                onChange={e => setCashReceived(e.target.value)}
-                style={{
-                  flex: 1, border: '1px solid #f3e8ff', borderRadius: '8px',
-                  padding: '8px 12px', fontSize: '13px',
-                  fontFamily: "'DM Mono', monospace",
-                  outline: 'none', color: '#1a0a2e', background: 'white'
-                }}
-              />
+        {/* Change is shown in the Payment section, driven by the cash tender itself */}
+
+        {/* Bill-level discount */}
+        <div style={{ marginTop: '10px', marginBottom: '10px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 600, color: '#9333ea', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+            Bill Discount
+          </div>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', border: '1px solid #f3e8ff', borderRadius: '8px', overflow: 'hidden', flexShrink: 0 }}>
+              {(['flat', 'pct'] as const).map(m => {
+                const active = (props.manualDiscountMode || 'flat') === m
+                return (
+                  <button
+                    key={m}
+                    onClick={() => props.setManualDiscountMode?.(m)}
+                    style={{
+                      border: 'none', cursor: 'pointer', padding: '8px 12px', fontSize: '13px', fontWeight: 600,
+                      background: active ? '#9333ea' : 'white', color: active ? 'white' : '#9333ea'
+                    }}>
+                    {m === 'flat' ? '₹' : '%'}
+                  </button>
+                )
+              })}
             </div>
-            {change !== null && (
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                fontSize: '13px', fontWeight: 600, padding: '6px 10px',
-                borderRadius: '8px',
-                background: change >= 0 ? '#f0fdf4' : '#fef2f2',
-                color: change >= 0 ? '#16a34a' : '#ef4444'
-              }}>
-                <span>Change</span>
-                <span style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {change >= 0 ? `₹${change.toFixed(2)}` : `Short ₹${Math.abs(change).toFixed(2)}`}
-                </span>
-              </div>
+            <input
+              type="number"
+              min={0}
+              value={Number(props.manualDiscount || 0) > 0 ? props.manualDiscount : ''}
+              onChange={e => props.setManualDiscount?.(e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0))}
+              placeholder="0"
+              style={{
+                flex: 1, minWidth: 0, border: '1px solid #f3e8ff', borderRadius: '8px',
+                padding: '8px 10px', fontSize: '13px', fontFamily: "'DM Mono', monospace",
+                outline: 'none', color: '#1a0a2e', background: 'white'
+              }}
+            />
+            {Number(props.manualDiscount || 0) > 0 && (
+              <button
+                onClick={() => props.setManualDiscount?.(0)}
+                style={{ background: 'none', border: 'none', color: '#a21caf', cursor: 'pointer', padding: '4px' }}>
+                <X size={16} />
+              </button>
             )}
           </div>
-        )}
+          {Number(props.manualDiscountAmount || 0) > 0 && (
+            <div style={{ marginTop: '5px', fontSize: '11px', fontWeight: 700, color: '#16a34a', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Discount off this bill</span>
+              <span style={{ fontFamily: "'DM Mono', monospace" }}>-₹{Number(props.manualDiscountAmount || 0).toFixed(2)}</span>
+            </div>
+          )}
+        </div>
 
         <button
           className="btn-complete"

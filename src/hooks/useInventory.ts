@@ -3,6 +3,16 @@ import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 
+// stock_damage_log.type only accepts these four. The UI collects a free-text
+// reason, so map it; anything unrecognised is recorded as generic damage.
+function damageTypeFor(reason: string): 'damage' | 'loss' | 'theft' | 'expiry' {
+  const r = (reason || '').toLowerCase()
+  if (r.includes('theft') || r.includes('shrink')) return 'theft'
+  if (r.includes('expir')) return 'expiry'
+  if (r.includes('sample') || r.includes('display') || r.includes('lost') || r.includes('loss')) return 'loss'
+  return 'damage'
+}
+
 export function useInventory() {
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -21,7 +31,7 @@ export function useInventory() {
           .order('name')
         if (!error && data && data.length > 0) {
           setProducts(data)
-          saveProductsToCache(data)
+          saveProductsToCache(data, { replace: true })
           setLoading(false)
           return
         }
@@ -105,20 +115,28 @@ export function useInventory() {
             .update({ stock_qty: newQty })
             .eq('id', productId)
 
-          await supabase.from('stock_damage_log').insert({
+          // The table stores a POSITIVE qty (CHECK qty > 0) plus a `type` limited
+          // to damage/loss/theft/expiry. Direction lives in adjustment_type and in
+          // qty_before/qty_after. Writing a signed `qty_change` — a column that does
+          // not exist — silently rejected every row, so nothing was ever logged.
+          const qtyChange =
+            type === 'add'
+              ? qty
+              : type === 'remove'
+                ? -qty
+                : qty - product.stock_qty
+
+          const { error: logError } = await supabase.from('stock_damage_log').insert({
             product_id: productId,
+            qty: Math.abs(qtyChange) || 1,
             qty_before: product.stock_qty,
-            qty_change:
-              type === 'add'
-                ? qty
-                : type === 'remove'
-                  ? -qty
-                  : qty - product.stock_qty,
             qty_after: newQty,
+            type: damageTypeFor(reason),
             reason: reason,
             notes: notes || null,
             adjustment_type: type
           })
+          if (logError) throw logError
         } catch (dbErr) {
           console.warn('DB adjust stock warning, local cache already updated:', dbErr)
         }
@@ -206,7 +224,6 @@ export function useInventory() {
           product_id: count.productId,
           system_qty: count.systemQty,
           physical_qty: count.physicalQty,
-          difference: count.physicalQty - count.systemQty,
           counted_at: new Date().toISOString()
         })
 

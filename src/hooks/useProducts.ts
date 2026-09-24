@@ -49,7 +49,10 @@ export function useProducts() {
       if (error) throw error
       if (data && data.length > 0) {
         setProducts(data)
-        saveProductsToCache(data)
+        // Only a query with no filters represents the full catalogue.
+        saveProductsToCache(data, {
+          replace: !search && !categoryFilter && statusFilter === 'all',
+        })
       } else {
         const cached = getCachedProducts()
         setProducts(cached || data || [])

@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Layout } from '../components/shared/Layout'
-import { getSettings, saveSettings, DEFAULT_SETTINGS, type AppSettings } from '../utils/settings'
+import { getSettings, saveSettings, DEFAULT_SETTINGS, pushShopSettings, pullShopSettings, type AppSettings } from '../utils/settings'
 import { supabase } from '../lib/supabase'
-import { printBill } from '../utils/printBill'
+import { printBill, buildBillHTML, buildBillMessage } from '../utils/printBill'
+import { printHTML, listPrinters, canSelectPrinters, autoAssignPrinters, clearPrintQueues, pendingJobs } from '../utils/printHTML'
+import { printBarcodeLabels } from '../utils/printLabels'
 import { getCachedSalesmen, saveSalesmenToCache } from '../utils/offlineCache'
+import type { WhatsAppState } from '../types'
+import { waStatus, waConnect, waLogout, sendWhatsApp, isRelayConfigured } from '../utils/whatsapp'
 import toast from 'react-hot-toast'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -201,28 +205,149 @@ function ShopInfoTab() {
 
 // ─── TAB 2: Bill & Print ─────────────────────────────────────────────────────
 
+// Stand-in sale for the live preview and the test print. Deliberately exercises
+// the awkward cases: long product names with sizes, a discount, and a split payment.
+const SAMPLE_SALE = {
+  invoiceNo: 'B/1457',
+  cart: [
+    { product: { name: '2353', category: 'PANTS', barcode: '45265', size: '42' }, qty: 1, unit_price: 1400, line_total: 1400 },
+    { product: { name: '4375', category: 'TOP', barcode: '45792', size: '3XL' }, qty: 1, unit_price: 950, line_total: 950 },
+    { product: { name: '803291', category: 'TOP', barcode: '44562', size: '3XL-4XL' }, qty: 2, unit_price: 1050, line_total: 2100 },
+  ],
+  customer: { name: 'Rekha', phone: '8488004851' },
+  subtotal: 4450, gstAmount: 0, totalDiscount: 200, netAmount: 4250,
+  paymentMode: 'upi',
+  tenders: { cash: 250, card: 0, upi: 4000 },
+  creditRemainder: 0,
+  salesmanName: 'aadil',
+  date: new Date().toISOString(),
+  note: '',
+}
+
+// Stand-in shipping label so the third printer can be tested before the
+// online-order label document itself is built.
+const SAMPLE_LABEL_HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Arial,sans-serif;width:100mm;padding:4mm;color:#000}
+  .b{border:1.5px solid #000;padding:4mm}
+  h1{font-size:13pt;margin-bottom:2mm}
+  .r{font-size:9pt;line-height:1.5}
+  .c{margin-top:3mm;padding-top:3mm;border-top:1px dashed #000;font-size:11pt;font-weight:700}
+</style></head><body><div class="b">
+  <h1>TEST SHIPPING LABEL</h1>
+  <div class="r">Deliver to<br><b>Sample Customer</b><br>12 Example Road, Surat 395003<br>M. 98250 00000</div>
+  <div class="c">Order TEST-0001 &nbsp;|&nbsp; 1 parcel</div>
+</div></body></html>`
+
 function BillPrintTab() {
   const [s, setS] = useState(() => getSettings())
   const set = (k: keyof AppSettings, v: any) => setS(prev => ({ ...prev, [k]: v }))
 
   const save = () => { saveSettings(s); toast.success('Print settings saved!') }
 
-  const printTest = () => {
-    const testSale = {
-      invoiceNo: 'TEST-001',
-      cart: [
-        { product: { name: 'Sample Product', gst_rate: 12 }, qty: 2, unit_price: 499, discount_pct: 0, line_total: 998 }
-      ],
-      customer: { name: 'Test Customer', phone: '9876543210' },
-      subtotal: 998, gstAmount: 119.76, totalDiscount: 0, netAmount: 1117.76,
-      paymentMode: 'cash', date: new Date().toLocaleString('en-IN'),
-      salesmanName: 'Test Staff', note: ''
+  const [printers, setPrinters] = useState<{ name: string; displayName: string; isDefault: boolean }[]>([])
+  const [syncing, setSyncing] = useState(false)
+
+  const [detecting, setDetecting] = useState(false)
+  const [queued, setQueued] = useState(0)
+
+  // A backlog is invisible until it lands on paper — sixty copies of one bill, in
+  // the incident that prompted this. Show it here while the shop is on this screen.
+  useEffect(() => {
+    if (!canSelectPrinters()) return
+    let alive = true
+    const tick = () => pendingJobs().then(n => { if (alive) setQueued(n) })
+    tick()
+    const id = setInterval(tick, 15000)   // each tick spawns a PowerShell process; don't be greedy
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  const loadPrinters = async () => {
+    const list = await listPrinters()
+    setPrinters(list)
+    if (canSelectPrinters() && list.length === 0) toast.error('No printers reported by Windows')
+    return list
+  }
+
+  // Work out which printer is which and fill the boxes in. `force` re-decides
+  // even for printers already chosen by hand.
+  const detect = async (force: boolean) => {
+    setDetecting(true)
+    try {
+      await loadPrinters()
+      const { patch, found } = await autoAssignPrinters({ force })
+      if (!found) { toast.error('Windows reported no printers. Switch them on and try again.'); return }
+      if (!Object.keys(patch).length) { toast('Nothing to change', { icon: 'ℹ️' }); return }
+      saveSettings(patch)
+      setS(prev => ({ ...prev, ...patch }))
+      toast.success(`${found} printer${found === 1 ? '' : 's'} set up`)
+    } finally { setDetecting(false) }
+  }
+
+  // A fresh install should be ready to print without anyone opening this screen
+  // and matching Windows device names by hand.
+  useEffect(() => {
+    if (!canSelectPrinters()) { loadPrinters(); return }
+    if (getSettings().billPrinter) { loadPrinters(); return }
+    detect(false)
+  }, [])
+
+  const printTest = () => printBill(SAMPLE_SALE)
+
+  // Save first: the print routes by the saved setting, not by what is on screen.
+  const testPrint = (key: 'billPrinter' | 'barcodePrinter' | 'onlineLabelPrinter') => {
+    saveSettings({ [key]: s[key] } as Partial<AppSettings>)
+    if (key === 'billPrinter') { printBill(SAMPLE_SALE); return }
+    if (key === 'barcodePrinter') {
+      printBarcodeLabels([{
+        name: '803291', design_no: '803291', colour: '', size: '3XL',
+        barcode: '45918', mrp: 1500, sku: '45918',
+      }], 1, '50x25')
+      return
     }
-    printBill(testSale)
+    printHTML(SAMPLE_LABEL_HTML, { target: 'online', widthMm: 100, settleMs: 150 })
   }
 
   return (
     <>
+      <Card style={{ border: '1px solid #ddd6fe' }}>
+        <SectionTitle sub="Shop name, logo, conditions and footer follow the login onto every computer">
+          Bill Settings Sync
+        </SectionTitle>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            onClick={async () => {
+              setSyncing(true)
+              const ok = await pushShopSettings()
+              setSyncing(false)
+              ok ? toast.success('Published — other computers get this on next sign-in')
+                 : toast.error('Could not publish. Check the internet connection.')
+            }}
+            disabled={syncing}
+            style={{ padding: '10px 16px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.6 : 1, fontFamily: "'DM Sans', sans-serif" }}
+          >
+            {syncing ? 'Publishing…' : 'Publish to all computers'}
+          </button>
+          <button
+            onClick={async () => {
+              setSyncing(true)
+              const ok = await pullShopSettings()
+              setSyncing(false)
+              if (ok) { toast.success('Loaded from the shop'); setTimeout(() => window.location.reload(), 800) }
+              else toast('Nothing published yet — press Publish on the computer that is set up', { icon: 'ℹ️' })
+            }}
+            disabled={syncing}
+            style={{ padding: '10px 16px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}
+          >
+            Load from the shop
+          </button>
+        </div>
+        <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', marginBottom: 0, lineHeight: 1.6 }}>
+          Printer choices are <b>not</b> published — each computer keeps its own, because the
+          printers attached to one machine do not exist on another.
+        </p>
+      </Card>
+
       <Card>
         <SectionTitle sub="Customize what appears on your bills">Bill Customization</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
@@ -233,37 +358,103 @@ function BillPrintTab() {
             <input style={inputStyle} value={s.billFooter} onChange={e => set('billFooter', e.target.value)} placeholder="Thank you for shopping!" />
           </Field>
         </div>
-        <div style={{ display: 'flex', gap: '20px' }}>
-          <div style={{ flex: 1 }}>
+        <Field label="Bill Conditions" helper="One per line. Printed under the total with a * in front.">
+          <textarea
+            style={{ ...inputStyle, minHeight: '70px', resize: 'vertical', lineHeight: 1.5 }}
+            value={s.billTerms}
+            onChange={e => set('billTerms', e.target.value)}
+            placeholder={'EXCHANGE WITHIN 3 DAYS.\nNO REFUND.'}
+          />
+        </Field>
+
+        <Field label="Shop Logo" helper="Printed above the shop name. PNG or JPG, under 200 KB.">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {s.shopLogo && (
+              <img src={s.shopLogo} alt="" style={{ height: '44px', maxWidth: '120px', objectFit: 'contain', border: '1px solid #f3e8ff', borderRadius: '8px', padding: '4px', background: 'white' }} />
+            )}
+            <label style={{ padding: '9px 16px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer' }}>
+              {s.shopLogo ? 'Change logo' : 'Upload logo'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''            // let the same file be picked again
+                  if (!file) return
+                  // Settings live in localStorage, which is small and shared with
+                  // the offline cache — keep the logo well under its budget.
+                  if (file.size > 200 * 1024) return toast.error('Logo must be under 200 KB')
+                  const reader = new FileReader()
+                  reader.onload = () => set('shopLogo', String(reader.result))
+                  reader.onerror = () => toast.error('Could not read that image')
+                  reader.readAsDataURL(file)
+                }}
+              />
+            </label>
+            {s.shopLogo && (
+              <button
+                onClick={() => set('shopLogo', '')}
+                style={{ padding: '9px 14px', background: 'white', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '10px', fontSize: '13px', cursor: 'pointer' }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </Field>
+
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>Show on Bill</div>
             <Toggle value={s.showGSTIN} onChange={v => set('showGSTIN', v)} label="GSTIN" sub="Show GST number on bill" />
             <Toggle value={s.showCustomer} onChange={v => set('showCustomer', v)} label="Customer Name & Phone" />
             <Toggle value={s.showSalesman} onChange={v => set('showSalesman', v)} label="Salesman Name" />
-            <Toggle value={s.showGSTBreakdown} onChange={v => set('showGSTBreakdown', v)} label="GST Breakdown" sub="CGST + SGST split" />
-            <Toggle value={s.showLoyaltyPoints} onChange={v => set('showLoyaltyPoints', v)} label="Loyalty Points Earned" />
-            <Toggle value={s.showBarcode} onChange={v => set('showBarcode', v)} label="Barcode on Bill" />
-            <Toggle value={s.showUPIQR} onChange={v => set('showUPIQR', v)} label="UPI Payment Badge" />
+            <Toggle value={s.showPaymentBreakdown} onChange={v => set('showPaymentBreakdown', v)} label="Payment Details" sub="Cash / UPI / Card / Udhar split" />
+            <Toggle value={s.showBarcode} onChange={v => set('showBarcode', v)} label="Barcode under each item" />
           </div>
-          {/* Mini bill preview */}
-          <div style={{ width: '180px', flexShrink: 0 }}>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>Preview</div>
-            <div style={{ background: 'white', border: '1px solid #f3e8ff', borderRadius: '8px', padding: '10px', fontSize: '9px', color: '#1a0a2e', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-              <div style={{ textAlign: 'center', marginBottom: '6px' }}>
-                <div style={{ fontWeight: 700, fontSize: '11px', color: '#9333ea' }}>{s.billHeader || 'Tax Invoice'}</div>
-                <div style={{ color: '#64748b', fontSize: '8px' }}>{getSettings().shopName || 'Your Shop'}</div>
-                {s.showGSTIN && getSettings().gstin && <div style={{ color: '#64748b', fontSize: '8px' }}>GSTIN: {getSettings().gstin}</div>}
-              </div>
-              <div style={{ borderTop: '1px dashed #e9d5ff', margin: '4px 0' }} />
-              <div style={{ color: '#64748b', fontSize: '8px', marginBottom: '4px' }}>Invoice: #SAMPLE-001</div>
-              {s.showCustomer && <div style={{ color: '#64748b', fontSize: '8px' }}>Customer: Sample Name</div>}
-              {s.showSalesman && <div style={{ color: '#64748b', fontSize: '8px' }}>By: Staff Name</div>}
-              <div style={{ borderTop: '1px dashed #e9d5ff', margin: '4px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Item × 1</span><span>₹499</span></div>
-              <div style={{ borderTop: '1px dashed #e9d5ff', margin: '4px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#9333ea' }}><span>Total</span><span>₹499</span></div>
-              <div style={{ textAlign: 'center', marginTop: '6px', color: '#9333ea', fontWeight: 600, fontSize: '8px' }}>{s.billFooter || 'Thank you!'}</div>
+
+          {/* The real bill template, rendered live with the edits above. Not a
+              mock-up — a hand-drawn preview drifts away from the printed bill. */}
+          <div style={{ width: '250px', flexShrink: 0 }}>
+            <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>
+              Live Preview
+            </div>
+            <iframe
+              title="Bill preview"
+              srcDoc={buildBillHTML(SAMPLE_SALE, s)}
+              style={{
+                width: '250px', height: '430px', border: '1px solid #f3e8ff',
+                borderRadius: '8px', background: 'white',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.5 }}>
+              Exactly what prints and what the customer gets as a PDF on WhatsApp.
             </div>
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle sub="The text sent with the bill PDF on WhatsApp">WhatsApp Message</SectionTitle>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+          <Field label="Google Review Link" helper="Leave blank to leave this out of the message.">
+            <input style={inputStyle} value={s.googleReviewUrl} onChange={e => set('googleReviewUrl', e.target.value)} placeholder="https://g.page/r/.../review" />
+          </Field>
+          <Field label="Instagram Link" helper="Leave blank to leave this out of the message.">
+            <input style={inputStyle} value={s.instagramUrl} onChange={e => set('instagramUrl', e.target.value)} placeholder="https://www.instagram.com/yourshop" />
+          </Field>
+        </div>
+        <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>Preview</div>
+        <div style={{
+          background: '#dcf8c6', border: '1px solid #cfeab4', borderRadius: '12px',
+          padding: '12px 14px', fontSize: '13px', color: '#1a0a2e', lineHeight: 1.5,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: "'DM Sans', sans-serif",
+        }}>
+          {buildBillMessage(SAMPLE_SALE, s)}
+        </div>
+        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>
+          The bill PDF is attached to this message.
         </div>
       </Card>
 
@@ -287,6 +478,107 @@ function BillPrintTab() {
         <Toggle value={s.autoPrint} onChange={v => set('autoPrint', v)} label="Auto Print after each sale" sub="Print dialog opens automatically after Complete Sale" />
         <Toggle value={s.autoWhatsApp} onChange={v => set('autoWhatsApp', v)} label="Auto WhatsApp after sale" sub="Opens WhatsApp automatically (customer needs phone number)" />
         <SaveBtn onClick={save} />
+      </Card>
+
+      <Card>
+        <SectionTitle sub="Set on THIS computer only — every shop PC picks its own printers">Your Printers</SectionTitle>
+        {!canSelectPrinters() ? (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '14px', fontSize: '13px', color: '#92400e', lineHeight: 1.6 }}>
+            Choosing a printer per document needs the <b>desktop app</b>. In a browser the
+            print dialog opens and you pick the printer yourself each time.
+          </div>
+        ) : (
+          <>
+            {printers.length === 0 && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 14px', fontSize: '12px', color: '#b91c1c', marginBottom: '14px' }}>
+                Windows reported no printers. Connect and switch them on, then press Refresh.
+              </div>
+            )}
+
+            {queued > 0 && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '14px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', color: '#b91c1c', lineHeight: 1.6, marginBottom: '10px' }}>
+                  <b>{queued} print job{queued === 1 ? '' : 's'} waiting.</b> Windows holds jobs for a
+                  printer that is switched off or jammed, then prints all of them at once when it
+                  comes back. Clear them unless you are expecting these.
+                </div>
+                <button
+                  onClick={async () => {
+                    const r = await clearPrintQueues()
+                    if (r.reason) toast.error(r.reason)
+                    else toast.success(`Cleared ${r.removed} waiting job${r.removed === 1 ? '' : 's'}`)
+                    setQueued(await pendingJobs())
+                  }}
+                  style={{ padding: '9px 16px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}
+                >
+                  Clear {queued} waiting job{queued === 1 ? '' : 's'}
+                </button>
+              </div>
+            )}
+
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px', marginBottom: '16px' }}>
+              <div style={{ fontSize: '13px', color: '#166534', lineHeight: 1.6, marginBottom: '10px' }}>
+                Plug the printers in, switch them on, then press this once. The app
+                recognises receipt printers (Rugtek, POS-80, Epson TM) and label
+                printers (TSC, TVS, Zebra) by name and fills in the boxes below.
+              </div>
+              <button
+                onClick={() => detect(true)}
+                disabled={detecting}
+                style={{ padding: '10px 18px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: detecting ? 'not-allowed' : 'pointer', opacity: detecting ? 0.6 : 1, fontFamily: "'DM Sans', sans-serif" }}
+              >
+                {detecting ? 'Looking…' : '🔍 Detect my printers'}
+              </button>
+            </div>
+            {([
+              ['billPrinter', 'Bill / Receipt Printer', 'Sales bills, exchange slips, credit notes and purchase bills.'],
+              ['barcodePrinter', 'Barcode Label Printer', 'Product barcode and price stickers.'],
+              ['onlineLabelPrinter', 'Online Order Label Printer', 'Shipping and address stickers for web orders.'],
+            ] as const).map(([key, label, helper]) => (
+              <Field key={key} label={label} helper={helper}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <select
+                    style={{ ...inputStyle, flex: 1 }}
+                    value={s[key]}
+                    onChange={e => set(key, e.target.value)}
+                  >
+                    <option value="">Ask me each time (show the print dialog)</option>
+                    {printers.map(pr => (
+                      <option key={pr.name} value={pr.name}>
+                        {pr.displayName}{pr.isDefault ? '  (Windows default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => testPrint(key)}
+                    style={{ padding: '10px 14px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: "'DM Sans', sans-serif" }}
+                  >
+                    Test
+                  </button>
+                </div>
+              </Field>
+            ))}
+            <Toggle
+              value={s.rawThermal !== false}
+              onChange={v => { set('rawThermal', v); saveSettings({ rawThermal: v }) }}
+              label="Direct thermal printing (recommended)"
+              sub="Sends the receipt to the printer as plain printer commands instead of drawing a page. This is what stops thermal printers spitting out blank paper. Turn off only for an A4 laser printer."
+            />
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button
+                onClick={loadPrinters}
+                style={{ padding: '9px 16px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}
+              >
+                ↻ Refresh printer list
+              </button>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                {printers.length} printer{printers.length === 1 ? '' : 's'} found
+              </span>
+            </div>
+            <SaveBtn onClick={save} />
+          </>
+        )}
       </Card>
 
       <Card style={{ background: '#f5f3ff', border: '1px solid #e9d5ff' }}>
@@ -567,6 +859,7 @@ function DataBackupTab() {
   const [dbStatus, setDbStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
   const [dangerText, setDangerText] = useState('')
   const [resetText, setResetText] = useState('')
+  const [cacheText, setCacheText] = useState('')
 
   const exportProducts = async () => {
     const { data } = await supabase.from('products').select('*, categories(name)')
@@ -616,6 +909,26 @@ function DataBackupTab() {
     if (dangerText !== 'CONFIRM') { toast.error('Type CONFIRM to proceed'); return }
     const { error } = await supabase.from('sales').delete().like('invoice_no', 'OFF-%')
     if (error) { toast.error(error.message) } else { toast.success('Test data cleared'); setDangerText('') }
+  }
+
+  // Every cache the app keeps in this browser, except erp_settings (shop name,
+  // logo, bill conditions) which should survive a data reset. Without this, a
+  // wiped database still shows the old products and can even re-sync old bills
+  // from the pending queue.
+  const clearLocalCache = () => {
+    if (cacheText !== 'CONFIRM') { toast.error('Type CONFIRM to proceed'); return }
+    const keys = [
+      'gsoft_products_cache', 'gsoft_customers_cache', 'gsoft_credit_notes_cache',
+      'gsoft_expenses_cache', 'gsoft_purchase_returns_cache', 'gsoft_pending_sales',
+      'gsoft_salesmen_cache', 'expense_counter', 'purchase_counter',
+    ]
+    let removed = 0
+    for (const k of keys) {
+      if (localStorage.getItem(k) !== null) { localStorage.removeItem(k); removed++ }
+    }
+    toast.success(`Cleared ${removed} cached item${removed === 1 ? '' : 's'}`)
+    setCacheText('')
+    setTimeout(() => window.location.reload(), 1000)
   }
 
   const resetSettings = () => {
@@ -679,6 +992,17 @@ function DataBackupTab() {
             <button onClick={clearTestData} style={{ padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}>Clear Test Data</button>
           </div>
         </div>
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '16px', marginBottom: '12px' }}>
+          <div style={{ fontWeight: 600, color: '#dc2626', marginBottom: '6px', fontSize: '13px' }}>Clear Cached Data</div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px' }}>
+            Empties this browser's saved products, customers, credit notes and any unsynced bills.
+            Use after clearing the database so old data cannot reappear. Shop settings are kept.
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input style={{ ...inputStyle, width: '180px', padding: '8px 12px' }} placeholder='Type "CONFIRM"' value={cacheText} onChange={e => setCacheText(e.target.value)} />
+            <button onClick={clearLocalCache} style={{ padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}>Clear Cache</button>
+          </div>
+        </div>
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '16px' }}>
           <div style={{ fontWeight: 600, color: '#dc2626', marginBottom: '6px', fontSize: '13px' }}>Reset App Settings</div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px' }}>Clears all local settings. Does NOT delete any database data.</div>
@@ -701,11 +1025,18 @@ function AboutTab() {
     ['Ctrl+7', 'Reports'],
   ]
 
-  const checkUpdate = () => {
-    if (window.electronAPI) {
-      toast('Checking for updates...', { icon: '🔄' })
+  const checkUpdate = async () => {
+    if (!window.electronAPI?.checkForUpdates) {
+      toast('Updates apply to the desktop app. The web version is always current.', { icon: 'ℹ️' })
+      return
+    }
+    toast('Checking for updates…', { icon: '🔄' })
+    const r = await window.electronAPI.checkForUpdates()
+    if (!r.ok) { toast.error(r.reason || 'Could not reach the update server'); return }
+    if (r.version && r.version !== r.current) {
+      toast.success(`Version ${r.version} found — downloading. You will be asked to restart.`)
     } else {
-      toast('Updates are available in the desktop app only.', { icon: 'ℹ️' })
+      toast.success(`You are up to date (v${r.current || APP_VERSION})`)
     }
   }
 
@@ -717,7 +1048,7 @@ function AboutTab() {
           <div>
             <div style={{ fontSize: '22px', fontWeight: 700, color: '#1a0a2e' }}>Retail ERP</div>
             <div style={{ fontSize: '14px', color: '#9333ea', fontWeight: 500 }}>Fashion Edition</div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>Version 1.0.0 · Build 26 March 2026</div>
+            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>Version {APP_VERSION}</div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -733,7 +1064,7 @@ function AboutTab() {
           <button onClick={checkUpdate} style={{ padding: '10px 20px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
             Check for Updates
           </button>
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>Current: v1.0.0</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>Current: v{APP_VERSION}</span>
         </div>
         <div style={{ background: '#f5f3ff', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '14px' }}>
           <div style={{ fontWeight: 600, color: '#1a0a2e', marginBottom: '8px', fontSize: '13px' }}>Update History</div>
@@ -751,7 +1082,7 @@ function AboutTab() {
           <div>📧 vatsal@gsoft.com</div>
         </div>
         <button
-          onClick={() => window.open('https://wa.me/919999999999?text=' + encodeURIComponent('Hi, I need support for Retail ERP v1.0.0'))}
+          onClick={() => window.open('https://wa.me/919999999999?text=' + encodeURIComponent(`Hi, I need support for Retail ERP v${APP_VERSION}`))}
           style={{ padding: '10px 18px', background: '#25D366', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}
         >
           💬 WhatsApp Support
@@ -777,14 +1108,205 @@ function AboutTab() {
   )
 }
 
+const APP_VERSION: string = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.1'
+
+// ─── TAB: WhatsApp ───────────────────────────────────────────────────────────
+
+function WhatsAppTab() {
+  const [state, setState] = useState<WhatsAppState>({ status: 'disconnected' })
+  const [serverUrl, setServerUrl] = useState(() => getSettings().waServerUrl || '')
+
+  // A page served over https cannot reach http://localhost — Chrome blocks
+  // public-to-private requests. Say so plainly rather than letting the shop
+  // stare at a status that never turns green.
+  const sameMachine =
+    !serverUrl.trim() ||
+    window.location.protocol !== 'https:' ||
+    /^https:/i.test(serverUrl.trim())
+  const [testPhone, setTestPhone] = useState('')
+  const [testMsg, setTestMsg] = useState('Hello from Retail ERP 👋')
+  const [sending, setSending] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const failures = useRef(0)
+  const refresh = () =>
+    waStatus()
+      .then(s => { setState(s); setError(''); failures.current = 0 })
+      .catch(e => {
+        failures.current += 1
+        const msg = String(e?.message || '')
+        setError(/fetch|network|load failed/i.test(msg)
+          ? 'The WhatsApp service is not running on this computer. Bills still work — pressing WhatsApp opens the chat with the message ready, and you press send.'
+          : msg)
+      })
+
+  // Poll while pairing so the QR appears and the screen flips to connected on its own.
+  useEffect(() => {
+    if (!isRelayConfigured()) return
+    refresh()
+    const t = setInterval(() => {
+      // Give up after a few failures; a shop PC with no service should not poll
+      // a dead address every 2.5 seconds all day.
+      if (failures.current >= 3) return
+      refresh()
+    }, 2500)
+    return () => clearInterval(t)
+  }, [serverUrl])
+
+  const { status } = state
+  const dot = { connected: '#16a34a', connecting: '#f59e0b', qr: '#f59e0b', disconnected: '#94a3b8' }[status]
+  const label = {
+    connected: 'Connected', connecting: 'Connecting…', qr: 'Scan the QR code', disconnected: 'Not connected'
+  }[status]
+
+  return (
+    <>
+      <Card>
+        <SectionTitle sub="Link the shop's WhatsApp once — messages then send in the background">WhatsApp</SectionTitle>
+
+        <Field
+          label="WhatsApp Server Address"
+          helper="Where the WhatsApp service is running. Leave blank to always open WhatsApp in a tab instead."
+        >
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }}
+              value={serverUrl}
+              onChange={e => setServerUrl(e.target.value)}
+              placeholder="http://localhost:8099"
+            />
+            <button
+              onClick={() => { saveSettings({ waServerUrl: serverUrl.trim() }); toast.success('Saved'); refresh() }}
+              style={{
+                padding: '10px 16px', background: '#9333ea', color: 'white', border: 'none',
+                borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap'
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </Field>
+
+        {!sameMachine && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', fontSize: '12px', color: '#92400e', lineHeight: 1.6, marginBottom: '18px' }}>
+            This page is served from the internet but the address above is a local one.
+            Browsers block that combination, so direct sending will not work here.
+            Either open the app on the computer running the service, or host the service
+            and put its <code>https://</code> address above.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+          <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: dot }} />
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#1a0a2e' }}>{label}</div>
+          {state.name && <div style={{ fontSize: '12px', color: '#94a3b8' }}>· {state.name}</div>}
+        </div>
+
+        {status === 'qr' && state.qr && (
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <img src={state.qr} alt="WhatsApp QR" style={{ width: '260px', borderRadius: '12px', border: '1px solid #f3e8ff' }} />
+            <p style={{ fontSize: '12px', color: '#64748b', marginTop: '12px', lineHeight: 1.6 }}>
+              On your phone open <b>WhatsApp → Settings → Linked devices → Link a device</b>,
+              then point the camera here.
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px', fontSize: '12px', color: '#b91c1c', marginBottom: '16px' }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {status !== 'connected' && (
+            <button
+              onClick={async () => {
+                setBusy(true)
+                try { await waConnect(status === 'qr'); await refresh() }
+                catch (e: any) { toast.error(e.message || 'Could not start WhatsApp') }
+                finally { setBusy(false) }
+              }}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '12px', background: '#9333ea', color: 'white', border: 'none',
+                borderRadius: '12px', fontSize: '14px', fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.7 : 1
+              }}
+            >
+              {busy ? 'Starting…' : status === 'qr' ? 'Refresh QR' : 'Link WhatsApp'}
+            </button>
+          )}
+          {status === 'connected' && (
+            <button
+              onClick={async () => {
+                await waLogout().catch(() => {})
+                await refresh()
+                toast.success('WhatsApp unlinked')
+              }}
+              style={{
+                flex: 1, padding: '12px', background: 'white', color: '#dc2626', border: '1px solid #fecaca',
+                borderRadius: '12px', fontSize: '14px', fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: 'pointer'
+              }}
+            >
+              Unlink this device
+            </button>
+          )}
+        </div>
+      </Card>
+
+      {status === 'connected' && (
+        <Card>
+          <SectionTitle sub="Send yourself a message to confirm it works">Test message</SectionTitle>
+          <Field label="Phone number" helper="10 digits for India, or include the country code">
+            <input style={inputStyle} value={testPhone} onChange={e => setTestPhone(e.target.value)} placeholder="9876543210" />
+          </Field>
+          <Field label="Message">
+            <textarea style={{ ...inputStyle, minHeight: '80px', resize: 'vertical' }} value={testMsg} onChange={e => setTestMsg(e.target.value)} />
+          </Field>
+          <button
+            onClick={async () => {
+              if (!testPhone.trim()) return toast.error('Enter a phone number')
+              setSending(true)
+              await sendWhatsApp(testPhone, testMsg)
+              setSending(false)
+            }}
+            disabled={sending}
+            style={{
+              width: '100%', padding: '13px', background: '#16a34a', color: 'white', border: 'none',
+              borderRadius: '12px', fontSize: '14px', fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+              cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.7 : 1
+            }}
+          >
+            {sending ? 'Sending…' : 'Send test message'}
+          </button>
+        </Card>
+      )}
+
+      <Card style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+        <div style={{ fontSize: '13px', color: '#92400e', lineHeight: 1.7 }}>
+          <b>Please read.</b> This links your own WhatsApp account the same way WhatsApp Web does.
+          It is not WhatsApp's official business API, and automated sending is against their terms —
+          heavy or bulk-looking activity can get the number blocked. Use it for bills and reminders
+          to customers who expect them, not for marketing blasts. Keep the phone online and connected
+          to the internet, or messages will not go out.
+        </div>
+      </Card>
+    </>
+  )
+}
+
 // ─── Main SettingsPage ────────────────────────────────────────────────────────
 
-type Tab = 'shop' | 'print' | 'staff' | 'notifications' | 'data' | 'about'
+type Tab = 'shop' | 'print' | 'staff' | 'whatsapp' | 'notifications' | 'data' | 'about'
 
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'shop',          icon: '🏪', label: 'Shop Info' },
   { id: 'print',         icon: '🖨️', label: 'Bill & Print' },
   { id: 'staff',         icon: '👥', label: 'Staff & PIN' },
+  { id: 'whatsapp',      icon: '💬', label: 'WhatsApp' },
   { id: 'notifications', icon: '🔔', label: 'Notifications' },
   { id: 'data',          icon: '💾', label: 'Data & Backup' },
   { id: 'about',         icon: 'ℹ️', label: 'About' },
@@ -832,6 +1354,7 @@ export function SettingsPage() {
           {activeTab === 'shop'          && <ShopInfoTab />}
           {activeTab === 'print'         && <BillPrintTab />}
           {activeTab === 'staff'         && <StaffPINTab />}
+          {activeTab === 'whatsapp'      && <WhatsAppTab />}
           {activeTab === 'notifications' && <NotificationsTab />}
           {activeTab === 'data'          && <DataBackupTab />}
           {activeTab === 'about'         && <AboutTab />}

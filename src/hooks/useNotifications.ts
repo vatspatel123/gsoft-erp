@@ -64,22 +64,6 @@ export function useNotifications() {
           })
         }
 
-        // 4. Supplier Purchase Bills Due > 30 Days
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-        try {
-          const { data: supplierDues } = await supabase
-            .from('inward_challans')
-            .select('total_amount, bill_amount')
-            .lte('created_at', thirtyDaysAgo)
-            .limit(10)
-
-          if (supplierDues && supplierDues.length > 0) {
-            toast(`🔔 Reminder: Supplier purchase bills older than 30 days pending review/payment.`, {
-              duration: 7000,
-              style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }
-            })
-          }
-        } catch {}
       } catch (e) {
         // Silently fail — notifications are non-critical
       }

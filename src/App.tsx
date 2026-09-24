@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useNotifications } from './hooks/useNotifications'
 import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale } from './utils/offlineCache'
+import { pullShopSettings } from './utils/settings'
 import { supabase } from './lib/supabase'
 import toast from 'react-hot-toast'
 import { SplashScreen } from './components/shared/SplashScreen'
@@ -15,8 +16,6 @@ import { StockDamagePage } from './pages/StockDamagePage'
 import { CustomersPage } from './pages/CustomersPage'
 import { InvoicesPage } from './pages/InvoicesPage'
 import { SuppliersPage } from './pages/SuppliersPage'
-import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage'
-import { InwardChallansPage } from './pages/InwardChallansPage'
 import { AccountingPage } from './pages/AccountingPage'
 import ReportsPage from './pages/ReportsPage'
 import { StaffPage } from './pages/StaffPage'
@@ -47,6 +46,9 @@ function AppContent() {
       setSession(session)
       setAuthInitialized(true)
       if (session) {
+        // The shop's bill layout, logo and conditions live with the store, not
+        // with the computer, so a fresh install picks them up on first sign-in.
+        void pullShopSettings()
         supabase.from('stores').select('subscription_status').single().then(({ data }) => {
           if (data) setStoreStatus(data.subscription_status)
         })
@@ -58,6 +60,7 @@ function AppContent() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
+        void pullShopSettings()
         supabase.from('stores').select('subscription_status').single().then(({ data }) => {
           if (data) setStoreStatus(data.subscription_status)
         })
@@ -86,7 +89,7 @@ function AppContent() {
           supabase.from('users').select('id, name, role').eq('is_active', true),
           supabase.from('customers').select('*')
         ])
-        if (p.data) saveProductsToCache(p.data)
+        if (p.data) saveProductsToCache(p.data, { replace: true })
         if (s.data) saveSalesmenToCache(s.data)
         if (c.data && c.data.length >= 0) {
           localStorage.setItem('gsoft_customers_cache', JSON.stringify({
@@ -121,6 +124,15 @@ function AppContent() {
               net_amount: sale.netAmount,
               gst_amount: sale.gstAmount,
               payment_mode: sale.paymentMode,
+              cash_amount: sale.tenders?.cash || 0,
+              card_amount: sale.tenders?.card || 0,
+              upi_amount: sale.tenders?.upi || 0,
+              credit_amount: sale.creditRemainder || 0,
+              credit_status: sale.creditRemainder > 0 ? 'unpaid' : 'paid',
+              ...(sale.creditRemainder > 0 ? {
+                credit_due_days: sale.creditDueDays,
+                credit_due_date: sale.creditDueDate
+              } : {}),
               is_return: false
             })
             .select()
@@ -223,8 +235,6 @@ function AppContent() {
         <Route path="/crm" element={<CustomersPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
-        <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
-        <Route path="/inward-challans" element={<InwardChallansPage />} />
         <Route path="/accounting" element={<AccountingPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/staff" element={<StaffPage />} />

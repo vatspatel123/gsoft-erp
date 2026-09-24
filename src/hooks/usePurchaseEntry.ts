@@ -28,10 +28,13 @@ export interface PurchaseItem {
   colour: string
   mrp: number | ''
   qty: number | ''
-  batch_no: string
+  barcode: string
   unit_cost: number | ''
   gst_rate: number
   line_total: number
+  // Set when a row was copied from another, so the UI can show them as one design
+  // in several colours.
+  groupId?: string
 }
 
 export interface PurchaseComplete {
@@ -40,6 +43,21 @@ export interface PurchaseComplete {
   items: PurchaseItem[]
   supplier: Supplier | null
   netAmount: number
+}
+
+// Barcodes must be numeric to stay scannable and to satisfy isValidBarcode (6-13 digits).
+const makeBarcode = () =>
+  Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000).toString().padStart(3, '0')
+
+// Copying a set creates several rows in the same millisecond, so a plain timestamp
+// would repeat. Check against the rows that already exist before handing one out —
+// duplicate barcodes on real stock would break scanning at the counter.
+const uniqueBarcode = (existing: { barcode?: string }[]): string => {
+  for (let i = 0; i < 25; i++) {
+    const code = makeBarcode()
+    if (!existing.some(it => it.barcode === code)) return code
+  }
+  return makeBarcode() + Math.floor(Math.random() * 10)
 }
 
 const EMPTY_ITEM = (): PurchaseItem => ({
@@ -52,7 +70,7 @@ const EMPTY_ITEM = (): PurchaseItem => ({
   colour: '',
   mrp: '',
   qty: '',
-  batch_no: '',
+  barcode: makeBarcode(),
   unit_cost: '',
   gst_rate: 5,
   line_total: 0,
@@ -88,7 +106,9 @@ export function usePurchaseEntry() {
 
   // Items
   const [items, setItems] = useState<PurchaseItem[]>([EMPTY_ITEM()])
-  const [listOnWebsite, setListOnWebsite] = useState(true)
+  // Default false: the "Also list on website" control was removed from Purchase Entry,
+  // so purchased items must not silently auto-publish to the online catalogue.
+  const [listOnWebsite, setListOnWebsite] = useState(false)
 
   // Loading / success
   const [loading, setLoading] = useState(false)
@@ -187,22 +207,76 @@ export function usePurchaseEntry() {
   // ── Item operations ───────────────────────────────────────────────────────
   const addItem = () => setItems(prev => [...prev, EMPTY_ITEM()])
 
+  // Copy a whole colour set to another size. Every row sharing this groupId is cloned
+  // with the new size, keeping colour, qty, MRP, cost and GST. Batch is cleared because
+  // it identifies a physical lot. The clones form their own group.
+  const duplicateGroupAsSize = (groupId: string, newSize: string) => {
+    if (!groupId || !newSize) return
+    setItems(prev => {
+      const members = prev.filter(i => i.groupId === groupId)
+      if (members.length === 0) return prev
+      const newGroup = Math.random().toString(36).slice(2)
+      const clones: PurchaseItem[] = members.map(m => ({
+        ...m,
+        id: Math.random().toString(36).slice(2),
+        groupId: newGroup,
+        size: newSize,
+        // Each variant needs its own barcode, never the source row's.
+        barcode: uniqueBarcode(prev)
+      }))
+      const lastIdx = prev.map(i => i.groupId).lastIndexOf(groupId)
+      return [...prev.slice(0, lastIdx + 1), ...clones, ...prev.slice(lastIdx + 1)]
+    })
+    toast.success(`${newSize} set added`)
+  }
+
+  // Copy a row directly below itself. Everything carries over except colour and
+  // batch — colour is the thing being changed, and batch identifies a physical lot
+  // so it must not be duplicated.
+  const duplicateItem = (id: string) => {
+    setItems(prev => {
+      const idx = prev.findIndex(i => i.id === id)
+      if (idx === -1) return prev
+      const src = prev[idx]
+      const groupId = src.groupId || Math.random().toString(36).slice(2)
+      const copy: PurchaseItem = {
+        ...src,
+        id: Math.random().toString(36).slice(2),
+        groupId,
+        colour: '',
+        barcode: uniqueBarcode(prev)
+      }
+      const tagged = prev.map(i => (i.id === id ? { ...i, groupId } : i))
+      return [...tagged.slice(0, idx + 1), copy, ...tagged.slice(idx + 1)]
+    })
+  }
+
   const updateItem = (id: string, field: keyof PurchaseItem, value: any) => {
     setItems(prev => prev.map(item => {
       if (item.id !== id) return item
       const updated = { ...item, [field]: value }
 
-      // If product selected, auto-fill fields
+      // Auto-fill from the chosen product, but only where the row is still empty.
+      // Previously each field was overwritten with `value.X || ''`, so selecting a
+      // product that had no design/pcode/colour wiped values the user had typed —
+      // which made copying a row and picking the product destroy the copied data.
       if (field === 'product' && value) {
-        updated.productName = value.name || ''
-        updated.design_no = value.design_no || ''
-        updated.pcode = value.pcode || ''
-        updated.size = value.size || ''
-        updated.colour = value.colour || ''
-        updated.mrp = value.mrp || ''
-        updated.unit_cost = value.cost_price || ''
-        updated.gst_rate = value.gst_rate || 5
-        const c = typeof value.cost_price === 'number' ? value.cost_price : 0
+        updated.productName = value.name || updated.productName
+        // Barcode is the exception to "fill only what's empty": every row is born with
+        // a generated one, but an existing product already has labels printed and stuck
+        // on stock, so its barcode must win rather than be replaced.
+        updated.barcode = value.barcode || updated.barcode
+        updated.design_no = updated.design_no || value.design_no || ''
+        updated.pcode = updated.pcode || value.pcode || ''
+        updated.size = updated.size || value.size || ''
+        updated.colour = updated.colour || value.colour || ''
+        updated.mrp = updated.mrp !== '' ? updated.mrp : (value.mrp ?? '')
+        updated.unit_cost = updated.unit_cost !== '' ? updated.unit_cost : (value.cost_price ?? '')
+        // gst_rate defaults to 5 in EMPTY_ITEM, so it is always truthy and cannot be
+        // tested for "empty" like the other fields. Take the product's rate only when
+        // the row had no product yet; a row already carrying one keeps its rate.
+        updated.gst_rate = item.product ? updated.gst_rate : (value.gst_rate || updated.gst_rate || 5)
+        const c = typeof updated.unit_cost === 'number' ? updated.unit_cost : 0
         const q = typeof updated.qty === 'number' ? updated.qty : 0
         updated.line_total = q * c
       } else {
@@ -218,8 +292,8 @@ export function usePurchaseEntry() {
     setItems(prev => prev.length > 1 ? prev.filter(item => item.id !== id) : prev)
   }
 
-  const generateBatch = (id: string) => {
-    updateItem(id, 'batch_no', Date.now().toString().slice(-6))
+  const generateBarcode = (id: string) => {
+    setItems(prev => prev.map(i => (i.id === id ? { ...i, barcode: uniqueBarcode(prev) } : i)))
   }
 
   // ── Reset form ────────────────────────────────────────────────────────────
@@ -369,7 +443,7 @@ export function usePurchaseEntry() {
           pcode: item.pcode || null,
           size: item.size || null,
           colour: item.colour || null,
-          batch_no: item.batch_no || null,
+          barcode: item.barcode || null,
           qty: typeof item.qty === 'number' ? item.qty : 0,
           unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
           mrp: typeof item.mrp === 'number' ? item.mrp : null,
@@ -393,7 +467,8 @@ export function usePurchaseEntry() {
             .eq('id', item.product.id)
             .single()
 
-          const currentBarcode = prod?.barcode || item.batch_no || 'BC-' + Math.floor(100000 + Math.random() * 900000)
+          // The barcode entered on the row wins — it is what gets printed on the label.
+          const currentBarcode = item.barcode || prod?.barcode || makeBarcode()
           const newStock = (prod?.stock_qty || 0) + qty
 
           const { data: updatedProd } = await supabase
@@ -403,7 +478,6 @@ export function usePurchaseEntry() {
               cost_price: cost,
               mrp: mrp ?? prod?.mrp,
               unit_price: prod?.unit_price || unitPrice,
-              batch_no: item.batch_no || prod?.batch_no,
               barcode: currentBarcode,
             })
             .eq('id', item.product.id)
@@ -416,7 +490,7 @@ export function usePurchaseEntry() {
           })
         } else if (item.productName.trim()) {
           const newSku = 'SKU-' + Date.now().toString().slice(-6)
-          const generatedBarcode = item.batch_no || 'BC-' + Math.floor(100000 + Math.random() * 900000)
+          const generatedBarcode = item.barcode || makeBarcode()
           
           const { data: newProd, error: prodErr } = await supabase
             .from('products')
@@ -427,7 +501,6 @@ export function usePurchaseEntry() {
               pcode: item.pcode || null,
               size: item.size || null,
               colour: item.colour || null,
-              batch_no: item.batch_no || null,
               cost_price: cost,
               unit_price: unitPrice,
               mrp: mrp,
@@ -532,7 +605,7 @@ export function usePurchaseEntry() {
     discountMode, setDiscountMode,
     freightAmt, setFreightAmt,
     notes, setNotes,
-    items, addItem, updateItem, removeItem, generateBatch,
+    items, addItem, updateItem, removeItem, generateBarcode, duplicateItem, duplicateGroupAsSize,
     subtotal, effectiveDiscount, totalGST, cgst, sgst, igst,
     roundOff, netAmount, totalUnits,
     loading, savePurchase,

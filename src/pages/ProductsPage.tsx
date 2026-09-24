@@ -201,7 +201,7 @@ export function ProductsPage() {
                       <input type="checkbox" checked={selected.length === p.products.length && p.products.length > 0} onChange={toggleAll} style={{ accentColor: '#9333ea' }} />
                     </th>
                     <th style={thStyle}>Photo</th>
-                    <th style={thStyle}>Name & SKU</th>
+                    <th style={thStyle}>Category & Barcode</th>
                     <th style={thStyle}>Design</th>
                     <th style={thStyle}>Size</th>
                     <th style={thStyle}>Colour</th>
@@ -227,17 +227,23 @@ export function ProductsPage() {
                             <img src={product.photo_url} alt="" style={{ width: '40px', height: '40px', borderRadius: '10px', objectFit: 'cover' }} />
                           ) : (
                             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#f5f3ff', color: '#9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 700 }}>
-                              {product.name.charAt(0).toUpperCase()}
+                              {(product.categories?.name || product.name || '?').charAt(0).toUpperCase()}
                             </div>
                           )}
                         </td>
                         <td style={{ padding: '12px 8px' }}>
-                          <div style={{ fontSize: '12px', fontWeight: 500, color: '#1a0a2e' }}>{product.name}</div>
-                          <div style={{ fontSize: '10px', fontFamily: 'DM Mono, monospace', color: '#94a3b8', marginTop: '2px' }}>{product.sku}</div>
+                          {/* Category leads; the design already has its own column
+                              and sku repeats the barcode on imported stock. */}
+                          <div style={{ fontSize: '12px', fontWeight: 600, color: '#1a0a2e' }}>
+                            {product.categories?.name || product.name}
+                          </div>
                           {product.barcode && (
-                            <div style={{ fontSize: '9px', color: '#c084fc', fontFamily: 'DM Mono, monospace', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '1px' }}>
+                            <div style={{ fontSize: '10px', color: '#c084fc', fontFamily: 'DM Mono, monospace', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
                               ▌▌▌ {product.barcode}
                             </div>
+                          )}
+                          {product.sku && product.sku !== product.barcode && (
+                            <div style={{ fontSize: '10px', fontFamily: 'DM Mono, monospace', color: '#94a3b8', marginTop: '1px' }}>{product.sku}</div>
                           )}
                         </td>
                         {/* Design No */}

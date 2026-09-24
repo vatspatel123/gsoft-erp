@@ -14,8 +14,6 @@ const pageNames: Record<string, string> = {
   '/invoices':        'Invoices',
   '/crm':             'Customers',
   '/suppliers':       'Suppliers',
-  '/purchase-orders': 'Purchase Orders',
-  '/inward-challans': 'Inward Challans',
   '/accounting':      'Accounting',
   '/reports':         'Reports',
 };

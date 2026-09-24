@@ -256,9 +256,9 @@ export function useCustomers() {
         .from('loyalty_transactions')
         .insert({
           customer_id: customerId,
-          points_change: points,
-          type: 'manual_credit',
-          notes: reason
+          points_delta: points,
+          balance_after: newPoints,
+          type: 'bonus'   // CHECK allows earn | redeem | bonus | referral
         })
 
       if (insertError) throw insertError

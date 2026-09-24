@@ -4,6 +4,7 @@ import { X, Receipt, ArrowLeftRight, Ticket, Clock, Star, Phone, MessageCircle, 
 import { calculateCustomerTier, getTierInfo, type CustomerTier } from '../../utils/customerTier'
 import { printCreditNote, sendCreditNoteWhatsApp } from '../../utils/printBill'
 import toast from 'react-hot-toast'
+import { sendWhatsApp } from '../../utils/whatsapp'
 
 interface CustomerHistoryModalProps {
   customer: {
@@ -121,7 +122,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
       (totalUnpaidCredit > 0 ? `• Outstanding Credit Balance: ₹${totalUnpaidCredit.toFixed(2)}%0A` : '') +
       `%0AThank you for being our valued customer!`
 
-    window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+    sendWhatsApp(fullPhone, msg, { encoded: true })
   }
 
   const send15DayOverdueReminder = (sale: any) => {
@@ -140,7 +141,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
       `_Dear ${customer.name}, gentle reminder regarding your outstanding bill #${sale.invoice_no} of ₹${Number(sale.net_amount).toFixed(2)} dated ${dateStr}._%0A` +
       `Thank you!`
 
-    window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+    sendWhatsApp(fullPhone, msg, { encoded: true })
   }
 
   return (

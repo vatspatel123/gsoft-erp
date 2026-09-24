@@ -387,7 +387,6 @@ export function ExchangePage() {
   // ── Process exchange ──────────────────────────────────────────────────────
   const processExchange = async () => {
     if (returnItems.length === 0) { toast.error('No return items selected'); return }
-    if (newItems.length === 0) { toast.error('Add replacement items'); return }
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
     setProcessing(true)
     try {
@@ -450,18 +449,20 @@ export function ExchangePage() {
           )
         } catch (e) { console.warn('Failed to insert return items:', e) }
 
-        // Insert new items
-        try {
-          await supabase.from('exchange_new_items').insert(
-            newItems.map(i => ({
-              exchange_id: exchangeId,
-              product_id: i.product.id,
-              qty: i.qty,
-              unit_price: i.unit_price,
-              line_total: i.line_total
-            }))
-          )
-        } catch (e) { console.warn('Failed to insert new items:', e) }
+        // Insert new items (skip if this is a return-only exchange with no replacement)
+        if (newItems.length > 0) {
+          try {
+            await supabase.from('exchange_new_items').insert(
+              newItems.map(i => ({
+                exchange_id: exchangeId,
+                product_id: i.product.id,
+                qty: i.qty,
+                unit_price: i.unit_price,
+                line_total: i.line_total
+              }))
+            )
+          } catch (e) { console.warn('Failed to insert new items:', e) }
+        }
       }
 
       // Restore stock for returned items
@@ -932,6 +933,9 @@ export function ExchangePage() {
                   {newItems.length === 0 ? (
                     <div style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '13px', border: '2px dashed #f3e8ff', borderRadius: '10px' }}>
                       Search above or click a variant to add replacement items
+                      <div style={{ marginTop: '12px', fontSize: '12px', color: '#9333ea', fontWeight: 600 }}>
+                        — or leave this empty and click "Complete Return & Issue Credit Note" on the right to refund the customer with store credit instead of a replacement item —
+                      </div>
                     </div>
                   ) : (
                     newItems.map(item => (
@@ -1011,7 +1015,7 @@ export function ExchangePage() {
                 )}
 
                 {/* Balance */}
-                {returnItems.length > 0 && newItems.length > 0 && (
+                {returnItems.length > 0 && (
                   <div style={{ borderTop: '2px solid #f3e8ff', paddingTop: '14px', marginBottom: '14px' }}>
                     {balance === 0 && (
                       <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '12px', textAlign: 'center' }}>
@@ -1044,7 +1048,7 @@ export function ExchangePage() {
                         <div style={{ fontWeight: 700, color: '#3b82f6', fontSize: '14px', marginBottom: '4px' }}>
                           Store Owes ₹{Math.abs(balance).toFixed(2)}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>Returned items cost more than new items</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>{newItems.length === 0 ? 'No replacement taken — full return' : 'Returned items cost more than new items'}</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {([
                             ['credit_note', `🎫 Issue Credit Note Voucher (₹${Math.abs(balance).toFixed(2)})`],
@@ -1077,13 +1081,13 @@ export function ExchangePage() {
                 {/* Complete Button */}
                 <button
                   onClick={processExchange}
-                  disabled={processing || returnItems.length === 0 || newItems.length === 0}
+                  disabled={processing || returnItems.length === 0}
                   style={{
                     ...btnPrimary, width: '100%', padding: '14px', fontSize: '14px',
-                    opacity: processing || returnItems.length === 0 || newItems.length === 0 ? 0.4 : 1,
-                    cursor: processing || returnItems.length === 0 || newItems.length === 0 ? 'not-allowed' : 'pointer'
+                    opacity: processing || returnItems.length === 0 ? 0.4 : 1,
+                    cursor: processing || returnItems.length === 0 ? 'not-allowed' : 'pointer'
                   }}>
-                  {processing ? 'Processing...' : '🔄 Complete Exchange'}
+                  {processing ? 'Processing...' : newItems.length === 0 ? '🎫 Complete Return & Issue Credit Note' : '🔄 Complete Exchange'}
                 </button>
               </div>
             </div>

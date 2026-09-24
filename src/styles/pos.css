@@ -253,6 +253,20 @@
 }
 .qty-control input::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
 
+/* Money fields in the order summary (tenders, credit, bill discount): hide the
+   number spinners. A stray click or scroll on those arrows silently changes an
+   amount being tendered, which is not acceptable on a money field. */
+.order-summary input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.order-summary input[type="number"]::-webkit-inner-spin-button,
+.order-summary input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
 .discount-input {
   display: flex;
   align-items: center;

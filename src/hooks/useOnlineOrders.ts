@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { OnlineOrder, OnlineOrderStatus, OnlineOrderItem } from '../types/ecommerce'
 import toast from 'react-hot-toast'
+import { sendWhatsApp } from '../utils/whatsapp'
 
 const STORAGE_ORDERS_KEY = 'gsoft_online_orders_cache'
 
@@ -208,7 +209,7 @@ export function useOnlineOrders() {
         `_Visit our website again soon!_`
     }
 
-    window.open(`https://wa.me/${fullPhone}?text=${msg}`, '_blank')
+    sendWhatsApp(fullPhone, msg, { encoded: true })
   }
 
   // Convert Web Order to POS Invoice
@@ -222,6 +223,12 @@ export function useOnlineOrders() {
         net_amount: order.net_amount,
         gst_amount: 0,
         payment_mode: order.payment_method === 'cod' ? 'cash' : 'upi',
+        // Record the tender breakdown so web orders show up in the Cash Book too.
+        cash_amount: order.payment_method === 'cod' ? order.net_amount : 0,
+        upi_amount: order.payment_method === 'cod' ? 0 : order.net_amount,
+        card_amount: 0,
+        credit_amount: 0,
+        credit_status: 'paid',
         is_return: false
       }
 
