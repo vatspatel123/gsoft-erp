@@ -5,17 +5,6 @@ import { savePendingSale, getCachedProducts, saveCustomerToCache, findCachedCust
 import { calculateCustomerTier, getTierInfo, type CustomerTier } from '../utils/customerTier'
 import type { CreditNote } from './useCreditNotes'
 
-// IST Timezone Helper - converts current time to IST date string (YYYYMMDD)
-const getISTDateString = () => {
-  const now = new Date()
-  const istOffset = 5.5 * 60 * 60 * 1000
-  const istNow = new Date(now.getTime() + istOffset)
-  const year = istNow.getUTCFullYear()
-  const month = String(istNow.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(istNow.getUTCDate()).padStart(2, '0')
-  return `${year}${month}${day}`
-}
-
 export interface Product {
   id: string
   name: string
@@ -71,6 +60,14 @@ function calcLineTotal(price: number, qty: number, disc: number) {
 }
 
 const COUNTER_ID = 'd7e9d1ad-47e8-49c0-9e5b-f3e8721d1e00'
+
+/**
+ * Number for a bill saved without a connection. The "L" keeps it out of the
+ * INV-0001 series, so a sale made offline can never take a number the next
+ * online sale will also claim.
+ */
+const localInvoiceNo = () =>
+  'INV-L' + String(Date.now()).slice(-6)
 
 export function usePOS(salesmanId: string | null = null) {
   const [cart, setCart] = useState<CartItem[]>([])
@@ -483,25 +480,39 @@ export function usePOS(salesmanId: string | null = null) {
     toast.success('Coupon applied!')
   }, [couponCode, subtotal])
 
+  // One continuous series — INV-0001, INV-0002, … — that never resets.
+  //
+  // The number used to carry the date (INV-20260927-0001) and the sequence was
+  // counted per day. The shop wanted the date off the bill, but simply dropping
+  // it would have restarted at INV-0001 every morning: duplicate invoice numbers,
+  // which GST does not allow. So the series is now continuous instead.
+  //
+  // Old date-style numbers stay as they were; they cannot collide with this
+  // shape because they contain a second dash.
   const generateInvoiceNo = async () => {
     try {
       if (navigator.onLine) {
-        const d = getISTDateString()
-        const { count, error } = await supabase
+        const { data, error } = await supabase
           .from('sales')
-          .select('*', { count: 'exact', head: true })
-          .like('invoice_no', `INV-${d}-%`)
+          .select('invoice_no')
+          .like('invoice_no', 'INV-%')
+          .order('created_at', { ascending: false })
+          .limit(200)
         if (!error) {
-          const seq = String((count || 0) + 1).padStart(4, '0')
-          return `INV-${d}-${seq}`
+          // ponytail: max of the latest 200, not a DB sequence. Two tills closing
+          // a sale in the same instant can still draw the same number — the same
+          // race the per-day counter had. A Postgres sequence fixes it for good.
+          const last = (data || []).reduce((m: number, r: any) => {
+            const hit = /^INV-(\d+)$/.exec(String(r.invoice_no || ''))
+            return hit ? Math.max(m, Number(hit[1])) : m
+          }, 0)
+          return `INV-${String(last + 1).padStart(4, '0')}`
         }
       }
     } catch (e) {
       console.warn('Network error generating invoice sequence:', e)
     }
-    const d = getISTDateString()
-    const randomSeq = String(Math.floor(Math.random() * 9000) + 1000)
-    return `INV-${d}-${randomSeq}`
+    return localInvoiceNo()
   }
 
   const completeSale = useCallback(async () => {
@@ -700,7 +711,7 @@ export function usePOS(salesmanId: string | null = null) {
     } catch (err: any) {
       console.warn('Database sale completion notice, saving sale locally:', err)
       const offlineSale = {
-        invoiceNo: 'INV-' + getISTDateString() + '-' + String(Math.floor(Math.random() * 9000) + 1000),
+        invoiceNo: localInvoiceNo(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
         netAmount, paymentMode: derivedPaymentMode, tenders, creditRemainder,
