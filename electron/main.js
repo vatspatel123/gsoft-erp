@@ -178,6 +178,11 @@ ipcMain.handle('print:raw', async (_e, { deviceName, ops }) => {
   catch (e) { return { ok: false, reason: (e && e.message) || 'Raw print failed' } }
 })
 
+ipcMain.handle('print:rawText', async (_e, { deviceName, text }) => {
+  try { return await require('./escpos').printRawString(deviceName, text) }
+  catch (e) { return { ok: false, reason: (e && e.message) || 'Raw print failed' } }
+})
+
 ipcMain.handle('printers:queueCount', async (_e, names) => {
   try { return await require('./escpos').queueCount(names) }
   catch { return { count: 0 } }
@@ -188,7 +193,7 @@ ipcMain.handle('printers:clearQueue', async (_e, names) => {
   catch (e) { return { removed: 0, reason: (e && e.message) || 'Could not clear the queue' } }
 })
 
-ipcMain.handle('print:html', async (_e, { html, deviceName, widthMm, settleMs, copies }) => {
-  try { return await printing().printHTML(html, { deviceName, widthMm, settleMs, copies }) }
+ipcMain.handle('print:html', async (_e, { html, deviceName, widthMm, heightMm, settleMs, copies }) => {
+  try { return await printing().printHTML(html, { deviceName, widthMm, heightMm, settleMs, copies }) }
   catch (e) { return { ok: false, reason: (e && e.message) || 'Print failed' } }
 })

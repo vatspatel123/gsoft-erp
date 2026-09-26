@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { printBill, buildBillHTML, buildBillMessage } from '../utils/printBill'
 import { printHTML, listPrinters, canSelectPrinters, autoAssignPrinters, clearPrintQueues, pendingJobs } from '../utils/printHTML'
 import { printBarcodeLabels } from '../utils/printLabels'
+import { printPurchaseA4 } from '../utils/printA4Purchase'
 import { getCachedSalesmen, saveSalesmenToCache } from '../utils/offlineCache'
 import type { WhatsAppState } from '../types'
 import { waStatus, waConnect, waLogout, sendWhatsApp, isRelayConfigured } from '../utils/whatsapp'
@@ -295,9 +296,20 @@ function BillPrintTab() {
   const printTest = () => printBill(SAMPLE_SALE)
 
   // Save first: the print routes by the saved setting, not by what is on screen.
-  const testPrint = (key: 'billPrinter' | 'barcodePrinter' | 'onlineLabelPrinter') => {
+  const testPrint = (key: 'billPrinter' | 'barcodePrinter' | 'onlineLabelPrinter' | 'a4Printer') => {
     saveSettings({ [key]: s[key] } as Partial<AppSettings>)
     if (key === 'billPrinter') { printBill(SAMPLE_SALE); return }
+    if (key === 'a4Printer') {
+      // The real document, so the test proves the layout as well as the routing.
+      printPurchaseA4({
+        kind: 'purchase',
+        docNo: 'TEST-001',
+        date: new Date(),
+        supplierName: 'Sample Supplier',
+        items: [{ name: 'Sample item · 3XL', hsn: '6204', qty: 1, rate: 1255, gstPct: 5 }],
+      })
+      return
+    }
     if (key === 'barcodePrinter') {
       printBarcodeLabels([{
         name: '803291', design_no: '803291', colour: '', size: '3XL',
@@ -534,6 +546,7 @@ function BillPrintTab() {
               ['billPrinter', 'Bill / Receipt Printer', 'Sales bills, exchange slips, credit notes and purchase bills.'],
               ['barcodePrinter', 'Barcode Label Printer', 'Product barcode and price stickers.'],
               ['onlineLabelPrinter', 'Online Order Label Printer', 'Shipping and address stickers for web orders.'],
+              ['a4Printer', 'A4 Printer', 'Purchase bills, purchase returns and wholesale invoices. Leave unset to pick from the dialog.'],
             ] as const).map(([key, label, helper]) => (
               <Field key={key} label={label} helper={helper}>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -559,11 +572,24 @@ function BillPrintTab() {
               </Field>
             ))}
             <Toggle
-              value={s.rawThermal !== false}
+              value={s.rawThermal === true}
               onChange={v => { set('rawThermal', v); saveSettings({ rawThermal: v }) }}
-              label="Direct thermal printing (recommended)"
-              sub="Sends the receipt to the printer as plain printer commands instead of drawing a page. This is what stops thermal printers spitting out blank paper. Turn off only for an A4 laser printer."
+              label="Fast text receipts"
+              sub="OFF (recommended) prints the designed bill with your shop name, logo and proper fonts. ON sends plain printer commands instead — faster and immune to paper-size problems, but the bill is fixed-width text."
             />
+
+            {s.rawThermal !== true && (
+              <Field
+                label="Printable width (mm)"
+                helper="NOT the paper width. An 80mm thermal printer only marks about 72mm, and a 58mm one about 48mm — set this too wide and the Amount column falls off the right edge. 0 works it out from the paper size."
+              >
+                <input
+                  type="number" step="1" style={{ ...inputStyle, maxWidth: '160px' }}
+                  value={s.printWidthMm ?? 0}
+                  onChange={e => set('printWidthMm', Number(e.target.value))}
+                />
+              </Field>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <button
@@ -577,6 +603,67 @@ function BillPrintTab() {
               </span>
             </div>
             <SaveBtn onClick={save} />
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <SectionTitle sub="Measured off your actual roll — every roll differs, so nothing here is guessed">
+          Barcode Label Stock
+        </SectionTitle>
+
+        <Toggle
+          value={s.rawLabels !== false}
+          onChange={v => { set('rawLabels', v); saveSettings({ rawLabels: v }) }}
+          label="Direct label printing (recommended)"
+          sub="Speaks TSPL, the TSC printer's own language, instead of drawing a page for its driver to reinterpret. This is what stops labels coming out sideways or drifting onto the gap."
+        />
+
+        {s.rawLabels !== false && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginTop: '14px' }}>
+              {([
+                ['labelWidthMm', 'Label width (mm)', 'One label, not the whole roll'],
+                ['labelHeightMm', 'Label height (mm)', ''],
+                ['labelColumns', 'Labels across', '2 for side-by-side stock'],
+                ['labelColumnGapMm', 'Gap between columns (mm)', ''],
+                ['labelRowGapMm', 'Gap between rows (mm)', 'What the printer senses'],
+                ['labelOffsetXmm', 'Shift right (mm)', 'Minus to shift left'],
+                ['labelOffsetYmm', 'Shift down (mm)', 'Minus to shift up'],
+                ['labelDarkness', 'Darkness (0-15)', 'Raise if bars look faint'],
+                ['labelSpeed', 'Speed (1-6)', 'Lower prints darker'],
+              ] as const).map(([key, label, helper]) => (
+                <Field key={key} label={label} helper={helper}>
+                  <input
+                    type="number" step="0.5" style={inputStyle}
+                    value={(s as any)[key]}
+                    onChange={e => set(key as keyof AppSettings, Number(e.target.value))}
+                  />
+                </Field>
+              ))}
+            </div>
+
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', fontSize: '12.5px', color: '#92400e', lineHeight: 1.6, marginTop: '4px' }}>
+              <b>Print one, then look at it.</b> Adjust the shift values until the barcode
+              sits where you want it, and only then print a batch. One label at a time
+              costs nothing to get wrong.
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '12px' }}>
+              <button
+                onClick={() => {
+                  saveSettings(s)
+                  printBarcodeLabels([{
+                    name: 'KURTI SET', design_no: '10128', colour: 'Maroon', size: '3XL',
+                    barcode: '45918', mrp: 1450, sku: '45918',
+                  }], 1, '38x38')
+                }}
+                style={{ padding: '10px 18px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}
+              >
+                Print 1 test label
+              </button>
+              <SaveBtn onClick={save} />
+            </div>
           </>
         )}
       </Card>

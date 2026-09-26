@@ -22,6 +22,20 @@ export interface AppSettings {
   barcodePrinter: string     // Windows device name for barcode labels
   onlineLabelPrinter: string // Windows device name for online-order labels
   rawThermal: boolean        // send receipts as ESC/POS bytes instead of rendering HTML
+  printWidthMm: number       // what the head can actually mark; 0 = work it out from paperSize
+  a4Printer: string          // Windows device name for A4 documents ('' = ask each time)
+  rawLabels: boolean         // send barcode labels as TSPL instead of rendering HTML
+  // Label stock, measured off the roll in the shop. Rolls vary and no default
+  // survives contact with real stationery, so every dimension is adjustable.
+  labelWidthMm: number
+  labelHeightMm: number
+  labelColumns: number       // labels across the web
+  labelColumnGapMm: number
+  labelRowGapMm: number      // the gap the printer's sensor indexes on
+  labelOffsetXmm: number     // nudge, for stock that sits off-centre
+  labelOffsetYmm: number
+  labelDarkness: number      // 0-15
+  labelSpeed: number         // inches per second
   waServerUrl: string        // address of the WhatsApp relay ('' = never send directly)
   googleReviewUrl: string    // appended to the WhatsApp bill message ('' = omit)
   instagramUrl: string       // appended to the WhatsApp bill message ('' = omit)
@@ -66,7 +80,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
   billPrinter: '',
   barcodePrinter: '',
   onlineLabelPrinter: '',
-  rawThermal: true,
+  rawThermal: false,
+  printWidthMm: 0,
+  a4Printer: '',
+  rawLabels: true,
+  labelWidthMm: 38,
+  labelHeightMm: 38,
+  labelColumns: 2,
+  labelColumnGapMm: 2,
+  labelRowGapMm: 2,
+  labelOffsetXmm: 0,
+  labelOffsetYmm: 0,
+  labelDarkness: 8,
+  labelSpeed: 4,
   waServerUrl: 'http://localhost:8099',
   googleReviewUrl: '',
   instagramUrl: '',
@@ -101,6 +127,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
  */
 const MACHINE_KEYS = [
   'billPrinter', 'barcodePrinter', 'onlineLabelPrinter', 'rawThermal', 'waServerUrl',
+  'printWidthMm', 'a4Printer',
+  'rawLabels', 'labelWidthMm', 'labelHeightMm', 'labelColumns', 'labelColumnGapMm',
+  'labelRowGapMm', 'labelOffsetXmm', 'labelOffsetYmm', 'labelDarkness', 'labelSpeed',
 ] as const
 
 const sharedOnly = (s: AppSettings): Partial<AppSettings> => {
@@ -183,7 +212,23 @@ export function saveSettings(patch: Partial<AppSettings>): void {
   if (touchesShared) void pushShopSettings()
 }
 
-// Paper width in mm. Drives both the on-screen print layout and the PDF page size.
+// Paper width in mm — the physical stationery.
 export function billWidthMm(paperSize?: string): number {
   return paperSize === '58mm' ? 58 : paperSize === 'A4' ? 190 : 80
+}
+
+/**
+ * The width the print head can actually mark, which is NOT the paper width.
+ * An 80mm thermal printer images 72mm (576 dots at 203 dpi) and a 58mm one
+ * about 48mm. Laying a bill out to the paper width pushes its right-hand
+ * column — the Amount, the end of the bill number — off the edge of the paper,
+ * which is exactly what the shop photographed.
+ *
+ * Heads differ, so this is overridable. 0 means "work it out from paperSize".
+ */
+export function billPrintWidthMm(s?: AppSettings): number {
+  const c = s || getSettings()
+  const override = Number(c.printWidthMm) || 0
+  if (override > 0) return override
+  return c.paperSize === '58mm' ? 48 : c.paperSize === 'A4' ? 190 : 72
 }

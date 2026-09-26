@@ -1,6 +1,6 @@
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
-import { getSettings, billWidthMm } from './settings'
+import { getSettings, billPrintWidthMm } from './settings'
 import type { WhatsAppState } from '../types'
 
 // One way out for every WhatsApp message in the app.
@@ -112,7 +112,7 @@ export async function sendWhatsAppDocument(
   if (d) {
     try {
       const pdf = await window.electronAPI!.printing!.renderPDF!({
-        html: opts.html, widthMm: billWidthMm(getSettings().paperSize),
+        html: opts.html, widthMm: billPrintWidthMm(),
       })
       if (!pdf?.ok || !pdf.base64) throw new Error(pdf?.error || 'Could not build the PDF')
       const res = await d.sendDocument({
@@ -134,7 +134,7 @@ export async function sendWhatsAppDocument(
         method: 'POST',
         body: JSON.stringify({
           phone, html: opts.html, caption, fileName: opts.fileName,
-          widthMm: billWidthMm(getSettings().paperSize),
+          widthMm: billPrintWidthMm(),
         }),
       })
       toast.success('Bill PDF sent on WhatsApp ✅')

@@ -1,5 +1,6 @@
-import { getSettings, billWidthMm, type AppSettings } from './settings'
+import { getSettings, billPrintWidthMm, type AppSettings } from './settings'
 import { printHTML, printRaw, useRawBill } from './printHTML'
+import { printPurchaseA4 } from './printA4Purchase'
 import toast from 'react-hot-toast'
 import { sendWhatsApp } from './whatsapp'
 import { buildBillOps } from './escposBill'
@@ -164,7 +165,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
 
   // The override lets the Settings preview render unsaved edits live.
   const s = { ...getSettings(), ...(settingsOverride || {}) }
-  const widthMm = billWidthMm(s.paperSize)
+  const widthMm = billPrintWidthMm(s as AppSettings)
 
   const when = date ? new Date(date) : new Date()
   const valid = !isNaN(when.getTime()) ? when : new Date()
@@ -177,11 +178,11 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     // categories(name), a reprint sets `category` directly. Accept either.
     const category = p.category || p.categories?.name || ''
     return `
-      <tr>
+      <tr class="item">
         <td class="ctr">${i + 1}</td>
-        <td>${esc(category)}${p.colour ? `<div class="sub">${esc(p.colour)}</div>` : ''}</td>
+        <td class="cat">${esc(category)}${p.colour ? `<div class="sub">${esc(p.colour)}</div>` : ''}</td>
         <td class="code">${esc(p.barcode || p.batch_no || '')}</td>
-        <td class="ctr">${esc(p.size || '')}</td>
+        <td class="ctr nw">${esc(p.size || '')}</td>
         <td class="ctr">${item.qty}</td>
         <td class="num">${money(item.unit_price)}</td>
         <td class="num">${money(item.line_total)}</td>
@@ -237,22 +238,39 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     .addr { font-size:11px; margin-top:4px; line-height:1.35; }
     .phone { font-size:13px; margin-top:3px; }
     .gstin { font-size:10px; margin-top:2px; font-weight:400; }
-    .rule { border-top:1.5px solid #000; margin:5px 0; }
-    .meta { display:flex; justify-content:space-between; gap:8px; font-size:11px; }
+    .rule { border-top:1.5px solid #000; margin:6px 0; }
+
+    /* The customer / bill-number block and the item table used to be bold,
+       cramped and split words mid-way ("Stan/dard", "9900000/00001"). Same
+       columns and same content — just a quieter weight for the data, room
+       between rows, and nothing broken in the middle of a word or a code. */
+    .meta {
+      display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+      font-size:11px; font-weight:400; line-height:1.55; padding:1px 0 5px;
+    }
+    .meta b { font-weight:700; }
     .meta .r { text-align:right; white-space:nowrap; }
+
     table { width:100%; border-collapse:collapse; }
     th {
-      font-size:10px; text-align:left; padding:3px 1px;
-      border-top:1.5px solid #000; border-bottom:1.5px solid #000;
+      font-size:9.5px; font-weight:700; text-align:left; padding:5px 1px;
+      border-top:1.5px solid #000; border-bottom:1.5px solid #000; white-space:nowrap;
     }
-    td { font-size:10px; padding:3px 1px; vertical-align:top; word-break:break-word; }
-    .code { font-family:'DM Mono', ui-monospace, monospace; font-size:10px; text-align:center; }
+    td {
+      font-size:10px; font-weight:400; padding:6px 1px; vertical-align:top;
+      line-height:1.35; overflow-wrap:break-word;
+    }
+    tr.item + tr.item td { border-top:1px dotted #888; }
+    .cat { font-weight:700; }
+    /* A code is read digit by digit; wrapping it makes it two wrong numbers. */
+    .code { font-size:8px; text-align:center; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:-.1px; }
+    .nw { white-space:nowrap; font-size:9px; }
     .sub { font-size:9px; font-weight:400; }
     .ctr { text-align:center; }
     .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
     .totrow td {
       border-top:1.5px solid #000; border-bottom:1.5px solid #000;
-      font-size:11px; font-weight:800; padding:5px 1px;
+      font-size:11px; font-weight:800; padding:7px 1px;
     }
     .adj { display:flex; justify-content:space-between; font-size:11px; padding:2px 0; }
     .net {
@@ -284,10 +302,10 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   <div class="rule"></div>
 
   <div class="meta">
-    <div>${s.showCustomer && customer ? `${esc(customer.phone || '')} ${esc(customer.name || '')}` : ''}</div>
+    <div>${s.showCustomer && customer ? `<b>${esc(customer.phone || '')}</b> ${esc(customer.name || '')}` : ''}</div>
     <div class="r">
-      <div>Bill No.: ${esc(invoiceNo)}</div>
-      <div>Bill Date.: ${dateStr}</div>
+      <div>Bill No.: <b>${esc(invoiceNo)}</b></div>
+      <div>Bill Date.: <b>${dateStr}</b></div>
     </div>
   </div>
 
@@ -295,12 +313,12 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     <thead>
       <tr>
         <th class="ctr" style="width:6%">No.</th>
-        <th style="width:20%">Category</th>
-        <th class="code" style="width:15%">Barcode</th>
-        <th class="ctr" style="width:12%">Size</th>
-        <th class="ctr" style="width:7%">Qty</th>
-        <th class="num" style="width:17%">Rate</th>
-        <th class="num" style="width:23%">Amount</th>
+        <th style="width:17%">Category</th>
+        <th class="code" style="width:22%">Barcode</th>
+        <th class="ctr" style="width:14%">Size</th>
+        <th class="ctr" style="width:6%">Qty</th>
+        <th class="num" style="width:16%">Rate</th>
+        <th class="num" style="width:19%">Amount</th>
       </tr>
     </thead>
     <tbody>
@@ -463,88 +481,35 @@ export function sendCreditNoteWhatsApp(noteData: {
 }
 
 // ─── Purchase Return Slip Print ─────────────────────────────────────────────
+/**
+ * Purchase return = a debit memo to the supplier, and their accountant expects
+ * it on A4 in the GST layout, not on receipt paper.
+ */
 export function printPurchaseReturn(returnData: {
   returnNo: string
   supplierName: string
   supplierPhone?: string
+  supplierGstin?: string
   totalAmount: number
   reason?: string
-  items: Array<{
-    productName: string
-    size?: string
-    colour?: string
-    qty: number
-    unitCost: number
-    lineTotal: number
-  }>
-  createdAt: string
+  items: Array<{ productName: string; size?: string; colour?: string; hsn?: string
+                 qty: number; unitCost: number; lineTotal?: number; gstRate?: number }>
+  createdAt?: string
 }) {
-  const s = getSettings()
-  const shopName = s.shopName || 'Retail ERP'
-  const dateStr = new Date(returnData.createdAt).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric'
+  printPurchaseA4({
+    kind: 'return',
+    docNo: returnData.returnNo,
+    date: returnData.createdAt || new Date(),
+    supplierName: returnData.supplierName,
+    supplierGstin: returnData.supplierGstin,
+    items: (returnData.items || []).map(it => ({
+      name: [it.productName, it.colour, it.size].filter(Boolean).join(' · '),
+      hsn: it.hsn || '',
+      qty: Number(it.qty) || 0,
+      rate: Number(it.unitCost) || 0,
+      gstPct: Number(it.gstRate ?? 5),
+    })),
+    grandTotalOverride: Number(returnData.totalAmount) || undefined,
   })
-
-  const itemRows = returnData.items.map(item => `
-    <tr>
-      <td>${item.productName} ${item.size ? `<span style="color:#64748b">(${item.size})</span>` : ''}</td>
-      <td style="text-align:center">${item.qty}</td>
-      <td style="text-align:right">₹${Number(item.unitCost).toFixed(2)}</td>
-      <td style="text-align:right">₹${Number(item.lineTotal).toFixed(2)}</td>
-    </tr>
-  `).join('')
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Debit Note - ${returnData.returnNo}</title>
-      <style>
-        body { font-family: 'DM Sans', system-ui, sans-serif; padding: 16px; max-width: 400px; margin: 0 auto; color: #1e293b; }
-        .header { text-align: center; border-bottom: 2px solid #dc2626; padding-bottom: 10px; margin-bottom: 12px; }
-        .shop-name { font-size: 18px; font-weight: 800; color: #1e293b; }
-        .title-badge { display: inline-block; background: #dc2626; color: white; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 700; margin: 6px 0; }
-        table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
-        th { text-align: left; border-bottom: 1px solid #cbd5e1; padding: 6px 2px; color: #64748b; font-size: 11px; }
-        td { padding: 6px 2px; border-bottom: 1px solid #f1f5f9; }
-        .total-box { display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; color: #dc2626; border-top: 2px solid #dc2626; padding-top: 8px; margin-top: 8px; }
-        @media print { @page { margin: 4mm; } }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <div class="shop-name">${shopName}</div>
-        <div class="title-badge">PURCHASE RETURN / DEBIT NOTE</div>
-        <div style="font-size:12px;font-weight:700">Debit Note No: ${returnData.returnNo}</div>
-        <div style="font-size:11px;color:#64748b">Date: ${dateStr}</div>
-      </div>
-      <div style="font-size:12px;margin-bottom:8px">
-        <strong>Vendor:</strong> ${returnData.supplierName} ${returnData.supplierPhone ? `(${returnData.supplierPhone})` : ''}
-      </div>
-      ${returnData.reason ? `<div style="font-size:11px;color:#64748b;margin-bottom:8px">Reason: ${returnData.reason}</div>` : ''}
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th style="text-align:center">Qty</th>
-            <th style="text-align:right">Rate</th>
-            <th style="text-align:right">Total</th>
-          </tr>
-        </thead>
-        <tbody>${itemRows}</tbody>
-      </table>
-      <div class="total-box">
-        <span>Total Debit Amount</span>
-        <span>₹${Number(returnData.totalAmount).toFixed(2)}</span>
-      </div>
-      <div style="margin-top:24px;display:flex;justify-content:space-between;font-size:11px;color:#64748b">
-        <div>Authorized Signatory</div>
-        <div>Vendor Signature</div>
-      </div>
-    </body>
-    </html>
-  `
-  printHTML(html)
 }
 

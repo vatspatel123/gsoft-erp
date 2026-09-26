@@ -1,13 +1,16 @@
 import toast from 'react-hot-toast'
-import { getSettings, billWidthMm, type AppSettings } from './settings'
+import { getSettings, billPrintWidthMm, type AppSettings } from './settings'
 
-export type PrintTarget = 'bill' | 'label' | 'online'
+export type PrintTarget = 'bill' | 'label' | 'online' | 'a4'
 
 export interface PrintOpts {
   /** Which of the shop's printers this belongs on. Defaults to the bill printer. */
   target?: PrintTarget
   /** Stationery width in mm. Bills default to the configured paper size. */
   widthMm?: number
+  /** Stationery height in mm. Omitted means "measure the content" — right for a
+   *  receipt, wrong for label stock, where the page must equal the label pitch. */
+  heightMm?: number
   /** Time for the document to finish drawing itself (barcode SVGs) before printing. */
   settleMs?: number
   copies?: number
@@ -57,13 +60,14 @@ function claim(target: PrintTarget, sig: string): boolean {
 const release = (target: PrintTarget) => { inFlight.delete(target) }
 
 const LABEL: Record<PrintTarget, string> = {
-  bill: 'Receipt', label: 'Barcode label', online: 'Shipping label',
+  bill: 'Receipt', label: 'Barcode label', online: 'Shipping label', a4: 'A4 document',
 }
 
 const deviceFor = (target: PrintTarget): string => {
   const s = getSettings()
   if (target === 'label') return s.barcodePrinter || ''
   if (target === 'online') return s.onlineLabelPrinter || ''
+  if (target === 'a4') return s.a4Printer || ''
   return s.billPrinter || ''
 }
 
@@ -76,7 +80,7 @@ const deviceFor = (target: PrintTarget): string => {
  */
 export async function printHTML(html: string, opts: PrintOpts = {}): Promise<void> {
   const target = opts.target ?? 'bill'
-  const widthMm = opts.widthMm ?? (target === 'bill' ? billWidthMm(getSettings().paperSize) : 0)
+  const widthMm = opts.widthMm ?? (target === 'bill' ? billPrintWidthMm() : 0)
   const printing = window.electronAPI?.printing
 
   if (!claim(target, sigOf(html))) return
@@ -90,7 +94,7 @@ export async function printHTML(html: string, opts: PrintOpts = {}): Promise<voi
       // Width drives a CSS @page rule on the desktop side. (The Electron pageSize
       // option is a different thing and renders blank — do not use it.)
       const res = await printing.print({
-        html, deviceName, widthMm,
+        html, deviceName, widthMm, heightMm: opts.heightMm ?? 0,
         settleMs: opts.settleMs ?? 250,
         copies: opts.copies ?? 1,
       })
@@ -267,4 +271,36 @@ export async function autoAssignPrinters(
   if (online) patch.onlineLabelPrinter = online
 
   return { patch, found: real.length }
+}
+
+/**
+ * Send a raw printer program (TSPL for a TSC label printer) to one of the
+ * shop's printers. Carries the same runaway guard as every other print path.
+ */
+export async function printRawText(
+  target: PrintTarget, text: string
+): Promise<{ ok: boolean; reason?: string }> {
+  const api = window.electronAPI?.printing?.rawText
+  if (!api) return { ok: false, reason: 'Raw printing needs the desktop app' }
+  if (!claim(target, sigOf(text))) return { ok: true, reason: 'duplicate' }
+
+  const device = deviceFor(target)
+  const note = toast.loading(`${LABEL[target]} → ${device}`)
+  try {
+    const res = await api({ deviceName: device, text })
+    toast.dismiss(note)
+    if (res?.ok) toast.success(`${LABEL[target]} sent`, { duration: 2000 })
+    return res
+  } catch (e: any) {
+    toast.dismiss(note)
+    return { ok: false, reason: e?.message || 'Raw print failed' }
+  } finally {
+    release(target)
+  }
+}
+
+/** True when barcode labels should go out as TSPL rather than rendered HTML. */
+export const useRawLabels = (): boolean => {
+  const s = getSettings()
+  return !!window.electronAPI?.printing?.rawText && s.rawLabels !== false && !!s.barcodePrinter
 }

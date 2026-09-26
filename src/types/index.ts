@@ -30,9 +30,11 @@ declare global {
       printing?: {
         list: () => Promise<{ name: string; displayName: string; isDefault: boolean; status?: number }[]>
         print: (payload: {
-          html: string; deviceName?: string; widthMm?: number; settleMs?: number; copies?: number
+          html: string; deviceName?: string; widthMm?: number; heightMm?: number; settleMs?: number; copies?: number
         }) => Promise<{ ok: boolean; reason?: string }>
         raw?: (payload: { deviceName?: string; ops: unknown[] })
+          => Promise<{ ok: boolean; reason?: string }>
+        rawText?: (payload: { deviceName?: string; text: string })
           => Promise<{ ok: boolean; reason?: string }>
         queueCount?: (names: string[]) => Promise<{ count: number }>
         clearQueue?: (names: string[]) => Promise<{ removed: number; reason?: string }>

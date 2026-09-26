@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => ipcRenderer.invoke('printers:list'),
     print: (payload) => ipcRenderer.invoke('print:html', payload),
     raw: (payload) => ipcRenderer.invoke('print:raw', payload),
+    rawText: (payload) => ipcRenderer.invoke('print:rawText', payload),
     queueCount: (names) => ipcRenderer.invoke('printers:queueCount', names),
     clearQueue: (names) => ipcRenderer.invoke('printers:clearQueue', names),
     renderPDF: (payload) => ipcRenderer.invoke('pdf:render', payload),
