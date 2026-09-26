@@ -3,7 +3,9 @@
 // barcode should be, and nothing would say why.
 import JSBARCODE_SRC from 'jsbarcode/dist/JsBarcode.all.min.js?raw'
 
-import { printHTML } from './printHTML'
+import { printHTML, printRawText, useRawLabels } from './printHTML'
+import toast from 'react-hot-toast'
+import { buildLabelTSPL } from './tsplLabels'
 export interface LabelData {
   shopName: string
   productName: string
@@ -43,10 +45,6 @@ export function printBarcodeLabels(
   })
 
   const is58mm = format === '58mm'
-
-  // Dimensions based on format
-  const labelWidth = is58mm ? 200 : format === '38x38' ? 144 : 189
-  const labelHeight = is58mm ? 120 : format === '38x38' ? 144 : format === '50x25' ? 94 : 113
   const labelsPerRow = is58mm ? 1 : 2
 
   const labelIds = labels.map((_, idx) => 'bc' + idx)
@@ -192,6 +190,22 @@ export function printBarcodeLabels(
 </body>
 </html>`
 
+  // A TSC printer speaks TSPL. Rendering HTML and letting its driver fit a
+  // 77mm sheet onto 38mm stock is what rotated every label 90 degrees, drifted
+  // the content off the roll and ate blank labels — see tsplLabels.ts.
+  // HTML stays as the fallback if the raw write fails.
+  const htmlFallback = () =>
+    printHTML(html, { target: 'label', widthMm: pageWmm, heightMm: pageHmm, settleMs: 700 })
+
+  if (useRawLabels()) {
+    printRawText('label', buildLabelTSPL(labels)).then(res => {
+      if (res.ok) return
+      toast.error(`Label printer: ${res.reason || 'failed'} — using the print dialog`)
+      htmlFallback()
+    })
+    return
+  }
+
   // Longer settle so JsBarcode has drawn every SVG before printing.
-  printHTML(html, { target: 'label', widthMm: pageWmm, settleMs: 700 })
+  htmlFallback()
 }

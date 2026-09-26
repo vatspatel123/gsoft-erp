@@ -120,20 +120,24 @@ function psScript() {
   return scriptPath
 }
 
-/** Send an op list to a named Windows printer as a raw ESC/POS job. */
-function printRaw(deviceName, ops) {
+/**
+ * Push bytes at a named Windows printer as a RAW job.
+ * Receipts send ESC/POS through here; TSC label printers send TSPL. Neither
+ * involves a driver laying out a page, which is the whole point.
+ */
+function sendBytes(deviceName, buf) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32')
-      return resolve({ ok: false, reason: 'Raw thermal printing needs Windows' })
+      return resolve({ ok: false, reason: 'Raw printing needs Windows' })
     if (!deviceName)
-      return resolve({ ok: false, reason: 'No receipt printer selected' })
+      return resolve({ ok: false, reason: 'No printer selected' })
 
     let bin
     try {
-      bin = path.join(os.tmpdir(), `erp-raw-${Date.now()}.bin`)
-      fs.writeFileSync(bin, encode(ops))
+      bin = path.join(os.tmpdir(), `erp-raw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.bin`)
+      fs.writeFileSync(bin, buf)
     } catch (e) {
-      return resolve({ ok: false, reason: (e && e.message) || 'Could not prepare the receipt' })
+      return resolve({ ok: false, reason: (e && e.message) || 'Could not prepare the job' })
     }
 
     // ponytail: Add-Type recompiles on every call (~1s). Fine for one bill at a
@@ -156,7 +160,14 @@ function printRaw(deviceName, ops) {
   })
 }
 
-module.exports = { printRaw, encode }
+/** A receipt, as ESC/POS. */
+const printRaw = (deviceName, ops) => sendBytes(deviceName, encode(ops))
+
+/** A label program, as TSPL. Latin-1: TSPL is byte-oriented, not UTF-8. */
+const printRawString = (deviceName, text) =>
+  sendBytes(deviceName, Buffer.from(String(text == null ? '' : text), 'latin1'))
+
+module.exports = { printRaw, printRawString, encode }
 
 // ─── Print queue ────────────────────────────────────────────────────────────
 //

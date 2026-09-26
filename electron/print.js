@@ -62,7 +62,7 @@ function printHTML(html, opts = {}) {
 }
 
 async function runPrint(html, opts = {}) {
-  const { deviceName = '', settleMs = 250, copies = 1, widthMm = 0 } = opts
+  const { deviceName = '', settleMs = 250, copies = 1, widthMm = 0, heightMm = 0 } = opts
 
   const file = path.join(app.getPath('temp'), `erp-print-${Date.now()}-${++seq}.html`)
   fs.writeFileSync(file, html, 'utf8')
@@ -88,7 +88,9 @@ async function runPrint(html, opts = {}) {
     // needs TWO lengths — "80mm auto" is invalid CSS and is silently dropped,
     // which is how jobs ended up on Letter paper.
     if (widthMm > 0) {
-      const heightMm = await w.webContents.executeJavaScript(`
+      // Label stock has a fixed pitch; a receipt's length is whatever it is.
+      // Measuring content for label stock is what drifted the roll.
+      const measured = heightMm > 0 ? heightMm : await w.webContents.executeJavaScript(`
         (() => {
           // BODY only. documentElement.scrollHeight is at least the window's
           // viewport height, so taking the max sized a 25mm label at 153mm and
@@ -101,7 +103,13 @@ async function runPrint(html, opts = {}) {
           return mm;
         })()
       `).catch(() => 0)
-      if (heightMm) printOpts.preferCSSPageSize = true
+      if (heightMm > 0) {
+        await w.webContents.executeJavaScript(
+          `(() => { const el = document.createElement('style');
+             el.textContent = '@page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }';
+             document.head.appendChild(el); })()`).catch(() => {})
+      }
+      if (measured) printOpts.preferCSSPageSize = true
     }
     if (deviceName) printOpts.deviceName = deviceName
 
