@@ -575,7 +575,7 @@ function BillPrintTab() {
               value={s.rawThermal === true}
               onChange={v => { set('rawThermal', v); saveSettings({ rawThermal: v }) }}
               label="Fast text receipts"
-              sub="OFF (recommended) prints the designed bill with your shop name, logo and proper fonts. ON sends plain printer commands instead — faster and immune to paper-size problems, but the bill is fixed-width text."
+              sub="OFF (recommended) prints the designed bill — logo, shop name, proper fonts and the ₹ sign. The app draws it as dots and sends them straight to the printer, so the printer driver never gets a chance to print blank. ON prints plain fixed-width text instead, which is slightly faster."
             />
 
             {s.rawThermal !== true && (
@@ -616,7 +616,7 @@ function BillPrintTab() {
           value={s.rawLabels !== false}
           onChange={v => { set('rawLabels', v); saveSettings({ rawLabels: v }) }}
           label="Direct label printing (recommended)"
-          sub="Speaks TSPL, the TSC printer's own language, instead of drawing a page for its driver to reinterpret. This is what stops labels coming out sideways or drifting onto the gap."
+          sub="The app draws each label as dots (fonts and ₹ exactly as designed) and the printer draws the barcode itself, so it scans cleanly. Nothing passes through the printer driver, which is what stops labels coming out sideways or drifting onto the gap."
         />
 
         {s.rawLabels !== false && (

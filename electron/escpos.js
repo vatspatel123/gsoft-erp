@@ -167,7 +167,7 @@ const printRaw = (deviceName, ops) => sendBytes(deviceName, encode(ops))
 const printRawString = (deviceName, text) =>
   sendBytes(deviceName, Buffer.from(String(text == null ? '' : text), 'latin1'))
 
-module.exports = { printRaw, printRawString, encode }
+module.exports = { printRaw, printRawString, sendBytes, encode }
 
 // ─── Print queue ────────────────────────────────────────────────────────────
 //

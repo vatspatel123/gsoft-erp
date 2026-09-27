@@ -264,6 +264,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     .cat { font-weight:700; }
     /* A code is read digit by digit; wrapping it makes it two wrong numbers. */
     .code { font-size:8px; text-align:center; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:-.1px; }
+    th.code { font-size:9.5px; }
     .nw { white-space:nowrap; font-size:9px; }
     .sub { font-size:9px; font-weight:400; }
     .ctr { text-align:center; }
@@ -375,11 +376,13 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
  * HTML, and so does the thermal path if the raw write fails for any reason.
  */
 export function printBill(saleData: any) {
-  if (!useRawBill()) { printHTML(buildBillHTML(saleData)); return }
+  // Default: the designed bill, which printHTML draws as dots for a thermal
+  // printer. "Fast text receipts" swaps in plain ESC/POS text instead.
+  if (!(useRawBill() && getSettings().rawThermal === true)) { printHTML(buildBillHTML(saleData)); return }
 
   printRaw(buildBillOps(saleData)).then(res => {
     if (res.ok) return
-    toast.error(`Receipt printer: ${res.reason || 'failed'} — using the print dialog`)
+    toast.error(`Receipt printer: ${res.reason || 'failed'} — using the designed bill`)
     printHTML(buildBillHTML(saleData))
   })
 }

@@ -91,6 +91,22 @@ export async function printHTML(html: string, opts: PrintOpts = {}): Promise<voi
     // this the cashier has no way to tell a working printer from a dead one.
     const note = toast.loading(`${LABEL[target]} → ${deviceName || 'print dialog'}`)
     try {
+      // A receipt on a thermal printer is drawn as dots by the app and sent RAW.
+      // Letting the Windows driver lay it out is what printed blank bills on the
+      // shop's RP326 — see electron/raster.js. Covers every receipt-shaped
+      // document at once: bills, exchange slips, credit notes.
+      const thermal = target === 'bill' && !!deviceName && getSettings().paperSize !== 'A4'
+      if (thermal && printing.rasterBill) {
+        const res = await printing.rasterBill({ deviceName, html, widthMm })
+        toast.dismiss(note)
+        if (res?.ok) { toast.success('Receipt printed', { duration: 2000 }); return }
+        // Never fall back to the driver's silent print: that is the blank-paper
+        // route. The dialog at least lets the cashier see and choose.
+        toast.error(`Receipt printer: ${res?.reason || 'failed'} — opening the print dialog`)
+        await printing.print({ html, deviceName: '', widthMm, settleMs: opts.settleMs ?? 250 })
+        return
+      }
+
       // Width drives a CSS @page rule on the desktop side. (The Electron pageSize
       // option is a different thing and renders blank — do not use it.)
       const res = await printing.print({
@@ -213,8 +229,7 @@ export async function pendingJobs(): Promise<number> {
 /** True when receipts should go out as ESC/POS rather than rendered HTML. */
 export const useRawBill = (): boolean => {
   const s = getSettings()
-  return !!window.electronAPI?.printing?.raw &&
-         s.rawThermal !== false && s.paperSize !== 'A4' && !!s.billPrinter
+  return !!window.electronAPI?.printing?.raw && s.paperSize !== 'A4' && !!s.billPrinter
 }
 
 // ─── Automatic printer setup ────────────────────────────────────────────────
@@ -303,4 +318,27 @@ export async function printRawText(
 export const useRawLabels = (): boolean => {
   const s = getSettings()
   return !!window.electronAPI?.printing?.rawText && s.rawLabels !== false && !!s.barcodePrinter
+}
+
+/** Designed labels, drawn to dots by the app and placed on the roll in TSPL. */
+export async function printRasterLabels(
+  labelHtmls: string[], geometry: unknown
+): Promise<{ ok: boolean; reason?: string }> {
+  const api = window.electronAPI?.printing?.rasterLabels
+  if (!api) return { ok: false, reason: 'Needs the desktop app' }
+  if (!claim('label', sigOf(labelHtmls.join('|')))) return { ok: true, reason: 'duplicate' }
+
+  const device = deviceFor('label')
+  const note = toast.loading(`Barcode label → ${device}`)
+  try {
+    const res = await api({ deviceName: device, labels: labelHtmls, geometry })
+    toast.dismiss(note)
+    if (res?.ok) toast.success(`${labelHtmls.length} label${labelHtmls.length === 1 ? '' : 's'} sent`, { duration: 2000 })
+    return res
+  } catch (e: any) {
+    toast.dismiss(note)
+    return { ok: false, reason: e?.message || 'Label print failed' }
+  } finally {
+    release('label')
+  }
 }

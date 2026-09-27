@@ -178,6 +178,23 @@ ipcMain.handle('print:raw', async (_e, { deviceName, ops }) => {
   catch (e) { return { ok: false, reason: (e && e.message) || 'Raw print failed' } }
 })
 
+// Designed documents drawn as dots and sent RAW — see electron/raster.js.
+// This is the only route that has put the designed bill on the RP326; the
+// Windows-driver route printed blank.
+ipcMain.handle('print:rasterBill', async (_e, { deviceName, html, widthMm }) => {
+  try {
+    const job = await require('./raster').billJob(html, widthMm)
+    return await require('./escpos').sendBytes(deviceName, job)
+  } catch (e) { return { ok: false, reason: (e && e.message) || 'Could not draw the bill' } }
+})
+
+ipcMain.handle('print:rasterLabels', async (_e, { deviceName, labels, geometry }) => {
+  try {
+    const job = await require('./raster').labelJob(labels, geometry)
+    return await require('./escpos').sendBytes(deviceName, job)
+  } catch (e) { return { ok: false, reason: (e && e.message) || 'Could not draw the labels' } }
+})
+
 ipcMain.handle('print:rawText', async (_e, { deviceName, text }) => {
   try { return await require('./escpos').printRawString(deviceName, text) }
   catch (e) { return { ok: false, reason: (e && e.message) || 'Raw print failed' } }

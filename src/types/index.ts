@@ -36,6 +36,10 @@ declare global {
           => Promise<{ ok: boolean; reason?: string }>
         rawText?: (payload: { deviceName?: string; text: string })
           => Promise<{ ok: boolean; reason?: string }>
+        rasterBill?: (payload: { deviceName: string; html: string; widthMm: number })
+          => Promise<{ ok: boolean; reason?: string }>
+        rasterLabels?: (payload: { deviceName: string; labels: string[]; geometry: unknown })
+          => Promise<{ ok: boolean; reason?: string }>
         queueCount?: (names: string[]) => Promise<{ count: number }>
         clearQueue?: (names: string[]) => Promise<{ removed: number; reason?: string }>
         renderPDF?: (payload: { html: string; widthMm?: number })

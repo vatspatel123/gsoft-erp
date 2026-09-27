@@ -100,7 +100,7 @@ function oneLabel(l: LabelData, x0: number, y0: number, g: LabelGeometry): strin
 
   let y = mm(1.5)
   centre(l.shopName, y, '2'); y += FONT_H['2'] + 4
-  left(l.productName || l.designNo, y, '2'); y += FONT_H['2'] + 4
+  left(l.category || l.productName || l.designNo, y, '2'); y += FONT_H['2'] + 4
   left(l.designNo, y, '1'); right(l.colour, y, '1'); y += FONT_H['1'] + 3
   left(l.pcode, y, '1'); right(l.size, y, '1'); y += FONT_H['1'] + 6
 

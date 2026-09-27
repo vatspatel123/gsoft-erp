@@ -3,11 +3,12 @@
 // barcode should be, and nothing would say why.
 import JSBARCODE_SRC from 'jsbarcode/dist/JsBarcode.all.min.js?raw'
 
-import { printHTML, printRawText, useRawLabels } from './printHTML'
+import { printHTML, printRawText, useRawLabels, printRasterLabels } from './printHTML'
 import toast from 'react-hot-toast'
-import { buildLabelTSPL } from './tsplLabels'
+import { buildLabelTSPL, labelGeometry } from './tsplLabels'
 export interface LabelData {
   shopName: string
+  category: string
   productName: string
   designNo: string
   colour: string
@@ -32,6 +33,9 @@ export function printBarcodeLabels(
     for (let c = 0; c < copies; c++) {
       labels.push({
         shopName,
+        // The tag's second line is the category ("SHORT MIDI"). In this shop
+        // product.name holds the design number, so it can't stand in for it.
+        category: product.category || product.categories?.name || product.name || '',
         productName: product.name || '',
         designNo: product.design_no || '',
         colour: product.colour || '',
@@ -184,7 +188,6 @@ export function printBarcodeLabels(
           console.error('Barcode error:', e);
         }
       });
-      setTimeout(function() { window.print(); }, 800);
     };
   </script>
 </body>
@@ -197,6 +200,18 @@ export function printBarcodeLabels(
   const htmlFallback = () =>
     printHTML(html, { target: 'label', widthMm: pageWmm, heightMm: pageHmm, settleMs: 700 })
 
+  // Designed labels drawn as dots — the real rupee sign, the shop's layout —
+  // placed on the roll by TSPL. Plain TSPL text is the fallback.
+  if (useRawLabels() && window.electronAPI?.printing?.rasterLabels) {
+    const geo = labelGeometry()
+    printRasterLabels(labels.map(l => buildLabelHTML(l, geo.widthMm, geo.heightMm)), geo).then(res => {
+      if (res.ok) return
+      toast.error(`Label printer: ${res.reason || 'failed'} — printing plain labels`)
+      printRawText('label', buildLabelTSPL(labels))
+    })
+    return
+  }
+
   if (useRawLabels()) {
     printRawText('label', buildLabelTSPL(labels)).then(res => {
       if (res.ok) return
@@ -208,4 +223,50 @@ export function printBarcodeLabels(
 
   // Longer settle so JsBarcode has drawn every SVG before printing.
   htmlFallback()
+}
+
+
+const escLabel = (v: any) =>
+  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * One label as a standalone page, laid out like the shop's existing tag:
+ *
+ *   URMIII ALL PLUS
+ *   SHORT MIDI
+ *   4413        PrimaryCOLOUR
+ *   87                   3XL
+ *   ₹ 1850
+ *   ||||||||||||||||||||||
+ *   45237           45237
+ *
+ * Drawn to dots by the desktop app (electron/raster.js), so the fonts and the
+ * rupee sign come out exactly as they look here.
+ */
+export function buildLabelHTML(l: LabelData, widthMm = 38, heightMm = 38): string {
+  const code = String(l.barcode || '')
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:${widthMm}mm; height:${heightMm}mm; overflow:hidden; background:#fff; color:#000;
+         font-family: Arial, Helvetica, sans-serif; padding: 2.2mm 2.4mm 1.6mm; }
+  .shop { font-size:11.5px; letter-spacing:.2px; white-space:nowrap; overflow:hidden; }
+  .cat  { font-size:11px; font-weight:700; margin-top:1px; white-space:nowrap; overflow:hidden; }
+  .row  { display:flex; justify-content:space-between; gap:4px; font-size:9.5px; font-weight:700;
+          margin-top:2px; white-space:nowrap; }
+  .row span:last-child { overflow:hidden; text-overflow:clip; }
+  .mrp  { display:flex; align-items:baseline; gap:4px; margin-top:2px; }
+  .mrp .r { font-size:13px; font-weight:700; }
+  .mrp .v { font-size:25px; font-weight:800; line-height:1; letter-spacing:.3px; }
+  #bc { width:100%; height:8.2mm; margin-top:1.5px; }   /* the printer draws the barcode here */
+  .codes { display:flex; justify-content:space-between; font-size:9.5px; font-weight:700; margin-top:1px; }
+</style></head><body>
+  <div class="shop">${escLabel(l.shopName)}</div>
+  <div class="cat">${escLabel(l.category)}</div>
+  <div class="row"><span>${escLabel(l.designNo)}</span><span>${escLabel(l.colour)}</span></div>
+  <div class="row"><span>${escLabel(l.pcode)}</span><span>${escLabel(l.size)}</span></div>
+  <div class="mrp"><span class="r">&#x20B9;</span><span class="v">${Math.round(Number(l.mrp) || 0)}</span></div>
+  <div id="bc" data-code="${escLabel(code)}"></div>
+  <div class="codes"><span>${escLabel(code)}</span><span>${escLabel(code)}</span></div>
+</body></html>`
 }
