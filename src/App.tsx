@@ -24,6 +24,7 @@ import { ExchangePage } from './pages/ExchangePage'
 import { WholesalePage } from './pages/WholesalePage'
 import { PurchaseEntryPage } from './pages/PurchaseEntryPage'
 import { PurchaseReturnPage } from './pages/PurchaseReturnPage'
+import { PurchaseBillsPage } from './pages/PurchaseBillsPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { OnlineListingsPage } from './pages/OnlineListingsPage'
 import { OnlineOrdersPage } from './pages/OnlineOrdersPage'
@@ -243,6 +244,7 @@ function AppContent() {
         <Route path="/wholesale" element={<WholesalePage />} />
         <Route path="/purchase-entry" element={<PurchaseEntryPage />} />
         <Route path="/purchase-returns" element={<PurchaseReturnPage />} />
+        <Route path="/purchase-bills" element={<PurchaseBillsPage />} />
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/online-listings" element={<OnlineListingsPage />} />
         <Route path="/online-orders" element={<OnlineOrdersPage />} />

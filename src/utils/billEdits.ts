@@ -1,0 +1,147 @@
+import { supabase } from '../lib/supabase'
+
+/**
+ * Editing bills after they're made.
+ *
+ * The edit itself happens in the database (edit_sale / edit_purchase in
+ * BILL_EDITS_SCHEMA.sql) as one transaction, so stock, udhar, loyalty and the
+ * bill can never end up half-changed. These helpers only call it and preview
+ * the totals with the same formulas the POS and Purchase Entry use.
+ */
+
+export interface SaleLine {
+  product_id: string
+  name: string
+  barcode?: string
+  size?: string
+  qty: number
+  unit_price: number
+  discount_pct: number
+  gst_rate: number
+  /** What was on the bill before this edit (0 for an added line). */
+  orig_qty: number
+  /** Stock on the shelf right now, before this edit. */
+  stock_qty: number
+}
+
+export interface PurchaseLine {
+  product_id: string
+  name: string
+  barcode?: string
+  size?: string
+  qty: number
+  unit_cost: number
+  gst_rate: number
+  orig_qty: number
+  stock_qty: number
+}
+
+export interface BillEdit {
+  id: string
+  bill_type: 'sale' | 'purchase'
+  bill_no: string | null
+  reason: string
+  authorized_name: string | null
+  edited_by_login: string | null
+  before: { bill: any; items: any[] }
+  after: { bill: any; items: any[] }
+  created_at: string
+}
+
+// ── the same arithmetic the POS uses: prices include GST ─────────────────────
+export const saleLineTotal = (l: Pick<SaleLine, 'unit_price' | 'qty' | 'discount_pct'>) =>
+  Math.round(l.unit_price * l.qty * (1 - (l.discount_pct || 0) / 100) * 100) / 100
+
+export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash: number; card: number; upi: number }) {
+  const subtotal = lines.reduce((s, l) => s + saleLineTotal(l), 0)
+  const gst = lines.reduce((s, l) => {
+    const t = saleLineTotal(l), r = (l.gst_rate || 0) / 100
+    return s + (r > 0 ? t - t / (1 + r) : 0)
+  }, 0)
+  const disc = Math.min(Math.max(0, discount || 0), subtotal)
+  const net = Math.round((subtotal - disc) * 100) / 100
+  const paid = (tenders.cash || 0) + (tenders.card || 0) + (tenders.upi || 0)
+  const udhar = Math.max(0, Math.round((net - paid) * 100) / 100)
+  return { subtotal, gst, discount: disc, net, paid, udhar }
+}
+
+// ── the same arithmetic Purchase Entry uses: GST added on top ────────────────
+export function purchaseTotals(lines: PurchaseLine[], discount: number, freight: number) {
+  const subtotal = lines.reduce((s, l) => s + l.qty * l.unit_cost, 0)
+  const gst = lines.reduce((s, l) => s + l.qty * l.unit_cost * (l.gst_rate || 0) / 100, 0)
+  const pre = subtotal - Math.max(0, discount || 0) + Math.max(0, freight || 0) + gst
+  const net = Math.round(pre)
+  return { subtotal, gst, net, roundOff: Math.round((net - pre) * 100) / 100 }
+}
+
+/** Postgres error text, without the transport noise around it. */
+const clean = (e: any): string =>
+  String(e?.message || e || 'Something went wrong').replace(/^.*?ERROR:\s*/i, '').trim()
+
+export async function editSale(
+  saleId: string,
+  changes: Record<string, unknown>,
+  lines: SaleLine[],
+  reason: string,
+  auth?: { login: string; password: string },
+): Promise<{ ok: true; net: number; udhar: number } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc('edit_sale', {
+    p_sale_id: saleId,
+    p_changes: changes,
+    p_items: lines.map(l => ({ product_id: l.product_id, qty: l.qty, unit_price: l.unit_price, discount_pct: l.discount_pct })),
+    p_reason: reason,
+    p_auth_login: auth?.login ?? null,
+    p_auth_password: auth?.password ?? null,
+  })
+  if (error) return { ok: false, error: clean(error) }
+  return { ok: true, net: Number(data?.net_amount), udhar: Number(data?.udhar) }
+}
+
+export async function editPurchase(
+  billId: string,
+  changes: Record<string, unknown>,
+  lines: PurchaseLine[],
+  reason: string,
+): Promise<{ ok: true; net: number; roundOff: number } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc('edit_purchase', {
+    p_bill_id: billId,
+    p_changes: changes,
+    p_items: lines.map(l => ({ product_id: l.product_id, qty: l.qty, unit_cost: l.unit_cost, gst_rate: l.gst_rate })),
+    p_reason: reason,
+  })
+  if (error) return { ok: false, error: clean(error) }
+  return { ok: true, net: Number(data?.net_amount), roundOff: Number(data?.round_off) }
+}
+
+export async function billHistory(type: 'sale' | 'purchase', billId: string): Promise<BillEdit[]> {
+  const { data } = await supabase
+    .from('bill_edits')
+    .select('*')
+    .eq('bill_type', type)
+    .eq('bill_id', billId)
+    .order('created_at', { ascending: false })
+  return (data as BillEdit[]) || []
+}
+
+// ── staff passwords ──────────────────────────────────────────────────────────
+export async function setStaffPassword(
+  userId: string, password: string, owner?: { login: string; password: string },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await supabase.rpc('set_staff_password', {
+    p_user_id: userId,
+    p_new_password: password,
+    p_owner_login: owner?.login ?? null,
+    p_owner_password: owner?.password ?? null,
+  })
+  return error ? { ok: false, error: clean(error) } : { ok: true }
+}
+
+/** Ids of staff who have a password set. Empty if the feature isn't installed yet. */
+export async function staffWithPassword(): Promise<Set<string>> {
+  const { data, error } = await supabase.rpc('staff_with_password')
+  if (error || !Array.isArray(data)) return new Set()
+  return new Set(data.map((r: any) => (typeof r === 'string' ? r : r?.staff_with_password)).filter(Boolean))
+}
+
+export const money = (n: number) =>
+  '₹' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

@@ -22,6 +22,7 @@ export interface Invoice {
   credit_due_days?: number
   is_return: boolean
   created_at: string
+  edit_count?: number
   customers?: {
     name: string
     phone: string

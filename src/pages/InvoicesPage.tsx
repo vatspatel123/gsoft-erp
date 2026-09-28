@@ -16,11 +16,14 @@ import {
   RotateCcw,
   ArrowLeftRight,
   Search,
-  Loader2
+  Loader2,
+  Pencil
 } from 'lucide-react'
 import '../styles/invoices.css'
 import { sendWhatsApp, sendWhatsAppDocument } from '../utils/whatsapp'
 import toast from 'react-hot-toast'
+import { EditSaleModal } from '../components/bills/EditSaleModal'
+import { BillHistoryModal } from '../components/bills/BillHistoryModal'
 
 export function InvoicesPage() {
   const {
@@ -47,6 +50,10 @@ export function InvoicesPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
   const [refundConfirm, setRefundConfirm] = useState<Invoice | null>(null)
   const [isRefunding, setIsRefunding] = useState(false)
+  const [editingSale, setEditingSale] = useState<string | null>(null)
+  const [historySale, setHistorySale] = useState<{ id: string; no: string } | null>(null)
+  // Bills saved offline have no database row yet, so there is nothing to edit.
+  const editable = (inv: Invoice) => !inv.is_return && /^[0-9a-f-]{36}$/i.test(String(inv.id))
 
   // Rebuild the sale exactly as the POS had it, so a reprint or a re-send
   // produces the same bill the customer was originally handed.
@@ -384,6 +391,16 @@ export function InvoicesPage() {
                       <td>
                         <span className="invoice-no">{invoice.invoice_no}</span>
                         {invoice.is_return && <div className="refunded-badge">REFUNDED</div>}
+                        {(invoice.edit_count || 0) > 0 && (
+                          <button
+                            onClick={() => setHistorySale({ id: invoice.id, no: invoice.invoice_no })}
+                            title="See what was changed"
+                            style={{ display: 'block', marginTop: 4, padding: '2px 8px', borderRadius: 20, background: '#fef3c7',
+                                     color: '#92400e', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                          >
+                            Edited {invoice.edit_count}×
+                          </button>
+                        )}
                       </td>
                       <td>
                         <div className="date-time">
@@ -491,6 +508,15 @@ export function InvoicesPage() {
                               disabled={!invoice.customers?.phone}
                             >
                               🔔
+                            </button>
+                          )}
+                          {editable(invoice) && (
+                            <button
+                              className="action-btn primary"
+                              onClick={() => setEditingSale(invoice.id)}
+                              title="Edit bill"
+                            >
+                              <Pencil size={16} />
                             </button>
                           )}
                           {!invoice.is_return && (
@@ -702,6 +728,12 @@ export function InvoicesPage() {
             </div>
           </div>
         </div>
+      )}
+      {editingSale && (
+        <EditSaleModal saleId={editingSale} onClose={() => setEditingSale(null)} onSaved={() => fetchInvoices()} />
+      )}
+      {historySale && (
+        <BillHistoryModal type="sale" billId={historySale.id} billNo={historySale.no} onClose={() => setHistorySale(null)} />
       )}
     </Layout>
   )

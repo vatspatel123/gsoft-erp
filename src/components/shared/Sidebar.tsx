@@ -55,6 +55,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { to: '/suppliers', label: 'Suppliers', icon: Truck },
       { to: '/purchase-entry', label: 'Purchase Entry', icon: ShoppingBag },
+      { to: '/purchase-bills', label: 'Purchase Bills', icon: FileText },
       { to: '/purchase-returns', label: 'Purchase Returns', icon: RotateCcw, badge: 'New', badgeColor: '#dc2626' },
     ]
   },
