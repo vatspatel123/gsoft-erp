@@ -72,7 +72,7 @@ export function PurchaseReturnPage() {
       if (navigator.onLine) {
         const { data, error } = await supabase
           .from('purchase_returns')
-          .select('*, purchase_return_items(*)')
+          .select('*, purchase_return_items(*, products(gst_rate, hsn_code))')
           .order('created_at', { ascending: false })
 
         if (!error && data) setHistory(data)
@@ -222,6 +222,7 @@ export function PurchaseReturnPage() {
         returnNo,
         supplierName: selectedSupplier.name,
         supplierPhone: selectedSupplier.phone,
+        supplierGstin: selectedSupplier.gstin,
         totalAmount: totalReturnAmount,
         reason: returnReason,
         items: returnItems.map(i => ({
@@ -230,7 +231,9 @@ export function PurchaseReturnPage() {
           colour: i.product.colour,
           qty: i.qty,
           unitCost: i.unitCost,
-          lineTotal: i.lineTotal
+          lineTotal: i.lineTotal,
+          gstRate: i.product.gst_rate,
+          hsn: i.product.hsn_code,
         })),
         createdAt: new Date().toISOString()
       }
@@ -594,7 +597,9 @@ export function PurchaseReturnPage() {
                                 colour: i.colour,
                                 qty: i.qty,
                                 unitCost: i.unit_cost,
-                                lineTotal: i.line_total
+                                lineTotal: i.line_total,
+                                gstRate: i.products?.gst_rate,
+                                hsn: i.products?.hsn_code,
                               })),
                               createdAt: ret.created_at
                             })}

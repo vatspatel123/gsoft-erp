@@ -178,11 +178,11 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     // categories(name), a reprint sets `category` directly. Accept either.
     const category = p.category || p.categories?.name || ''
     return `
-      <tr class="item">
+      <tr>
         <td class="ctr">${i + 1}</td>
-        <td class="cat">${esc(category)}${p.colour ? `<div class="sub">${esc(p.colour)}</div>` : ''}</td>
-        <td class="code">${esc(p.barcode || p.batch_no || '')}</td>
-        <td class="ctr nw">${esc(p.size || '')}</td>
+        <td>${esc(category)}${p.colour ? `<div class="sub">${esc(p.colour)}</div>` : ''}</td>
+        <td class="code${String(p.barcode || p.batch_no || '').length > 7 ? ' long' : ''}">${esc(p.barcode || p.batch_no || '')}</td>
+        <td class="ctr">${esc(p.size || '')}</td>
         <td class="ctr">${item.qty}</td>
         <td class="num">${money(item.unit_price)}</td>
         <td class="num">${money(item.line_total)}</td>
@@ -238,40 +238,26 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     .addr { font-size:11px; margin-top:4px; line-height:1.35; }
     .phone { font-size:13px; margin-top:3px; }
     .gstin { font-size:10px; margin-top:2px; font-weight:400; }
-    .rule { border-top:1.5px solid #000; margin:6px 0; }
-
-    /* The customer / bill-number block and the item table used to be bold,
-       cramped and split words mid-way ("Stan/dard", "9900000/00001"). Same
-       columns and same content — just a quieter weight for the data, room
-       between rows, and nothing broken in the middle of a word or a code. */
-    .meta {
-      display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
-      font-size:11px; font-weight:400; line-height:1.55; padding:1px 0 5px;
-    }
-    .meta b { font-weight:700; }
+    .rule { border-top:1.5px solid #000; margin:5px 0; }
+    .meta { display:flex; justify-content:space-between; gap:8px; font-size:11px; }
     .meta .r { text-align:right; white-space:nowrap; }
-
     table { width:100%; border-collapse:collapse; }
     th {
-      font-size:9.5px; font-weight:700; text-align:left; padding:5px 1px;
-      border-top:1.5px solid #000; border-bottom:1.5px solid #000; white-space:nowrap;
+      font-size:10px; text-align:left; padding:3px 1px;
+      border-top:1.5px solid #000; border-bottom:1.5px solid #000;
     }
-    td {
-      font-size:10px; font-weight:400; padding:6px 1px; vertical-align:top;
-      line-height:1.35; overflow-wrap:break-word;
-    }
-    tr.item + tr.item td { border-top:1px dotted #888; }
-    .cat { font-weight:700; }
-    /* A code is read digit by digit; wrapping it makes it two wrong numbers. */
-    .code { font-size:8px; text-align:center; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:-.1px; }
-    th.code { font-size:9.5px; }
-    .nw { white-space:nowrap; font-size:9px; }
+    td { font-size:10px; padding:3px 1px; vertical-align:top; word-break:break-word; }
+    .code { font-family:'DM Mono', ui-monospace, monospace; font-size:10px; text-align:center; white-space:nowrap; word-break:normal; }
+    /* 1,292 of the shop's 1,295 codes are five digits and print exactly as
+       above. The few long ones (up to 13 digits) are allowed to wrap, smaller:
+       kept on one line they push the Amount column off the paper. */
+    td.code.long { font-size:8.5px; white-space:normal; word-break:break-all; }
     .sub { font-size:9px; font-weight:400; }
     .ctr { text-align:center; }
     .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
     .totrow td {
       border-top:1.5px solid #000; border-bottom:1.5px solid #000;
-      font-size:11px; font-weight:800; padding:7px 1px;
+      font-size:11px; font-weight:800; padding:5px 1px;
     }
     .adj { display:flex; justify-content:space-between; font-size:11px; padding:2px 0; }
     .net {
@@ -303,10 +289,10 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   <div class="rule"></div>
 
   <div class="meta">
-    <div>${s.showCustomer && customer ? `<b>${esc(customer.phone || '')}</b> ${esc(customer.name || '')}` : ''}</div>
+    <div>${s.showCustomer && customer ? `${esc(customer.phone || '')} ${esc(customer.name || '')}` : ''}</div>
     <div class="r">
-      <div>Bill No.: <b>${esc(invoiceNo)}</b></div>
-      <div>Bill Date.: <b>${dateStr}</b></div>
+      <div>Bill No.: ${esc(invoiceNo)}</div>
+      <div>Bill Date.: ${dateStr}</div>
     </div>
   </div>
 
@@ -314,12 +300,12 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     <thead>
       <tr>
         <th class="ctr" style="width:6%">No.</th>
-        <th style="width:17%">Category</th>
-        <th class="code" style="width:22%">Barcode</th>
-        <th class="ctr" style="width:14%">Size</th>
-        <th class="ctr" style="width:6%">Qty</th>
-        <th class="num" style="width:16%">Rate</th>
-        <th class="num" style="width:19%">Amount</th>
+        <th style="width:20%">Category</th>
+        <th class="code" style="width:15%">Barcode</th>
+        <th class="ctr" style="width:12%">Size</th>
+        <th class="ctr" style="width:7%">Qty</th>
+        <th class="num" style="width:17%">Rate</th>
+        <th class="num" style="width:23%">Amount</th>
       </tr>
     </thead>
     <tbody>
@@ -510,9 +496,9 @@ export function printPurchaseReturn(returnData: {
       hsn: it.hsn || '',
       qty: Number(it.qty) || 0,
       rate: Number(it.unitCost) || 0,
+      // The product's own rate; 5% only when the product has none recorded.
       gstPct: Number(it.gstRate ?? 5),
     })),
-    grandTotalOverride: Number(returnData.totalAmount) || undefined,
   })
 }
 

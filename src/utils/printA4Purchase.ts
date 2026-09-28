@@ -30,8 +30,6 @@ export interface A4PurchaseDoc {
   origBillNo?: string
   origDate?: string
   items: A4Line[]
-  /** Overrides the computed total, for a bill whose stored total is authoritative. */
-  grandTotalOverride?: number
 }
 
 const esc = (v: any) =>
@@ -64,7 +62,10 @@ export function buildPurchaseA4HTML(doc: A4PurchaseDoc): string {
     rows.reduce((a, r) => a + Number(r[k] || 0), 0)
 
   const netTotal = sum('net')
-  const grand = doc.grandTotalOverride ?? Math.round(netTotal)
+  // Round Off is rounding to the rupee and nothing else, so it can never exceed
+  // 50 paise. Forcing the total to a stored figure once pushed a whole ₹42.50 of
+  // GST into this line on a purchase return.
+  const grand = Math.round(netTotal)
   const roundOff = +(grand - netTotal).toFixed(2)
   const totalGST = sum('cgst') + sum('sgst')
 

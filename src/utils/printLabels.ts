@@ -248,14 +248,17 @@ export function buildLabelHTML(l: LabelData, widthMm = 38, heightMm = 38): strin
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
+  /* Centred throughout, as the shop asked. The top margin is a touch deeper
+     than the sides: a sticker that sits slightly high on the roll otherwise
+     loses the shop name off its top edge. */
   body { width:${widthMm}mm; height:${heightMm}mm; overflow:hidden; background:#fff; color:#000;
-         font-family: Arial, Helvetica, sans-serif; padding: 2.2mm 2.4mm 1.6mm; }
-  .shop { font-size:11.5px; letter-spacing:.2px; white-space:nowrap; overflow:hidden; }
+         font-family: Arial, Helvetica, sans-serif; padding: 3mm 2.4mm 1.4mm; text-align:center; }
+  .shop { font-size:12px; font-weight:800; letter-spacing:.3px; white-space:nowrap; overflow:hidden; }
   .cat  { font-size:11px; font-weight:700; margin-top:1px; white-space:nowrap; overflow:hidden; }
-  .row  { display:flex; justify-content:space-between; gap:4px; font-size:9.5px; font-weight:700;
+  .row  { display:flex; justify-content:center; gap:6mm; font-size:9.5px; font-weight:700;
           margin-top:2px; white-space:nowrap; }
-  .row span:last-child { overflow:hidden; text-overflow:clip; }
-  .mrp  { display:flex; align-items:baseline; gap:4px; margin-top:2px; }
+  .row:empty, .row span:empty { display:none; }
+  .mrp  { display:flex; justify-content:center; align-items:baseline; gap:4px; margin-top:2px; }
   .mrp .r { font-size:13px; font-weight:700; }
   .mrp .v { font-size:25px; font-weight:800; line-height:1; letter-spacing:.3px; }
   #bc { width:100%; height:8.2mm; margin-top:1.5px; }   /* the printer draws the barcode here */
