@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react'
+import { appliedTenders } from '../utils/tenders'
+import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { savePendingSale, getCachedProducts, saveCustomerToCache, findCachedCustomer } from '../utils/offlineCache'
@@ -77,6 +78,9 @@ export function usePOS(salesmanId: string | null = null) {
   // Multi-tender: the biller allocates an amount per tender. Anything left unallocated
   // becomes udhar (credit) on the customer's account.
   const [tenders, setTenders] = useState<{ cash: number; card: number; upi: number }>({ cash: 0, card: 0, upi: 0 })
+  // Set when the cashier taps "pay full by …": that tender then follows the bill,
+  // so a discount added afterwards doesn't leave the old total sitting in it.
+  const [fullBy, setFullBy] = useState<'cash' | 'card' | 'upi' | null>(null)
   const [loyaltyToRedeem, setLoyaltyToRedeem] = useState(0)
   const [isSaving, setIsSaving] = useState(false)
   const [lastSale, setLastSale] = useState<any>(null)
@@ -320,6 +324,7 @@ export function usePOS(salesmanId: string | null = null) {
   const netAmount = Math.max(0, subtotal - totalDiscount)
 
   const setTender = useCallback((kind: 'cash' | 'card' | 'upi', amount: number) => {
+    setFullBy(null)   // typed by hand: it no longer follows the bill
     setTenders(prev => ({ ...prev, [kind]: Math.max(0, amount || 0) }))
   }, [])
 
@@ -338,8 +343,17 @@ export function usePOS(salesmanId: string | null = null) {
             : 'cash'
 
   const payFullBy = useCallback((kind: 'cash' | 'card' | 'upi') => {
+    setFullBy(kind)
     setTenders({ cash: 0, card: 0, upi: 0, [kind]: netAmount } as any)
   }, [netAmount])
+
+  // Keep a "pay full" tender equal to the bill as items and discounts change.
+  useEffect(() => {
+    if (fullBy) setTenders({ cash: 0, card: 0, upi: 0, [fullBy]: netAmount } as any)
+  }, [fullBy, netAmount])
+
+  // What is recorded and printed: the payment kept, never the change handed back.
+  const paid = appliedTenders(tenders, netAmount)
 
   const loadCustomerExtraInfo = useCallback(async (cust: any) => {
     if (!cust) return
@@ -531,7 +545,7 @@ export function usePOS(salesmanId: string | null = null) {
         invoiceNo: 'OFF-' + Date.now(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
-        netAmount, paymentMode: derivedPaymentMode, tenders, creditRemainder,
+        netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
         salesmanId, counterId: COUNTER_ID,
         date: new Date().toLocaleString('en-IN')
       }
@@ -554,9 +568,9 @@ export function usePOS(salesmanId: string | null = null) {
           net_amount: netAmount,
           gst_amount: gstAmount,
           payment_mode: derivedPaymentMode,
-          cash_amount: tenders.cash,
-          card_amount: tenders.card,
-          upi_amount: tenders.upi,
+          cash_amount: paid.cash,
+          card_amount: paid.card,
+          upi_amount: paid.upi,
           credit_amount: creditRemainder,
           loyalty_points_used: loyaltyToRedeem,
           is_return: false
@@ -695,7 +709,7 @@ export function usePOS(salesmanId: string | null = null) {
         totalDiscount,
         netAmount,
         paymentMode: derivedPaymentMode,
-        tenders,
+        tenders: paid,
         creditRemainder,
         changeDue,
         creditDueDays: creditRemainder > 0 ? creditDueDays : undefined,
@@ -714,7 +728,7 @@ export function usePOS(salesmanId: string | null = null) {
         invoiceNo: localInvoiceNo(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
-        netAmount, paymentMode: derivedPaymentMode, tenders, creditRemainder,
+        netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
         creditDueDays: creditRemainder > 0 ? creditDueDays : undefined,
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanId, counterId: COUNTER_ID,
@@ -728,7 +742,7 @@ export function usePOS(salesmanId: string | null = null) {
     } finally {
       setIsSaving(false)
     }
-  }, [cart, customer, coupon, tenders, derivedPaymentMode, creditRemainder, changeDue, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, creditToApply, creditAllocations, creditNoteDiscount, creditDueDays, creditDueDate])
+  }, [cart, customer, coupon, tenders, paid, derivedPaymentMode, creditRemainder, changeDue, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, creditToApply, creditAllocations, creditNoteDiscount, creditDueDays, creditDueDate])
 
   const clearCart = useCallback(() => {
     setCart([])
@@ -737,6 +751,7 @@ export function usePOS(salesmanId: string | null = null) {
     setCouponCode('')
     setLoyaltyToRedeem(0)
     setTenders({ cash: 0, card: 0, upi: 0 })
+    setFullBy(null)
     setCreditDueDays(5)
     const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
     setCreditDueDate(d.toISOString().slice(0, 10))

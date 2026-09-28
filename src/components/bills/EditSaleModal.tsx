@@ -136,9 +136,10 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     if (reason.trim().length < 3) { toast.error('Please write why this bill is being edited'); return }
     if (salesmanChanged && (!authLogin.trim() || !authPw)) { toast.error('Changing the salesman needs your staff ID and password'); return }
 
+    // Save what the shop kept; change handed back is not income.
     const changes: Record<string, unknown> = {
       discount_amount: Math.round(discount * 100) / 100,
-      cash_amount: tenders.cash, card_amount: tenders.card, upi_amount: tenders.upi,
+      cash_amount: totals.kept.cash, card_amount: totals.kept.card, upi_amount: totals.kept.upi,
     }
     if (customerChanged) changes.customer_id = customer?.id || ''
     if (salesmanChanged) changes.salesman_id = salesmanId || ''
@@ -309,6 +310,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
               {Number(sale.net_amount) !== totals.net && <span style={S.changed}>was {money(Number(sale.net_amount))}</span>}
               <span style={{ color: totals.udhar > 0 ? '#b45309' : '#15803d', fontWeight: 600 }}>
                 {totals.udhar > 0 ? `Udhar ${money(totals.udhar)}` : 'Fully paid'}
+                {totals.change > 0 && ` · change ${money(totals.change)} (saved as ${money(totals.paid)})`}
               </span>
             </div>
 

@@ -279,7 +279,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
 <body>
   <div class="center">
     ${s.shopLogo ? `<img class="logo" src="${esc(s.shopLogo)}" alt="">` : ''}
-    <div class="shop">${esc(s.shopName || 'Retail ERP')}</div>
+    ${s.shopLogo ? '' : `<div class="shop">${esc(s.shopName || 'Retail ERP')}</div>`}
     ${s.shopTagline ? `<div class="brand">${esc(s.shopTagline)}</div>` : ''}
     ${s.shopAddress ? `<div class="addr">${esc(s.shopAddress)}</div>` : ''}
     ${s.shopPhone ? `<div class="phone">M. ${esc(s.shopPhone)}</div>` : ''}

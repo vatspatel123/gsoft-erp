@@ -160,6 +160,8 @@ DECLARE
   v_card         NUMERIC;
   v_upi          NUMERIC;
   v_udhar        NUMERIC;
+  v_over         NUMERIC;
+  v_take         NUMERIC;
   v_customer     UUID;
   v_salesman     UUID;
   v_auth_id      UUID;
@@ -243,6 +245,14 @@ BEGIN
   v_cash := greatest(0, coalesce((p_changes ->> 'cash_amount')::numeric, v_old.cash_amount, 0));
   v_card := greatest(0, coalesce((p_changes ->> 'card_amount')::numeric, v_old.card_amount, 0));
   v_upi  := greatest(0, coalesce((p_changes ->> 'upi_amount')::numeric,  v_old.upi_amount,  0));
+  -- Keep only what the shop keeps: anything over the bill is change handed
+  -- back, taken off cash first, then UPI, then card.
+  v_over := round(v_cash + v_card + v_upi - v_net, 2);
+  IF v_over > 0 THEN
+    v_take := least(v_cash, v_over); v_cash := v_cash - v_take; v_over := v_over - v_take;
+    v_take := least(v_upi,  v_over); v_upi  := v_upi  - v_take; v_over := v_over - v_take;
+    v_take := least(v_card, v_over); v_card := v_card - v_take;
+  END IF;
   v_udhar := greatest(0, round(v_net - v_cash - v_card - v_upi, 2));
 
   -- Customer: loyalty and total spent follow the bill.

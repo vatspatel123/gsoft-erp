@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { appliedTenders } from './tenders'
 
 /**
  * Editing bills after they're made.
@@ -60,9 +61,12 @@ export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash:
   }, 0)
   const disc = Math.min(Math.max(0, discount || 0), subtotal)
   const net = Math.round((subtotal - disc) * 100) / 100
-  const paid = (tenders.cash || 0) + (tenders.card || 0) + (tenders.upi || 0)
+  const handed = (tenders.cash || 0) + (tenders.card || 0) + (tenders.upi || 0)
+  const kept = appliedTenders(tenders, net)
+  const paid = kept.cash + kept.card + kept.upi
   const udhar = Math.max(0, Math.round((net - paid) * 100) / 100)
-  return { subtotal, gst, discount: disc, net, paid, udhar }
+  const change = Math.max(0, Math.round((handed - net) * 100) / 100)
+  return { subtotal, gst, discount: disc, net, paid, udhar, change, kept }
 }
 
 // ── the same arithmetic Purchase Entry uses: GST added on top ────────────────
