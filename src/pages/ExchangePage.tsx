@@ -7,6 +7,7 @@ import { printExchangeBill, sendExchangeWhatsApp, printCreditNote, sendCreditNot
 import { getPendingSales } from '../utils/offlineCache'
 import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
 import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
+import { appliedTenders, type Tenders } from '../utils/tenders'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ReturnItem {
@@ -102,7 +103,10 @@ export function ExchangePage() {
   const replInputRef = useRef<HTMLInputElement>(null)
 
   // Right panel
-  const [paymentMode, setPaymentMode] = useState<'cash' | 'card' | 'upi'>('cash')
+  // What the customer pays when the new items cost more — split like the POS.
+  const [tenders, setTenders] = useState<Tenders>({ cash: 0, card: 0, upi: 0 })
+  // Set by a "Full" button: that tender then follows the balance as items change.
+  const [fullBy, setFullBy] = useState<keyof Tenders | null>(null)
   const [creditOption, setCreditOption] = useState<'credit_note' | 'loyalty' | 'cash' | 'upi'>('credit_note')
   const [exchangeNotes, setExchangeNotes] = useState('')
   const [processing, setProcessing] = useState(false)
@@ -379,6 +383,22 @@ export function ExchangePage() {
   const newTotal = newItems.reduce((s, i) => s + i.line_total, 0)
   const balance = newTotal - returnTotal // positive = customer pays, negative = store owes
 
+  // Customer-pays side: same rules as the POS. "Full" follows the balance, and
+  // only what the shop keeps is recorded — change handed back isn't income.
+  const due = Math.max(0, Math.round(balance * 100) / 100)
+  useEffect(() => {
+    if (due <= 0) { setTenders({ cash: 0, card: 0, upi: 0 }); setFullBy(null); return }
+    if (fullBy) setTenders({ cash: 0, card: 0, upi: 0, [fullBy]: due })
+  }, [due, fullBy])
+  const kept = appliedTenders(tenders, due)
+  const keptTotal = kept.cash + kept.card + kept.upi
+  const short = Math.max(0, Math.round((due - keptTotal) * 100) / 100)
+  const change = Math.max(0, Math.round((tenders.cash + tenders.card + tenders.upi - due) * 100) / 100)
+  // payment_mode is a single legacy field: record whichever tender carried most of it.
+  const mainTender: keyof Tenders =
+    kept.upi >= kept.cash && kept.upi >= kept.card && kept.upi > 0 ? 'upi'
+      : kept.card > kept.cash ? 'card' : 'cash'
+
   const daysSince = originalInvoice
     ? Math.floor((Date.now() - new Date(originalInvoice.created_at).getTime()) / 86400000)
     : 0
@@ -387,6 +407,10 @@ export function ExchangePage() {
   // ── Process exchange ──────────────────────────────────────────────────────
   const processExchange = async () => {
     if (returnItems.length === 0) { toast.error('No return items selected'); return }
+    if (due > 0 && short > 0.009) {
+      toast.error(`Collect ₹${short.toFixed(2)} more — cash, card and UPI must cover the ₹${due.toFixed(2)} balance`)
+      return
+    }
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
     setProcessing(true)
     try {
@@ -408,7 +432,10 @@ export function ExchangePage() {
             new_sale_amount: newTotal,
             balance_amount: Math.abs(balance),
             balance_type: balance === 0 ? 'nil' : balance > 0 ? 'customer_pays' : 'store_credit',
-            payment_mode: paymentMode,
+            payment_mode: due > 0 ? mainTender : (creditOption === 'upi' ? 'upi' : 'cash'),
+            cash_amount: kept.cash,
+            card_amount: kept.card,
+            upi_amount: kept.upi,
             notes: exchangeNotes || null,
             status: 'completed'
           })
@@ -506,6 +533,7 @@ export function ExchangePage() {
       const completeData = {
         exchangeNo, returnItems, newItems,
         returnTotal, newTotal, balance,
+        tenders: due > 0 ? kept : null,
         customer: originalInvoice.customers,
         originalInvoiceNo: originalInvoice.invoice_no,
         creditNote: cnResult
@@ -1030,16 +1058,37 @@ export function ExchangePage() {
                           Customer Pays ₹{balance.toFixed(2)}
                         </div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>New items cost more than returned items</div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          {(['cash', 'card', 'upi'] as const).map(m => (
-                            <button key={m} onClick={() => setPaymentMode(m)} style={{
-                              flex: 1, padding: '6px', borderRadius: '7px', border: '1px solid',
-                              borderColor: paymentMode === m ? '#f59e0b' : '#fed7aa',
-                              background: paymentMode === m ? '#f59e0b' : 'white',
-                              color: paymentMode === m ? 'white' : '#92400e',
-                              fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif'
-                            }}>{m.toUpperCase()}</button>
+                        {/* Split payment, as at the POS: type each part, or tap Full. */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {([['cash', '💵 Cash'], ['card', '💳 Card'], ['upi', '📱 UPI']] as const).map(([k, label]) => (
+                            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ width: '64px', fontSize: '12px', color: '#92400e', fontWeight: 600 }}>{label}</span>
+                              <input
+                                type="number" min={0} step="0.01" inputMode="decimal"
+                                value={tenders[k] || ''}
+                                placeholder="0.00"
+                                onChange={e => {
+                                  setFullBy(null)   // typed by hand: stop following the balance
+                                  setTenders(t => ({ ...t, [k]: Math.max(0, Number(e.target.value) || 0) }))
+                                }}
+                                style={{ ...inputStyle, flex: 1, padding: '8px 10px', borderColor: '#fed7aa', fontFamily: 'DM Mono, monospace' }}
+                              />
+                              <button
+                                onClick={() => { setFullBy(k); setTenders({ cash: 0, card: 0, upi: 0, [k]: due }) }}
+                                style={{
+                                  padding: '8px 12px', borderRadius: '8px', border: '1px solid #fed7aa',
+                                  background: fullBy === k ? '#f59e0b' : '#fff7ed', color: fullBy === k ? 'white' : '#92400e',
+                                  fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif'
+                                }}>Full</button>
+                            </div>
                           ))}
+                          <div style={{
+                            display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
+                            background: short > 0 ? '#fef2f2' : '#f0fdf4', color: short > 0 ? '#b91c1c' : '#15803d'
+                          }}>
+                            <span>{short > 0 ? `Collect ₹${short.toFixed(2)} more` : change > 0 ? `✓ Paid · give ₹${change.toFixed(2)} change` : '✓ Fully paid'}</span>
+                            <span style={{ fontFamily: 'DM Mono, monospace' }}>₹{keptTotal.toFixed(2)} / ₹{due.toFixed(2)}</span>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1081,11 +1130,11 @@ export function ExchangePage() {
                 {/* Complete Button */}
                 <button
                   onClick={processExchange}
-                  disabled={processing || returnItems.length === 0}
+                  disabled={processing || returnItems.length === 0 || (due > 0 && short > 0.009)}
                   style={{
                     ...btnPrimary, width: '100%', padding: '14px', fontSize: '14px',
-                    opacity: processing || returnItems.length === 0 ? 0.4 : 1,
-                    cursor: processing || returnItems.length === 0 ? 'not-allowed' : 'pointer'
+                    opacity: processing || returnItems.length === 0 || (due > 0 && short > 0.009) ? 0.4 : 1,
+                    cursor: processing || returnItems.length === 0 || (due > 0 && short > 0.009) ? 'not-allowed' : 'pointer'
                   }}>
                   {processing ? 'Processing...' : newItems.length === 0 ? '🎫 Complete Return & Issue Credit Note' : '🔄 Complete Exchange'}
                 </button>

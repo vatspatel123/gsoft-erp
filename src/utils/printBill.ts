@@ -62,6 +62,10 @@ export function printExchangeBill(exchangeData: any) {
     <tbody>${newRows}</tbody></table>
     <div class="divider"></div>
     <div class="balance-row"><span>${balanceText}</span></div>
+    ${exchangeData.balance > 0 && exchangeData.tenders ? `<div style="font-size:11px;margin-top:4px">${
+      ([['Cash', exchangeData.tenders.cash], ['Card', exchangeData.tenders.card], ['UPI', exchangeData.tenders.upi]] as [string, number][])
+        .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ₹${Number(v).toFixed(2)}`).join(' · ')
+    }</div>` : ''}
     <div class="divider"></div>
     <div class="footer">
       <div style="font-size:12px;font-weight:600;color:#9333ea">Exchange Completed ✓</div>
