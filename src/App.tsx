@@ -71,6 +71,15 @@ function AppContent() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // A login that can't be renewed (password changed, signed out on another PC).
+  // Say so in words the cashier can act on, rather than "JWT expired".
+  useEffect(() => {
+    const onExpired = () => toast.error('Your login has expired. Please sign out and sign in again — nothing was saved.',
+      { id: 'session-expired', duration: 8000 })
+    window.addEventListener('erp:session-expired', onExpired)
+    return () => window.removeEventListener('erp:session-expired', onExpired)
+  }, [])
+
   // Splash screen — 2 seconds
   useEffect(() => {
     const t = setTimeout(() => setShowSplash(false), 2000)

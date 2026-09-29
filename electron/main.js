@@ -33,6 +33,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      // Keep timers running while minimised: the login renews itself on a timer,
+      // and a paused one let it expire ("JWT expired" on the next save).
+      backgroundThrottling: false,
     },
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.png'),
