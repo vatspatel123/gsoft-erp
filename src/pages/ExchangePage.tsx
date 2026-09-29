@@ -106,7 +106,8 @@ export function ExchangePage() {
   // What the customer pays when the new items cost more — split like the POS.
   const [tenders, setTenders] = useState<Tenders>({ cash: 0, card: 0, upi: 0 })
   // Set by a "Full" button: that tender then follows the balance as items change.
-  const [fullBy, setFullBy] = useState<keyof Tenders | null>(null)
+  const [fullBy, setFullBy] = useState<keyof Tenders | 'udhar' | null>(null)
+  const [udharAmt, setUdharAmt] = useState(0)
   const [creditOption, setCreditOption] = useState<'credit_note' | 'loyalty' | 'cash' | 'upi'>('credit_note')
   const [exchangeNotes, setExchangeNotes] = useState('')
   const [processing, setProcessing] = useState(false)
@@ -383,22 +384,31 @@ export function ExchangePage() {
   const newTotal = newItems.reduce((s, i) => s + i.line_total, 0)
   const balance = newTotal - returnTotal // positive = customer pays, negative = store owes
 
-  // Customer-pays side: same rules as the POS. "Full" follows the balance, and
-  // only what the shop keeps is recorded — change handed back isn't income.
+  // Customer-pays side: same rules as the POS. Cash / card / UPI / udhar are each
+  // typed; "Full" fills that row with whatever the other rows leave and keeps
+  // following the balance. Only what the shop keeps is recorded — change handed
+  // back isn't income.
   const due = Math.max(0, Math.round(balance * 100) / 100)
-  useEffect(() => {
-    if (due <= 0) { setTenders({ cash: 0, card: 0, upi: 0 }); setFullBy(null); return }
-    if (fullBy) setTenders({ cash: 0, card: 0, upi: 0, [fullBy]: due })
-  }, [due, fullBy])
-  const kept = appliedTenders(tenders, due)
-  const keptTotal = kept.cash + kept.card + kept.upi
-  const short = Math.max(0, Math.round((due - keptTotal) * 100) / 100)
-  // Anything not paid now can go on udhar — but only against a named customer,
-  // since a walk-in can't be chased for it. Due in 5 days, as at the POS.
+  // Udhar only against a named customer — a walk-in can't be chased for it.
+  // Due in 5 days, as at the POS.
   const canUdhar = !!originalInvoice?.customer_id
-  const udhar = canUdhar ? short : 0
+  const udhar = canUdhar ? Math.min(udharAmt, due) : 0
+  const fillRest = (k: keyof Tenders | 'udhar') => {
+    const others = tenders.cash + tenders.card + tenders.upi + udhar - (k === 'udhar' ? udhar : tenders[k])
+    const rest = Math.max(0, Math.round((due - others) * 100) / 100)
+    if (k === 'udhar') setUdharAmt(rest)
+    else setTenders(t => ({ ...t, [k]: rest }))
+  }
+  useEffect(() => {
+    if (due <= 0) { setTenders({ cash: 0, card: 0, upi: 0 }); setUdharAmt(0); setFullBy(null); return }
+    if (fullBy) fillRest(fullBy)
+  }, [due, fullBy])
+  const toCollect = Math.round((due - udhar) * 100) / 100
+  const kept = appliedTenders(tenders, toCollect)
+  const keptTotal = kept.cash + kept.card + kept.upi
+  const short = Math.max(0, Math.round((toCollect - keptTotal) * 100) / 100)
   const udharDue = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10)
-  const change = Math.max(0, Math.round((tenders.cash + tenders.card + tenders.upi - due) * 100) / 100)
+  const change = Math.max(0, Math.round((tenders.cash + tenders.card + tenders.upi - toCollect) * 100) / 100)
   // payment_mode is a single legacy field: record whichever tender carried most of it.
   const mainTender: keyof Tenders =
     kept.upi >= kept.cash && kept.upi >= kept.card && kept.upi > 0 ? 'upi'
@@ -412,8 +422,10 @@ export function ExchangePage() {
   // ── Process exchange ──────────────────────────────────────────────────────
   const processExchange = async () => {
     if (returnItems.length === 0) { toast.error('No return items selected'); return }
-    if (due > 0 && short > 0.009 && !canUdhar) {
-      toast.error(`Collect ₹${short.toFixed(2)} more — the original bill has no customer, so the balance can't go on udhar`)
+    if (due > 0 && short > 0.009) {
+      toast.error(canUdhar
+        ? `₹${short.toFixed(2)} is not covered — collect it, or put it in Udhar`
+        : `Collect ₹${short.toFixed(2)} more — the original bill has no customer, so the balance can't go on udhar`)
       return
     }
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
@@ -1071,21 +1083,24 @@ export function ExchangePage() {
                         <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>New items cost more than returned items</div>
                         {/* Split payment, as at the POS: type each part, or tap Full. */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {([['cash', '💵 Cash'], ['card', '💳 Card'], ['upi', '📱 UPI']] as const).map(([k, label]) => (
+                          {([['cash', '💵 Cash'], ['card', '💳 Card'], ['upi', '📱 UPI'],
+                            ...(canUdhar ? [['udhar', '📝 Udhar']] : [])] as [keyof Tenders | 'udhar', string][]).map(([k, label]) => (
                             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span style={{ width: '64px', fontSize: '12px', color: '#92400e', fontWeight: 600 }}>{label}</span>
                               <input
                                 type="number" min={0} step="0.01" inputMode="decimal"
-                                value={tenders[k] || ''}
+                                value={(k === 'udhar' ? udharAmt : tenders[k]) || ''}
                                 placeholder="0.00"
                                 onChange={e => {
                                   setFullBy(null)   // typed by hand: stop following the balance
-                                  setTenders(t => ({ ...t, [k]: Math.max(0, Number(e.target.value) || 0) }))
+                                  const v = Math.max(0, Number(e.target.value) || 0)
+                                  if (k === 'udhar') setUdharAmt(v)
+                                  else setTenders(t => ({ ...t, [k]: v }))
                                 }}
                                 style={{ ...inputStyle, flex: 1, padding: '8px 10px', borderColor: '#fed7aa', fontFamily: 'DM Mono, monospace' }}
                               />
                               <button
-                                onClick={() => { setFullBy(k); setTenders({ cash: 0, card: 0, upi: 0, [k]: due }) }}
+                                onClick={() => { setFullBy(k); fillRest(k) }}
                                 style={{
                                   padding: '8px 12px', borderRadius: '8px', border: '1px solid #fed7aa',
                                   background: fullBy === k ? '#f59e0b' : '#fff7ed', color: fullBy === k ? 'white' : '#92400e',
@@ -1094,16 +1109,21 @@ export function ExchangePage() {
                             </div>
                           ))}
                           <div style={{
-                            display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
-                            background: short > 0 ? (canUdhar ? '#fffbeb' : '#fef2f2') : '#f0fdf4',
-                            color: short > 0 ? (canUdhar ? '#b45309' : '#b91c1c') : '#15803d'
+                            display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
+                            background: short > 0 ? '#fef2f2' : '#f0fdf4',
+                            color: short > 0 ? '#b91c1c' : '#15803d'
                           }}>
                             <span>{short > 0
                               ? canUdhar
-                                ? `Udhar ₹${short.toFixed(2)} — added to ${originalInvoice?.customers?.name || 'customer'}'s dues`
+                                ? `₹${short.toFixed(2)} not covered — collect it or put it in Udhar`
                                 : `Collect ₹${short.toFixed(2)} more (walk-in: no udhar)`
-                              : change > 0 ? `✓ Paid · give ₹${change.toFixed(2)} change` : '✓ Fully paid'}</span>
-                            <span style={{ fontFamily: 'DM Mono, monospace' }}>₹{keptTotal.toFixed(2)} / ₹{due.toFixed(2)}</span>
+                              : change > 0 ? `✓ Paid · give ₹${change.toFixed(2)} change` : '✓ Fully covered'}</span>
+                            {udhar > 0 && <span style={{ color: '#b45309' }}>
+                              Udhar ₹{udhar.toFixed(2)} → added to {originalInvoice?.customers?.name || 'customer'}'s dues
+                            </span>}
+                            <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 500, color: '#64748b' }}>
+                              Paid now ₹{keptTotal.toFixed(2)}{udhar > 0 ? ` + Udhar ₹${udhar.toFixed(2)}` : ''} of ₹{due.toFixed(2)}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -1146,11 +1166,11 @@ export function ExchangePage() {
                 {/* Complete Button */}
                 <button
                   onClick={processExchange}
-                  disabled={processing || returnItems.length === 0 || (due > 0 && short > 0.009 && !canUdhar)}
+                  disabled={processing || returnItems.length === 0 || (due > 0 && short > 0.009)}
                   style={{
                     ...btnPrimary, width: '100%', padding: '14px', fontSize: '14px',
-                    opacity: processing || returnItems.length === 0 || (due > 0 && short > 0.009 && !canUdhar) ? 0.4 : 1,
-                    cursor: processing || returnItems.length === 0 || (due > 0 && short > 0.009 && !canUdhar) ? 'not-allowed' : 'pointer'
+                    opacity: processing || returnItems.length === 0 || (due > 0 && short > 0.009) ? 0.4 : 1,
+                    cursor: processing || returnItems.length === 0 || (due > 0 && short > 0.009) ? 'not-allowed' : 'pointer'
                   }}>
                   {processing ? 'Processing...' : newItems.length === 0 ? '🎫 Complete Return & Issue Credit Note' : '🔄 Complete Exchange'}
                 </button>
