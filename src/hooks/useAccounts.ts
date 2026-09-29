@@ -33,6 +33,8 @@ export interface ReceivableRow {
   credit_due_date: string | null
   created_at: string
   customers?: { id: string; name: string; phone: string | null } | null
+  /** Where the udhar lives: a sales bill, or the unpaid balance of an exchange. */
+  source?: 'sale' | 'exchange'
 }
 
 export interface CreditNoteRow {
@@ -76,7 +78,7 @@ export function useAccounts() {
     try {
       const since = new Date(Date.now() - 60 * 86400000).toISOString()
 
-      const [pay, rec, cn, sales, exp] = await Promise.all([
+      const [pay, rec, cn, sales, exp, excRec] = await Promise.all([
         // Payables: anything not settled with a supplier.
         supabase
           .from('purchase_bills')
@@ -110,11 +112,27 @@ export function useAccounts() {
         supabase
           .from('expenses')
           .select('expense_date, amount, payment_mode')
-          .gte('expense_date', since.slice(0, 10))
+          .gte('expense_date', since.slice(0, 10)),
+
+        // Exchange balances left unpaid are udhar too.
+        supabase
+          .from('exchange_bills')
+          .select('id, exchange_no, customer_id, balance_amount, credit_amount, credit_paid, credit_status, credit_due_date, created_at, customers(id, name, phone)')
+          .neq('credit_status', 'paid')
+          .gt('credit_amount', 0),
       ])
 
       if (!pay.error) setPayables((pay.data || []) as any)
-      if (!rec.error) setReceivables((rec.data || []) as any)
+      if (!rec.error) {
+        const fromSales: ReceivableRow[] = ((rec.data || []) as any[]).map(r => ({ ...r, source: 'sale' }))
+        // An exchange shows under its exchange number; "net" is the balance it left.
+        const fromExchanges: ReceivableRow[] = excRec.error ? [] : ((excRec.data || []) as any[]).map(r => ({
+          id: r.id, invoice_no: r.exchange_no, customer_id: r.customer_id, net_amount: Number(r.balance_amount) || 0,
+          credit_amount: r.credit_amount, credit_paid: r.credit_paid, credit_status: r.credit_status,
+          credit_due_date: r.credit_due_date, created_at: r.created_at, customers: r.customers, source: 'exchange',
+        }))
+        setReceivables([...fromSales, ...fromExchanges].sort((a, b) => a.created_at.localeCompare(b.created_at)))
+      }
       if (!cn.error) setCreditNotes((cn.data || []) as any)
 
       const byDay = new Map<string, DayBookRow>()
@@ -189,7 +207,7 @@ export function useAccounts() {
     const settled = newPaid >= Number(row.credit_amount || 0) - 0.009
     try {
       const { error } = await supabase
-        .from('sales')
+        .from(row.source === 'exchange' ? 'exchange_bills' : 'sales')
         .update({ credit_paid: newPaid, credit_tender: tender, credit_status: settled ? 'paid' : 'partial' })
         .eq('id', row.id)
       if (error) throw error

@@ -393,6 +393,11 @@ export function ExchangePage() {
   const kept = appliedTenders(tenders, due)
   const keptTotal = kept.cash + kept.card + kept.upi
   const short = Math.max(0, Math.round((due - keptTotal) * 100) / 100)
+  // Anything not paid now can go on udhar — but only against a named customer,
+  // since a walk-in can't be chased for it. Due in 5 days, as at the POS.
+  const canUdhar = !!originalInvoice?.customer_id
+  const udhar = canUdhar ? short : 0
+  const udharDue = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10)
   const change = Math.max(0, Math.round((tenders.cash + tenders.card + tenders.upi - due) * 100) / 100)
   // payment_mode is a single legacy field: record whichever tender carried most of it.
   const mainTender: keyof Tenders =
@@ -407,8 +412,8 @@ export function ExchangePage() {
   // ── Process exchange ──────────────────────────────────────────────────────
   const processExchange = async () => {
     if (returnItems.length === 0) { toast.error('No return items selected'); return }
-    if (due > 0 && short > 0.009) {
-      toast.error(`Collect ₹${short.toFixed(2)} more — cash, card and UPI must cover the ₹${due.toFixed(2)} balance`)
+    if (due > 0 && short > 0.009 && !canUdhar) {
+      toast.error(`Collect ₹${short.toFixed(2)} more — the original bill has no customer, so the balance can't go on udhar`)
       return
     }
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
@@ -436,6 +441,11 @@ export function ExchangePage() {
             cash_amount: kept.cash,
             card_amount: kept.card,
             upi_amount: kept.upi,
+            // Unpaid balance: udhar, listed and collected in Accounts -> Receivables.
+            credit_amount: udhar,
+            credit_paid: 0,
+            credit_status: udhar > 0.009 ? 'unpaid' : 'paid',
+            credit_due_date: udhar > 0.009 ? udharDue : null,
             notes: exchangeNotes || null,
             status: 'completed'
           })
@@ -534,6 +544,7 @@ export function ExchangePage() {
         exchangeNo, returnItems, newItems,
         returnTotal, newTotal, balance,
         tenders: due > 0 ? kept : null,
+        udhar,
         customer: originalInvoice.customers,
         originalInvoiceNo: originalInvoice.invoice_no,
         creditNote: cnResult
@@ -1084,9 +1095,14 @@ export function ExchangePage() {
                           ))}
                           <div style={{
                             display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
-                            background: short > 0 ? '#fef2f2' : '#f0fdf4', color: short > 0 ? '#b91c1c' : '#15803d'
+                            background: short > 0 ? (canUdhar ? '#fffbeb' : '#fef2f2') : '#f0fdf4',
+                            color: short > 0 ? (canUdhar ? '#b45309' : '#b91c1c') : '#15803d'
                           }}>
-                            <span>{short > 0 ? `Collect ₹${short.toFixed(2)} more` : change > 0 ? `✓ Paid · give ₹${change.toFixed(2)} change` : '✓ Fully paid'}</span>
+                            <span>{short > 0
+                              ? canUdhar
+                                ? `Udhar ₹${short.toFixed(2)} — added to ${originalInvoice?.customers?.name || 'customer'}'s dues`
+                                : `Collect ₹${short.toFixed(2)} more (walk-in: no udhar)`
+                              : change > 0 ? `✓ Paid · give ₹${change.toFixed(2)} change` : '✓ Fully paid'}</span>
                             <span style={{ fontFamily: 'DM Mono, monospace' }}>₹{keptTotal.toFixed(2)} / ₹{due.toFixed(2)}</span>
                           </div>
                         </div>
@@ -1130,11 +1146,11 @@ export function ExchangePage() {
                 {/* Complete Button */}
                 <button
                   onClick={processExchange}
-                  disabled={processing || returnItems.length === 0 || (due > 0 && short > 0.009)}
+                  disabled={processing || returnItems.length === 0 || (due > 0 && short > 0.009 && !canUdhar)}
                   style={{
                     ...btnPrimary, width: '100%', padding: '14px', fontSize: '14px',
-                    opacity: processing || returnItems.length === 0 || (due > 0 && short > 0.009) ? 0.4 : 1,
-                    cursor: processing || returnItems.length === 0 || (due > 0 && short > 0.009) ? 'not-allowed' : 'pointer'
+                    opacity: processing || returnItems.length === 0 || (due > 0 && short > 0.009 && !canUdhar) ? 0.4 : 1,
+                    cursor: processing || returnItems.length === 0 || (due > 0 && short > 0.009 && !canUdhar) ? 'not-allowed' : 'pointer'
                   }}>
                   {processing ? 'Processing...' : newItems.length === 0 ? '🎫 Complete Return & Issue Credit Note' : '🔄 Complete Exchange'}
                 </button>
@@ -1184,7 +1200,7 @@ export function ExchangePage() {
                   ))}
                 </div>
                 <div style={{ borderTop: '2px solid #9333ea', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#9333ea', fontFamily: 'DM Mono, monospace' }}>
-                  <span>{exchangeComplete.balance === 0 ? 'Zero Balance Exchange' : exchangeComplete.balance > 0 ? `Customer Paid: ₹${exchangeComplete.balance.toFixed(2)}` : `Store Credit: ₹${Math.abs(exchangeComplete.balance).toFixed(2)}`}</span>
+                  <span>{exchangeComplete.balance === 0 ? 'Zero Balance Exchange' : exchangeComplete.balance > 0 ? (exchangeComplete.udhar > 0 ? `Customer Balance: ₹${exchangeComplete.balance.toFixed(2)} · Udhar ₹${exchangeComplete.udhar.toFixed(2)}` : `Customer Paid: ₹${exchangeComplete.balance.toFixed(2)}`) : `Store Credit: ₹${Math.abs(exchangeComplete.balance).toFixed(2)}`}</span>
                 </div>
               </div>
 

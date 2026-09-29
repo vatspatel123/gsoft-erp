@@ -26,7 +26,7 @@ export function printExchangeBill(exchangeData: any) {
   const balanceText = exchangeData.balance === 0
     ? 'Zero Balance Exchange'
     : exchangeData.balance > 0
-    ? 'Customer Paid: ₹' + Math.abs(exchangeData.balance).toFixed(2)
+    ? ((exchangeData.udhar || 0) > 0 ? 'Customer Balance: ₹' : 'Customer Paid: ₹') + Math.abs(exchangeData.balance).toFixed(2)
     : 'Store Credit: ₹' + Math.abs(exchangeData.balance).toFixed(2)
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -63,7 +63,8 @@ export function printExchangeBill(exchangeData: any) {
     <div class="divider"></div>
     <div class="balance-row"><span>${balanceText}</span></div>
     ${exchangeData.balance > 0 && exchangeData.tenders ? `<div style="font-size:11px;margin-top:4px">${
-      ([['Cash', exchangeData.tenders.cash], ['Card', exchangeData.tenders.card], ['UPI', exchangeData.tenders.upi]] as [string, number][])
+      ([['Cash', exchangeData.tenders.cash], ['Card', exchangeData.tenders.card], ['UPI', exchangeData.tenders.upi],
+        ['Udhar', exchangeData.udhar || 0]] as [string, number][])
         .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ₹${Number(v).toFixed(2)}`).join(' · ')
     }</div>` : ''}
     <div class="divider"></div>
