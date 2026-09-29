@@ -21,6 +21,16 @@ export function Cart({ items, onUpdateQty, onUpdateDiscount, onRemove }: CartPro
 
   return (
     <div className="cart-list">
+      {/* Piece count, so the cashier can match it against the pile on the counter. */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '10px 16px', borderRadius: '12px', background: '#f3e8ff',
+        color: '#6b21a8', fontSize: '14px', fontWeight: 600, marginBottom: '10px',
+      }}>
+        <span>{items.length} item{items.length !== 1 ? 's' : ''}</span>
+        <span>Total Qty: <b style={{ fontSize: '18px', fontFamily: 'DM Mono, monospace' }}>
+          {items.reduce((s, i) => s + i.qty, 0)}</b> pcs</span>
+      </div>
       {items.map((item, idx) => {
         const p = item.product as any;
         const fashionParts = [

@@ -31,7 +31,7 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
       caption: buildBillMessage(saleData),
       fileName: `Invoice-${saleData.invoiceNo}.pdf`,
     })
-    setSent(true)
+    if (how !== 'failed') setSent(true)
     if (how === 'browser') toast.success('WhatsApp opened! ✅')
   }
 

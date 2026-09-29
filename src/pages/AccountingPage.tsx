@@ -4,6 +4,8 @@ import { Layout } from '../components/shared/Layout'
 import { EmptyState } from '../components/shared/EmptyState'
 import { useAccounts, payableOutstanding, receivableOutstanding, type PayableRow, type ReceivableRow } from '../hooks/useAccounts'
 import { exportToCSV } from '../utils/exportCSV'
+import { sendWhatsApp } from '../utils/whatsapp'
+import { getSettings } from '../utils/settings'
 import { Wallet, TrendingUp, TrendingDown, Ticket, Download, MessageCircle, Check, ArrowRight } from 'lucide-react'
 
 const card: React.CSSProperties = {
@@ -260,10 +262,13 @@ export function AccountingPage() {
                       </div>
                       <div style={{ display: 'flex', gap: '5px' }}>
                         {r.customers?.phone && (
-                          <a href={waLink(r.customers.phone)} target="_blank" rel="noreferrer" title="WhatsApp reminder"
+                          <button title="Send udhar reminder on WhatsApp"
+                            onClick={() => sendWhatsApp(r.customers!.phone!,
+                              `Dear ${r.customers?.name || 'Customer'},\n\nA friendly reminder: ${INR(receivableOutstanding(r))} is pending against bill ${r.invoice_no}` +
+                              `${r.credit_due_date ? ` (due ${new Date(r.credit_due_date).toLocaleDateString('en-IN')})` : ''}.\n\nThank you — ${getSettings().shopName || 'Team'}`)}
                             style={{ ...iconBtn, display: 'inline-flex', color: '#16a34a', borderColor: '#bbf7d0', background: '#f0fdf4' }}>
                             <MessageCircle size={13} />
-                          </a>
+                          </button>
                         )}
                         <button
                           onClick={() => openPayment({

@@ -92,6 +92,14 @@ const decode = (s: string) => { try { return decodeURIComponent(s) } catch { ret
 const isExpectedFallback = (msg: string) =>
   /not connected|not configured|Failed to fetch|NetworkError|Load failed|Not signed in/i.test(msg)
 
+// Desktop app: never throw the cashier out to a browser tab. Say what to fix.
+function desktopFailed(err?: string) {
+  const msg = String(err || 'Send failed')
+  toast.error(/not linked/i.test(msg)
+    ? 'WhatsApp is not linked on this PC. Go to Settings → WhatsApp and scan the QR once — then sending is direct.'
+    : `WhatsApp: ${msg}`, { id: 'wa-fail', duration: 7000 })
+}
+
 /**
  * Send a rendered document (the bill) as a PDF attachment with a text caption.
  * The relay turns the HTML into the PDF, so the attachment is pixel-identical
@@ -103,7 +111,7 @@ const isExpectedFallback = (msg: string) =>
 export async function sendWhatsAppDocument(
   phone: string,
   opts: { html: string; caption: string; fileName: string; encoded?: boolean }
-): Promise<'sent' | 'text' | 'browser'> {
+): Promise<'sent' | 'text' | 'browser' | 'failed'> {
   const caption = opts.encoded ? decode(opts.caption) : opts.caption
 
   // Desktop app: build the PDF with the app's own renderer and attach it. The
@@ -119,13 +127,11 @@ export async function sendWhatsAppDocument(
         phone, pdfBase64: pdf.base64, fileName: opts.fileName, caption,
       })
       if (res.ok) { toast.success('Bill PDF sent on WhatsApp ✅'); return 'sent' }
-      if (!/not linked/i.test(res.error || '')) toast.error(res.error || 'Send failed')
+      desktopFailed(res.error)
     } catch (e: any) {
-      const msg = String(e?.message || '')
-      if (!isExpectedFallback(msg)) toast.error(`${msg} — opening WhatsApp instead`)
+      desktopFailed(e?.message)
     }
-    window.open(`https://wa.me/${waPhone(phone)}?text=${encodeURIComponent(caption)}`, '_blank')
-    return 'browser'
+    return 'failed'
   }
 
   if (relayUrl()) {
@@ -160,17 +166,17 @@ export async function sendWhatsApp(
   phone: string,
   text: string,
   opts: { silent?: boolean; encoded?: boolean; features?: string } = {}
-): Promise<'sent' | 'browser'> {
+): Promise<'sent' | 'browser' | 'failed'> {
   const d = desktop()
   if (d) {
     try {
       const res = await d.send(phone, opts.encoded ? decode(text) : text)
       if (res.ok) { if (!opts.silent) toast.success('Sent on WhatsApp ✅'); return 'sent' }
-      if (!/not linked/i.test(res.error || '')) toast.error(res.error || 'Send failed')
-    } catch { /* fall through to the chat link */ }
-    const u = `https://wa.me/${waPhone(phone)}?text=${opts.encoded ? text : encodeURIComponent(text)}`
-    window.open(u, '_blank', opts.features)
-    return 'browser'
+      desktopFailed(res.error)
+    } catch (e: any) {
+      desktopFailed(e?.message)
+    }
+    return 'failed'
   }
 
   if (relayUrl()) {

@@ -105,8 +105,26 @@ const toJid = (phone) => {
   return (digits.length === 10 ? '91' + digits : digits) + '@s.whatsapp.net'
 }
 
+// Right after the app opens, or after a network blip, a paired session is still
+// reconnecting. Wait for it instead of failing the send (which used to throw the
+// cashier out to a browser tab).
+async function ready(ms = 20000) {
+  if (sock && status === 'connected') return true
+  let paired = false
+  try { paired = fs.existsSync(path.join(authDir(), 'creds.json')) } catch {}
+  if (!paired) return false
+  if (status === 'disconnected') connect(win).catch(() => {})
+  const until = Date.now() + ms
+  while (Date.now() < until) {
+    await new Promise(r => setTimeout(r, 500))
+    if (sock && status === 'connected') return true
+    if (status === 'qr') return false        // pairing was lost: needs a fresh scan
+  }
+  return false
+}
+
 async function sendMessage(phone, text) {
-  if (!sock || status !== 'connected') return { ok: false, error: 'WhatsApp is not linked yet' }
+  if (!(await ready())) return { ok: false, error: 'WhatsApp is not linked yet' }
   const jid = toJid(phone)
   if (!jid) return { ok: false, error: 'Invalid phone number' }
   try {
@@ -120,7 +138,7 @@ async function sendMessage(phone, text) {
 }
 
 async function sendDocument(phone, { pdfBase64, fileName, caption }) {
-  if (!sock || status !== 'connected') return { ok: false, error: 'WhatsApp is not linked yet' }
+  if (!(await ready())) return { ok: false, error: 'WhatsApp is not linked yet' }
   const jid = toJid(phone)
   if (!jid) return { ok: false, error: 'Invalid phone number' }
   try {
