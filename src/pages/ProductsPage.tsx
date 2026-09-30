@@ -27,7 +27,10 @@ export function ProductsPage() {
   const [showForm, setShowForm] = useState(false);
   const [showSpreadsheet, setShowSpreadsheet] = useState(false);
   const [editProduct, setEditProduct] = useState<any>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  // The ticked products themselves, not just their ids: ticks survive a change
+  // of search / category filter, so labels can be picked across categories.
+  const [picked, setPicked] = useState<any[]>([]);
+  const selected = picked.map(x => x.id);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [showPrintLabels, setShowPrintLabels] = useState(false);
@@ -36,11 +39,16 @@ export function ProductsPage() {
   const openEdit = (product: any) => { setEditProduct(product); setShowForm(true); };
   const openAdd = () => { setEditProduct(null); setShowForm(true); };
 
-  const toggleSelect = (id: string) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleSelect = (product: any) => {
+    setPicked(prev => prev.some(x => x.id === product.id) ? prev.filter(x => x.id !== product.id) : [...prev, product]);
   };
+  // Header box acts on the rows on screen only; ticks from other filters stay.
+  const allVisibleTicked = p.products.length > 0 && p.products.every(x => selected.includes(x.id));
   const toggleAll = () => {
-    setSelected(selected.length === p.products.length ? [] : p.products.map(x => x.id));
+    const visible = new Set(p.products.map(x => x.id));
+    setPicked(prev => allVisibleTicked
+      ? prev.filter(x => !visible.has(x.id))
+      : [...prev.filter(x => !visible.has(x.id)), ...p.products]);
   };
 
   const stats = [
@@ -161,18 +169,18 @@ export function ProductsPage() {
         {selected.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 18px', background: '#f5f3ff', border: '1px solid #e9d5ff', borderRadius: '12px', marginBottom: '14px' }}>
             <span style={{ fontSize: '13px', fontWeight: 500, color: '#9333ea' }}>{selected.length} selected</span>
+            <button onClick={() => setPicked([])} style={{ padding: '4px 10px', background: 'white', color: '#64748b', border: '1px solid #e9d5ff', borderRadius: '8px', fontSize: '12px', cursor: 'pointer' }}>Clear</button>
             <div style={{ flex: 1 }} />
             <button
               onClick={() => {
-                const sel = p.products.filter(x => selected.includes(x.id));
-                setLabelProducts(sel);
+                setLabelProducts(picked);
                 setShowPrintLabels(true);
               }}
               style={{ padding: '7px 14px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
               <Tag size={13} /> Print Labels
             </button>
-            <button onClick={() => { p.bulkDeactivate(selected); setSelected([]); }} style={{ padding: '7px 14px', background: '#fff7ed', color: '#f59e0b', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>Deactivate</button>
-            <select onChange={e => { if (e.target.value) { p.bulkCategory(selected, e.target.value); setSelected([]); } }} defaultValue="" style={{ padding: '7px 12px', border: '1px solid #f3e8ff', borderRadius: '8px', fontSize: '12px', background: 'white', color: '#64748b', cursor: 'pointer' }}>
+            <button onClick={() => { p.bulkDeactivate(selected); setPicked([]); }} style={{ padding: '7px 14px', background: '#fff7ed', color: '#f59e0b', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>Deactivate</button>
+            <select onChange={e => { if (e.target.value) { p.bulkCategory(selected, e.target.value); setPicked([]); } }} defaultValue="" style={{ padding: '7px 12px', border: '1px solid #f3e8ff', borderRadius: '8px', fontSize: '12px', background: 'white', color: '#64748b', cursor: 'pointer' }}>
               <option value="">Change Category</option>
               {p.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -198,7 +206,7 @@ export function ProductsPage() {
                 <thead>
                   <tr style={{ borderBottom: '1px solid #f3e8ff' }}>
                     <th style={{ padding: '14px 16px', textAlign: 'left', width: '36px' }}>
-                      <input type="checkbox" checked={selected.length === p.products.length && p.products.length > 0} onChange={toggleAll} style={{ accentColor: '#9333ea' }} />
+                      <input type="checkbox" checked={allVisibleTicked} onChange={toggleAll} style={{ accentColor: '#9333ea' }} />
                     </th>
                     <th style={thStyle}>Photo</th>
                     <th style={thStyle}>Category & Barcode</th>
@@ -220,7 +228,7 @@ export function ProductsPage() {
                         onMouseEnter={e => (e.currentTarget.style.background = '#fdf8ff')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
                         <td style={{ padding: '12px 16px' }}>
-                          <input type="checkbox" checked={selected.includes(product.id)} onChange={() => toggleSelect(product.id)} style={{ accentColor: '#9333ea' }} />
+                          <input type="checkbox" checked={selected.includes(product.id)} onChange={() => toggleSelect(product)} style={{ accentColor: '#9333ea' }} />
                         </td>
                         <td style={{ padding: '12px 8px' }}>
                           {product.photo_url ? (
@@ -329,7 +337,7 @@ export function ProductsPage() {
           message="This action cannot be undone. All selected products will be permanently deleted."
           confirmLabel="Delete All"
           confirmColor="red"
-          onConfirm={() => { p.bulkDelete(selected); setSelected([]); setConfirmBulkDelete(false); }}
+          onConfirm={() => { p.bulkDelete(selected); setPicked([]); setConfirmBulkDelete(false); }}
           onCancel={() => setConfirmBulkDelete(false)}
         />
 
