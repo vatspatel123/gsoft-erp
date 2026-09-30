@@ -29,6 +29,7 @@ import { ExpensesPage } from './pages/ExpensesPage'
 import { OnlineListingsPage } from './pages/OnlineListingsPage'
 import { OnlineOrdersPage } from './pages/OnlineOrdersPage'
 import { WebsiteSettingsPage } from './pages/WebsiteSettingsPage'
+import { FormatDesignerPage } from './pages/FormatDesignerPage'
 import type { Session } from '@supabase/supabase-js'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { SubscriptionLockedScreen } from './components/auth/SubscriptionLockedScreen'
@@ -249,6 +250,7 @@ function AppContent() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/staff" element={<StaffPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/formats" element={<FormatDesignerPage />} />
         <Route path="/exchange" element={<ExchangePage />} />
         <Route path="/wholesale" element={<WholesalePage />} />
         <Route path="/purchase-entry" element={<PurchaseEntryPage />} />

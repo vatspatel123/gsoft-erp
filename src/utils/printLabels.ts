@@ -6,6 +6,8 @@ import JSBARCODE_SRC from 'jsbarcode/dist/JsBarcode.all.min.js?raw'
 import { printHTML, printRawText, useRawLabels, printRasterLabels } from './printHTML'
 import toast from 'react-hot-toast'
 import { buildLabelTSPL, labelGeometry } from './tsplLabels'
+import { getSettings } from './settings'
+import { activeLabelDesign, buildDesignedLabelHTML } from './formatDesigns'
 export interface LabelData {
   shopName: string
   category: string
@@ -15,6 +17,7 @@ export interface LabelData {
   pcode: string
   size: string
   mrp: number
+  price?: number
   barcode: string
   batchNo: string
 }
@@ -42,6 +45,7 @@ export function printBarcodeLabels(
         pcode: product.pcode || '',
         size: product.size || '',
         mrp: product.mrp || product.unit_price || 0,
+        price: product.unit_price || 0,
         barcode: product.barcode || product.batch_no || product.sku || '',
         batchNo: product.batch_no || product.sku || ''
       })
@@ -244,6 +248,9 @@ const escLabel = (v: any) =>
  * rupee sign come out exactly as they look here.
  */
 export function buildLabelHTML(l: LabelData, widthMm = 38, heightMm = 38): string {
+  // The shop's own format from the designer, when one is active.
+  const design = activeLabelDesign(getSettings())
+  if (design) return buildDesignedLabelHTML(design, l, widthMm, heightMm)
   const code = String(l.barcode || '')
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>

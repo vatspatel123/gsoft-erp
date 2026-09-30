@@ -1,9 +1,9 @@
 import { getSettings, billPrintWidthMm, type AppSettings } from './settings'
-import { printHTML, printRaw, useRawBill } from './printHTML'
+import { printHTML } from './printHTML'
+import { activeBillDesign, type BillDesign, type BillColKey } from './formatDesigns'
 import { printPurchaseA4 } from './printA4Purchase'
 import toast from 'react-hot-toast'
 import { sendWhatsApp } from './whatsapp'
-import { buildBillOps } from './escposBill'
 
 export function printExchangeBill(exchangeData: any) {
   const s = getSettings()
@@ -160,7 +160,7 @@ export function buildBillMessage(saleData: any, settingsOverride?: Partial<AppSe
 //
 // Deliberately black-on-white with no theme colour: these go to thermal printers,
 // which have no colour and render heavy bold text best.
-export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSettings>): string {
+export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSettings>, designOverride?: BillDesign): string {
   const {
     invoiceNo, cart = [], customer,
     subtotal = 0, totalDiscount = 0, netAmount = 0,
@@ -171,28 +171,45 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   // The override lets the Settings preview render unsaved edits live.
   const s = { ...getSettings(), ...(settingsOverride || {}) }
   const widthMm = billPrintWidthMm(s as AppSettings)
+  // What to show and where — the shop's own format from the designer, or the
+  // built-in one (which reproduces the bill as it has always printed).
+  const d = designOverride || activeBillDesign(s as AppSettings)
+  const cols = d.cols.filter(c => c.on)
 
   const when = date ? new Date(date) : new Date()
   const valid = !isNaN(when.getTime()) ? when : new Date()
   const dateStr = valid.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
   const timeStr = valid.toLocaleTimeString('en-IN', { hour12: false })
 
-  const itemRows = cart.map((item: any, i: number) => {
+  // Class and content of each column; the designer only chooses which show.
+  const COL_CLASS: Record<BillColKey, string> = {
+    no: 'ctr', category: '', barcode: 'code', design: '', size: 'ctr', colour: '',
+    qty: 'ctr', rate: 'num', disc: 'num', hsn: 'ctr', amount: 'num',
+  }
+  const cellFor = (k: BillColKey, item: any, i: number): [string, string] => {
     const p = item.product || {}
     // Category arrives differently depending on the screen: the POS embeds
     // categories(name), a reprint sets `category` directly. Accept either.
     const category = p.category || p.categories?.name || ''
-    return `
-      <tr>
-        <td class="ctr">${i + 1}</td>
-        <td>${esc(category)}${p.colour ? `<div class="sub">${esc(p.colour)}</div>` : ''}</td>
-        <td class="code${String(p.barcode || p.batch_no || '').length > 7 ? ' long' : ''}">${esc(p.barcode || p.batch_no || '')}</td>
-        <td class="ctr">${esc(p.size || '')}</td>
-        <td class="ctr">${item.qty}</td>
-        <td class="num">${money(item.unit_price)}</td>
-        <td class="num">${money(item.line_total)}</td>
-      </tr>`
-  }).join('')
+    const code = String(p.barcode || p.batch_no || '')
+    switch (k) {
+      case 'no': return ['ctr', String(i + 1)]
+      // Colour sits under the category unless it has a column of its own.
+      case 'category': return ['', esc(category) + (p.colour && !cols.some(c => c.k === 'colour') ? `<div class="sub">${esc(p.colour)}</div>` : '')]
+      case 'barcode': return ['code' + (code.length > 7 ? ' long' : ''), esc(code)]
+      case 'design': return ['', esc(p.design_no || '')]
+      case 'size': return ['ctr', esc(p.size || '')]
+      case 'colour': return ['', esc(p.colour || '')]
+      case 'qty': return ['ctr', String(item.qty)]
+      case 'rate': return ['num', money(item.unit_price)]
+      case 'disc': return ['num', item.discount_pct ? String(item.discount_pct) : '']
+      case 'hsn': return ['ctr', esc(p.hsn_code || '')]
+      case 'amount': return ['num', money(item.line_total)]
+    }
+  }
+  const itemRows = cart.map((item: any, i: number) =>
+    '<tr>' + cols.map(c => { const [cls, v] = cellFor(c.k, item, i); return `<td class="${cls}">${v}</td>` }).join('') + '</tr>'
+  ).join('')
 
   const totalQty = cart.reduce((n: number, i: any) => n + Number(i.qty || 0), 0)
 
@@ -200,8 +217,17 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     .split('\n').map(t => t.trim()).filter(Boolean)
     .map(t => `<div>* ${esc(t)}</div>`).join('')
 
+  // "Total" goes in the first text column before Qty (normally Category).
+  const qtyAt = cols.findIndex(c => c.k === 'qty')
+  const totalAt = cols.findIndex((c, i) => c.k !== 'no' && (qtyAt < 0 || i < qtyAt))
+  const totalRow = cols.map((c, i) =>
+    `<td class="${COL_CLASS[c.k]}">${c.k === 'qty' ? totalQty : c.k === 'amount' ? money(subtotal) : i === totalAt ? 'Total' : ''}</td>`
+  ).join('')
+  const roundOff = Math.round((Number(netAmount) - (Number(subtotal) - Number(totalDiscount))) * 100) / 100
+  const gst = Number(saleData.gstAmount || 0)
+
   const payRows: string[] = []
-  if (s.showPaymentBreakdown) {
+  if (d.showPayment) {
     const t = tenders || {}
     const entries: [string, number][] = [
       ['Cash', Number(t.cash || 0)],
@@ -283,57 +309,49 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
 </head>
 <body>
   <div class="center">
-    ${s.shopLogo ? `<img class="logo" src="${esc(s.shopLogo)}" alt="">` : ''}
-    ${s.shopLogo ? '' : `<div class="shop">${esc(s.shopName || 'Retail ERP')}</div>`}
-    ${s.shopTagline ? `<div class="brand">${esc(s.shopTagline)}</div>` : ''}
-    ${s.shopAddress ? `<div class="addr">${esc(s.shopAddress)}</div>` : ''}
-    ${s.shopPhone ? `<div class="phone">M. ${esc(s.shopPhone)}</div>` : ''}
-    ${s.showGSTIN && s.gstin ? `<div class="gstin">GSTIN: ${esc(s.gstin)}</div>` : ''}
+    ${d.showLogo && s.shopLogo ? `<img class="logo" src="${esc(s.shopLogo)}" alt="">` : ''}
+    ${d.showShopName ? `<div class="shop" style="font-size:${d.shopNameSize}px">${esc(s.shopName || 'Retail ERP')}</div>` : ''}
+    ${d.showTagline && s.shopTagline ? `<div class="brand">${esc(s.shopTagline)}</div>` : ''}
+    ${d.showAddress && s.shopAddress ? `<div class="addr">${esc(s.shopAddress)}</div>` : ''}
+    ${d.showPhone && s.shopPhone ? `<div class="phone">M. ${esc(s.shopPhone)}</div>` : ''}
+    ${d.showGstin && s.gstin ? `<div class="gstin">GSTIN: ${esc(s.gstin)}</div>` : ''}
   </div>
 
   <div class="rule"></div>
 
   <div class="meta">
-    <div>${s.showCustomer && customer ? `${esc(customer.phone || '')} ${esc(customer.name || '')}` : ''}</div>
+    <div>${d.showCustomer && customer ? `${esc(customer.phone || '')} ${esc(customer.name || '')}` : ''}</div>
     <div class="r">
-      <div>Bill No.: ${esc(invoiceNo)}</div>
-      <div>Bill Date.: ${dateStr}</div>
+      <div>${esc(d.billNoLabel)} ${esc(invoiceNo)}</div>
+      <div>${esc(d.dateLabel)} ${dateStr}</div>
     </div>
   </div>
 
   <table>
     <thead>
-      <tr>
-        <th class="ctr" style="width:6%">No.</th>
-        <th style="width:20%">Category</th>
-        <th class="code" style="width:15%">Barcode</th>
-        <th class="ctr" style="width:12%">Size</th>
-        <th class="ctr" style="width:7%">Qty</th>
-        <th class="num" style="width:17%">Rate</th>
-        <th class="num" style="width:23%">Amount</th>
-      </tr>
+      <tr>${cols.map(c => `<th class="${COL_CLASS[c.k]}" style="width:${c.w}%">${esc(c.label)}</th>`).join('')}</tr>
     </thead>
     <tbody>
       ${itemRows}
-      <tr class="totrow">
-        <td></td>
-        <td colspan="3">Total</td>
-        <td class="ctr">${totalQty}</td>
-        <td></td>
-        <td class="num">${money(subtotal)}</td>
-      </tr>
+      ${d.showTotalRow ? `<tr class="totrow">${totalRow}</tr>` : ''}
     </tbody>
   </table>
 
-  ${totalDiscount > 0 ? `
+  ${d.showDiscount && totalDiscount > 0 ? `
     <div class="adj"><span>Discount</span><span>- ${money(totalDiscount)}</span></div>
   ` : ''}
 
-  <div class="net"><span>Net Amt.: ₹</span><span>${money(netAmount)}</span></div>
+  ${d.showGst && gst > 0 ? `
+    <div class="adj"><span>CGST</span><span>${money(gst / 2)}</span></div>
+    <div class="adj"><span>SGST</span><span>${money(gst / 2)}</span></div>
+  ` : ''}
+  ${d.showRound && Math.abs(roundOff) >= 0.01 ? `<div class="adj"><span>Round off</span><span>${roundOff > 0 ? '+' : ''}${money(roundOff)}</span></div>` : ''}
 
-  ${s.showSalesman && salesmanName ? `<div class="who">${esc(salesmanName)}</div>` : ''}
-  ${terms ? `<div class="terms">${terms}</div>` : ''}
-  <div class="time">Time : ${timeStr}</div>
+  <div class="net" style="font-size:${d.netSize}px"><span>${esc(d.netLabel)}</span><span>${money(netAmount)}</span></div>
+
+  ${d.showSalesman && salesmanName ? `<div class="who">${esc(salesmanName)}</div>` : ''}
+  ${d.showTerms && terms ? `<div class="terms">${terms}</div>` : ''}
+  ${d.showTime ? `<div class="time">Time : ${timeStr}</div>` : ''}
 
   ${payRows.length ? `
     <div class="paytitle">Payment Details :</div>
@@ -351,7 +369,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
 
   ${note ? `<div class="note">Note: ${esc(note)}</div>` : ''}
 
-  <div class="foot">${esc(s.billFooter || 'Thank you for shopping!')}</div>
+  ${d.showFooter ? `<div class="foot">${esc(s.billFooter || 'Thank you for shopping!')}</div>` : ''}
 </body>
 </html>`
 
@@ -367,15 +385,10 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
  * HTML, and so does the thermal path if the raw write fails for any reason.
  */
 export function printBill(saleData: any) {
-  // Default: the designed bill, which printHTML draws as dots for a thermal
-  // printer. "Fast text receipts" swaps in plain ESC/POS text instead.
-  if (!(useRawBill() && getSettings().rawThermal === true)) { printHTML(buildBillHTML(saleData)); return }
-
-  printRaw(buildBillOps(saleData)).then(res => {
-    if (res.ok) return
-    toast.error(`Receipt printer: ${res.reason || 'failed'} — using the designed bill`)
-    printHTML(buildBillHTML(saleData))
-  })
+  // Always the designed bill: the very HTML the WhatsApp PDF is made from, so the
+  // paper and the PDF match. (A plain-text receipt mode existed; it made the two
+  // differ, so it's gone.)
+  printHTML(buildBillHTML(saleData))
 }
 
 // ─── Credit Note Voucher Print ──────────────────────────────────────────────

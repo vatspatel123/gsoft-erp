@@ -1,3 +1,5 @@
+import type { BillDesign, LabelDesign } from './formatDesigns'
+
 export const SETTINGS_KEY = 'erp_settings'
 
 export interface AppSettings {
@@ -21,7 +23,6 @@ export interface AppSettings {
   billPrinter: string        // Windows device name for receipts ('' = ask each time)
   barcodePrinter: string     // Windows device name for barcode labels
   onlineLabelPrinter: string // Windows device name for online-order labels
-  rawThermal: boolean        // send receipts as ESC/POS bytes instead of rendering HTML
   printWidthMm: number       // what the head can actually mark; 0 = work it out from paperSize
   a4Printer: string          // Windows device name for A4 documents ('' = ask each time)
   rawLabels: boolean         // send barcode labels as TSPL instead of rendering HTML
@@ -47,6 +48,11 @@ export interface AppSettings {
   showBarcode: boolean
   showUPIQR: boolean
   paperSize: '58mm' | '80mm' | 'A4'
+  // Formats made in the designer. -1 = the built-in layout.
+  billDesigns: BillDesign[]
+  activeBillDesign: number
+  labelDesigns: LabelDesign[]
+  activeLabelDesign: number
   autoPrint: boolean
   autoWhatsApp: boolean
   // Notifications
@@ -80,7 +86,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   billPrinter: '',
   barcodePrinter: '',
   onlineLabelPrinter: '',
-  rawThermal: false,
   printWidthMm: 0,
   a4Printer: '',
   rawLabels: true,
@@ -104,6 +109,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showBarcode: false,
   showUPIQR: false,
   paperSize: '80mm',
+  billDesigns: [],
+  activeBillDesign: -1,
+  labelDesigns: [],
+  activeLabelDesign: -1,
   autoPrint: false,
   autoWhatsApp: false,
   lowStockAlert: true,
@@ -126,7 +135,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
  * follows the login onto any computer.
  */
 const MACHINE_KEYS = [
-  'billPrinter', 'barcodePrinter', 'onlineLabelPrinter', 'rawThermal', 'waServerUrl',
+  'billPrinter', 'barcodePrinter', 'onlineLabelPrinter', 'waServerUrl',
   'printWidthMm', 'a4Printer',
   'rawLabels', 'labelWidthMm', 'labelHeightMm', 'labelColumns', 'labelColumnGapMm',
   'labelRowGapMm', 'labelOffsetXmm', 'labelOffsetYmm', 'labelDarkness', 'labelSpeed',

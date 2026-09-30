@@ -4,7 +4,7 @@ import {
   Package, Boxes, XOctagon,
   FileText, Users, ArrowLeftRight,
   Truck,
-  BookOpen, PieChart, Settings, Store,
+  BookOpen, PieChart, Settings, Store, PenTool,
   ShoppingBag, Receipt, RotateCcw,
   type LucideIcon
 } from 'lucide-react';
@@ -73,6 +73,7 @@ const SECTIONS: NavSection[] = [
       { to: '/accounting', label: 'Accounting', icon: BookOpen },
       { to: '/expenses', label: 'Expenses', icon: Receipt },
       { to: '/reports', label: 'Reports', icon: PieChart, badge: 'AI', badgeColor: '#8b5cf6' },
+      { to: '/formats', label: 'Bill & Label Designer', icon: PenTool, badge: 'New', badgeColor: '#dc2626' },
     ]
   }
 ];

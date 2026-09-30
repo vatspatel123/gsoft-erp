@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { Layout } from '../components/shared/Layout'
 import { getSettings, saveSettings, DEFAULT_SETTINGS, pushShopSettings, pullShopSettings, type AppSettings } from '../utils/settings'
@@ -431,6 +432,9 @@ function BillPrintTab() {
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>
               Live Preview
             </div>
+            <Link to="/formats" style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: '#9333ea' }}>
+              ✏️ Design your own bill & label format →
+            </Link>
             <iframe
               title="Bill preview"
               srcDoc={buildBillHTML(SAMPLE_SALE, s)}
@@ -571,25 +575,17 @@ function BillPrintTab() {
                 </div>
               </Field>
             ))}
-            <Toggle
-              value={s.rawThermal === true}
-              onChange={v => { set('rawThermal', v); saveSettings({ rawThermal: v }) }}
-              label="Fast text receipts"
-              sub="OFF (recommended) prints the designed bill — logo, shop name, proper fonts and the ₹ sign. The app draws it as dots and sends them straight to the printer, so the printer driver never gets a chance to print blank. ON prints plain fixed-width text instead, which is slightly faster."
-            />
 
-            {s.rawThermal !== true && (
-              <Field
-                label="Printable width (mm)"
-                helper="NOT the paper width. An 80mm thermal printer only marks about 72mm, and a 58mm one about 48mm — set this too wide and the Amount column falls off the right edge. 0 works it out from the paper size."
-              >
-                <input
-                  type="number" step="1" style={{ ...inputStyle, maxWidth: '160px' }}
-                  value={s.printWidthMm ?? 0}
-                  onChange={e => set('printWidthMm', Number(e.target.value))}
-                />
-              </Field>
-            )}
+            <Field
+              label="Printable width (mm)"
+              helper="NOT the paper width. An 80mm thermal printer only marks about 72mm, and a 58mm one about 48mm — set this too wide and the Amount column falls off the right edge. 0 works it out from the paper size."
+            >
+              <input
+                type="number" step="1" style={{ ...inputStyle, maxWidth: '160px' }}
+                value={s.printWidthMm ?? 0}
+                onChange={e => set('printWidthMm', Number(e.target.value))}
+              />
+            </Field>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <button

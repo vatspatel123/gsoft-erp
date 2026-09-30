@@ -182,29 +182,6 @@ export const canSelectPrinters = () => !!window.electronAPI?.printing
  * Send an already-laid-out receipt to the thermal printer as raw ESC/POS bytes.
  * Returns the failure reason so the caller can fall back to the HTML path.
  */
-export async function printRaw(ops: unknown[]): Promise<{ ok: boolean; reason?: string }> {
-  const raw = window.electronAPI?.printing?.raw
-  if (!raw) return { ok: false, reason: 'Raw printing needs the desktop app' }
-
-  // `handled` keeps the caller from falling back to the HTML path when the guard
-  // stopped a double-press — otherwise a blocked repeat would print anyway.
-  if (!claim('bill', sigOf(JSON.stringify(ops)))) return { ok: true, reason: 'duplicate' }
-
-  const device = deviceFor('bill')
-  const note = toast.loading(`Receipt → ${device}`)
-  try {
-    const res = await raw({ deviceName: device, ops })
-    toast.dismiss(note)
-    if (res?.ok) toast.success('Receipt printed', { duration: 2000 })
-    return res
-  } catch (e: any) {
-    toast.dismiss(note)
-    return { ok: false, reason: e?.message || 'Raw print failed' }
-  } finally {
-    release('bill')
-  }
-}
-
 /** Remove everything stuck in the queue for the shop's printers. */
 export async function clearPrintQueues(): Promise<{ removed: number; reason?: string }> {
   const api = window.electronAPI?.printing?.clearQueue
@@ -224,12 +201,6 @@ export async function pendingJobs(): Promise<number> {
   const names = [...new Set([s.billPrinter, s.barcodePrinter, s.onlineLabelPrinter].filter(Boolean))]
   if (!names.length) return 0
   try { return (await api(names))?.count ?? 0 } catch { return 0 }
-}
-
-/** True when receipts should go out as ESC/POS rather than rendered HTML. */
-export const useRawBill = (): boolean => {
-  const s = getSettings()
-  return !!window.electronAPI?.printing?.raw && s.paperSize !== 'A4' && !!s.billPrinter
 }
 
 // ─── Automatic printer setup ────────────────────────────────────────────────
