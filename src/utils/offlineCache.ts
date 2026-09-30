@@ -82,7 +82,8 @@ export function searchCachedProducts(
         (p.barcode && String(p.barcode).toLowerCase().includes(q)) ||
         (p.design_no && p.design_no.toLowerCase().includes(q)) ||
         (p.batch_no && p.batch_no.toLowerCase().includes(q)) ||
-        (p.pcode && p.pcode.toLowerCase().includes(q))
+        (p.pcode && p.pcode.toLowerCase().includes(q)) ||
+        ((p as any).categories?.name && (p as any).categories.name.toLowerCase().includes(q))
       )
     ).slice(0, limit)
 }

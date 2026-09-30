@@ -384,23 +384,11 @@ export default function POSScreen() {
         )}
 
         {showAddModal && (
-          <div className="bill-modal-overlay" onClick={() => setShowAddModal(false)}>
-            <div className="bill-modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-30px', position: 'relative', zIndex: 10 }}>
-                <button onClick={() => {
-                  setShowAddModal(false)
-                  setAddProductBarcode('')
-                }} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#64748b' }}>×</button>
-              </div>
-              <AddProductModal 
-                barcode={addProductBarcode}
-                onClose={() => {
-                  setShowAddModal(false)
-                  setAddProductBarcode('')
-                }}
-              />
-            </div>
-          </div>
+          <AddProductModal
+            barcode={addProductBarcode}
+            onClose={() => { setShowAddModal(false); setAddProductBarcode('') }}
+            onAdded={product => pos.addToCart(product, true)}
+          />
         )}
 
         {pos.oldLotAlert && (

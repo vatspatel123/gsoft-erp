@@ -110,7 +110,8 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
           p.is_active !== false && (
             (p.name && p.name.toLowerCase().includes(searchLower)) ||
             (p.sku && p.sku.toLowerCase().includes(searchLower)) ||
-            (p.design_no && p.design_no.toLowerCase().includes(searchLower))
+            (p.design_no && p.design_no.toLowerCase().includes(searchLower)) ||
+            (p.categories?.name && p.categories.name.toLowerCase().includes(searchLower))
           )
         )
 
@@ -175,12 +176,16 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
       let fetched: Product[] = []
       if (navigator.onLine) {
         try {
+          // Typing a category ("kurtis", "3 pc") lists that category's pieces too.
+          const { data: cats } = await supabase.from('categories').select('id').ilike('name', `%${searchStr}%`)
+          const catIds = (cats || []).map(c => c.id)
           const { data, error } = await supabase
             .from('products')
             .select('*, categories(name)')
-            .or(`name.ilike.%${searchStr}%,sku.ilike.%${searchStr}%,design_no.ilike.%${searchStr}%,batch_no.ilike.%${searchStr}%,barcode.ilike.%${searchStr}%`)
+            .or(`name.ilike.%${searchStr}%,sku.ilike.%${searchStr}%,design_no.ilike.%${searchStr}%,batch_no.ilike.%${searchStr}%,barcode.ilike.%${searchStr}%,pcode.ilike.%${searchStr}%` +
+              (catIds.length ? `,category_id.in.(${catIds.join(',')})` : ''))
             .eq('is_active', true)
-            .limit(12)
+            .limit(catIds.length ? 50 : 12)
           if (!error && data) {
             fetched = data
             saveProductsToCache(data)
@@ -190,7 +195,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
         }
       }
 
-      const cached = searchCachedProducts(searchStr, 12)
+      const cached = searchCachedProducts(searchStr, 50)
       const map = new Map<string, Product>()
       for (const p of cached) map.set(p.id, p)
       for (const p of fetched) map.set(p.id, p)

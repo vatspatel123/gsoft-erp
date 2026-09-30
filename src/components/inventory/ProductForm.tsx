@@ -37,6 +37,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
   const [saving, setSaving] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [showNewCat, setShowNewCat] = useState(false)
+  const [showMore, setShowMore] = useState(false)
 
   // Fashion fields
   const [designNo, setDesignNo] = useState(product?.design_no || '')
@@ -66,8 +67,8 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
 
   const finalSize = size === 'Custom' ? customSize : size
 
-  const margin = unitPrice && costPrice
-    ? (((parseFloat(unitPrice) - parseFloat(costPrice)) / parseFloat(unitPrice)) * 100).toFixed(1)
+  const margin = (unitPrice || mrp) && costPrice
+    ? (((parseFloat(unitPrice || mrp) - parseFloat(costPrice)) / parseFloat(unitPrice || mrp)) * 100).toFixed(1)
     : '—'
 
   const autoSku = () => setSku('SKU-' + Date.now().toString().slice(-6))
@@ -80,10 +81,16 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
     reader.readAsDataURL(file)
   }
 
+  // Name, SKU and selling price sit under More options, so each has a default:
+  // name = the category (how this shop's products are already named), a fresh
+  // SKU, and the MRP as the selling price.
+  const sellPrice = unitPrice || mrp
+  const catName = showNewCat ? newCatName.trim() : (categories.find(c => c.id === categoryId)?.name || '')
+  const finalName = name.trim() || catName || designNo.trim()
+  const canSave = !!finalName && !!sellPrice
+
   const handleSave = async (keepOpen = false) => {
-    if (!name.trim()) return
-    if (!sku.trim()) return
-    if (!unitPrice) return
+    if (!canSave) return
     setSaving(true)
 
     let finalCategoryId = categoryId
@@ -91,12 +98,13 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       const cat = await onAddCategory(newCatName.trim())
       if (cat) finalCategoryId = cat.id
     }
+    const finalSku = sku.trim() || 'SKU-' + Date.now().toString().slice(-6)
 
     // Auto-generate barcode if empty
     const autoBarcode =
       barcode.trim() ||
       (batchNo.trim() && /^\d+$/.test(batchNo.trim()) ? batchNo.trim().padStart(8, '0') : '') ||
-      sku.trim().replace(/\D/g, '').padStart(8, '0') ||
+      finalSku.replace(/\D/g, '').padStart(8, '0') ||
       Date.now().toString().slice(-8)
 
     const photoList = photosInput
@@ -104,10 +112,10 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       : photoUrl ? [photoUrl] : []
 
     const data: any = {
-      name: name.trim(),
-      sku: sku.trim(),
+      name: finalName,
+      sku: finalSku,
       barcode: autoBarcode || null,
-      unit_price: parseFloat(unitPrice),
+      unit_price: parseFloat(sellPrice),
       cost_price: costPrice ? parseFloat(costPrice) : null,
       gst_rate: parseFloat(gstRate),
       category_id: finalCategoryId || null,
@@ -124,7 +132,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       batch_no: batchNo.trim() || null,
       hsn_code: hsnCode.trim() || null,
       is_online: isOnline,
-      online_price: onlinePrice ? parseFloat(onlinePrice) : parseFloat(unitPrice),
+      online_price: onlinePrice ? parseFloat(onlinePrice) : parseFloat(sellPrice),
       is_featured: isFeatured,
       is_bestseller: isBestseller,
       online_description: onlineDescription.trim() || null,
@@ -186,7 +194,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
         <div style={{ padding: '24px 28px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div style={{ fontSize: '18px', fontWeight: 600, color: '#1a0a2e' }}>
-              {product ? 'Edit Product' : 'Add New Product'}
+              {product?.id ? 'Edit Product' : 'Add New Product'}
             </div>
             <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
               Fill in product details
@@ -200,53 +208,32 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
         {/* Form Body */}
         <div style={{ padding: '20px 28px 28px', overflowY: 'auto', flex: 1 }}>
 
-          {/* Photo Upload */}
-          <div style={sectionStyle}>
-            <label style={{ ...inputStyle, border: '2px dashed #e9d5ff', background: '#fdf8ff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100px', cursor: 'pointer', borderRadius: '12px', gap: '6px' }}>
-              {photoUrl ? (
-                <img src={photoUrl} alt="Preview" style={{ height: '80px', borderRadius: '8px', objectFit: 'cover' }} />
-              ) : (
-                <>
-                  <Camera size={24} color="#c084fc" />
-                  <span style={{ fontSize: '12px', color: '#9333ea', fontWeight: 500 }}>Upload Photo</span>
-                </>
-              )}
-              <input type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} />
-            </label>
-          </div>
-
-          {/* Basic Info */}
-          <div style={sectionStyle}>
-            <label style={labelStyle}>Product Name *</label>
-            <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cotton T-Shirt" />
-          </div>
-
-          <div style={{ ...gridTwoStyle, ...sectionStyle }}>
+          {/* The fields the shop fills for every piece. Everything else is under More options. */}
+          <div style={{ ...gridTwoStyle, marginBottom: '12px' }}>
             <div>
-              <label style={labelStyle}>SKU / Code *</label>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <input style={{ ...inputStyle, flex: 1 }} value={sku} onChange={e => setSku(e.target.value)} placeholder="SKU-XXXX" />
-                <button onClick={autoSku} style={{ padding: '0 10px', background: '#f5f3ff', border: '1px solid #f3e8ff', borderRadius: '10px', color: '#9333ea', fontSize: '11px', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>Auto</button>
-              </div>
+              <label style={labelStyle}>Category *</label>
+              {!showNewCat ? (
+                <select style={inputStyle} value={categoryId} onChange={e => {
+                  if (e.target.value === '__new__') { setShowNewCat(true); setCategoryId('') }
+                  else setCategoryId(e.target.value)
+                }}>
+                  <option value="">No category</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value="__new__">+ Add New Category</option>
+                </select>
+              ) : (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input style={{ ...inputStyle, flex: 1 }} value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name" autoFocus />
+                  <button onClick={() => { setShowNewCat(false); setNewCatName('') }} style={{ padding: '0 8px', background: 'none', border: '1px solid #f3e8ff', borderRadius: '10px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>✕</button>
+                </div>
+              )}
             </div>
             <div>
               <label style={labelStyle}>Barcode</label>
-              <input style={inputStyle} value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="Scan or type" />
+              <input style={inputStyle} value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="Scan or type (blank = auto)" />
             </div>
           </div>
-
-          {/* Fashion Details Section */}
-          <div style={fashionSectionStyle}>
-            <div style={fashionLabelStyle}>
-              Fashion Details
-              <span style={{ fontSize: '10px', fontWeight: 500, background: '#f3e8ff', color: '#9333ea', padding: '2px 8px', borderRadius: '99px', textTransform: 'none', letterSpacing: 0 }}>Optional</span>
-            </div>
-            <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px', marginTop: '-6px' }}>
-              Size, colour and design info for fashion items
-            </div>
-
-            {/* Row 1: Design No + PCode */}
-            <div style={{ ...gridTwoStyle, marginBottom: '12px' }}>
+                        <div style={{ ...gridTwoStyle, marginBottom: '12px' }}>
               <div>
                 <label style={labelStyle}>Design No</label>
                 <input style={inputStyle} value={designNo} onChange={e => setDesignNo(e.target.value)} placeholder="e.g. 31, 803125" />
@@ -258,9 +245,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
                 <div style={helperStyle}>Supplier product code</div>
               </div>
             </div>
-
-            {/* Row 2: Size + Colour */}
-            <div style={{ ...gridTwoStyle, marginBottom: '12px' }}>
+                        <div style={{ ...gridTwoStyle, marginBottom: '12px' }}>
               <div>
                 <label style={labelStyle}>Size</label>
                 <select
@@ -315,14 +300,80 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
                 </div>
               </div>
             </div>
-
-            {/* Row 3: MRP + Batch No */}
-            <div style={{ ...gridTwoStyle, marginBottom: '12px' }}>
+          <div style={{ ...gridTwoStyle, ...sectionStyle }}>
               <div>
-                <label style={labelStyle}>MRP ₹</label>
+                <label style={labelStyle}>MRP ₹ *</label>
                 <input style={inputStyle} type="number" value={mrp} onChange={e => setMrp(e.target.value)} placeholder="0.00" />
                 <div style={helperStyle}>Printed on barcode label</div>
               </div>
+            <div>
+              <label style={labelStyle}>Cost Price ₹</label>
+              <input style={inputStyle} type="number" value={costPrice} onChange={e => setCostPrice(e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+
+          <button type="button" onClick={() => setShowMore(v => !v)} style={{
+            width: '100%', padding: '10px', marginBottom: '16px', background: '#f5f3ff', border: '1px dashed #d8b4fe',
+            borderRadius: '10px', color: '#9333ea', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif'
+          }}>
+            {showMore ? '▲ Hide options' : '▼ More options (photo, name, SKU, selling price, GST, batch, HSN, stock, website…)'}
+          </button>
+
+          {showMore && (<>
+          {/* Photo Upload */}
+          <div style={sectionStyle}>
+            <label style={{ ...inputStyle, border: '2px dashed #e9d5ff', background: '#fdf8ff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100px', cursor: 'pointer', borderRadius: '12px', gap: '6px' }}>
+              {photoUrl ? (
+                <img src={photoUrl} alt="Preview" style={{ height: '80px', borderRadius: '8px', objectFit: 'cover' }} />
+              ) : (
+                <>
+                  <Camera size={24} color="#c084fc" />
+                  <span style={{ fontSize: '12px', color: '#9333ea', fontWeight: 500 }}>Upload Photo</span>
+                </>
+              )}
+              <input type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} />
+            </label>
+          </div>
+
+          {/* Basic Info */}
+          <div style={sectionStyle}>
+            <label style={labelStyle}>Product Name</label>
+            <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Blank = category name" />
+          </div>
+
+          <div style={{ ...gridTwoStyle, ...sectionStyle }}>
+            <div>
+              <label style={labelStyle}>SKU / Code</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input style={{ ...inputStyle, flex: 1 }} value={sku} onChange={e => setSku(e.target.value)} placeholder="Blank = auto" />
+                <button onClick={autoSku} style={{ padding: '0 10px', background: '#f5f3ff', border: '1px solid #f3e8ff', borderRadius: '10px', color: '#9333ea', fontSize: '11px', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>Auto</button>
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>GST Rate</label>
+              <select style={inputStyle} value={gstRate} onChange={e => setGstRate(e.target.value)}>
+                <option value="0">0%</option>
+                <option value="5">5%</option>
+                <option value="12">12%</option>
+                <option value="18">18%</option>
+                <option value="28">28%</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ ...gridThreeStyle, ...sectionStyle }}>
+            <div>
+              <label style={labelStyle}>Selling Price ₹</label>
+              <input style={inputStyle} type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder={mrp || '0.00'} />
+              <div style={helperStyle}>Blank = MRP</div>
+            </div>
+            <div>
+              <label style={labelStyle}>Margin %</label>
+              <input style={{ ...inputStyle, background: '#fdf8ff', color: '#9333ea', fontWeight: 600 }} value={margin} readOnly />
+            </div>
+          </div>
+
+          <div style={{ ...gridTwoStyle, ...sectionStyle }}>
               <div>
                 <label style={labelStyle}>Batch No</label>
                 <div style={{ display: 'flex', gap: '6px' }}>
@@ -335,8 +386,9 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
                 </div>
                 <div style={helperStyle}>For stock tracking</div>
               </div>
-            </div>
+          </div>
 
+          <div style={{ ...sectionStyle }}>
             {/* Row 4: HSN Code + Brand */}
             <div style={gridTwoStyle}>
               <div>
@@ -371,54 +423,6 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
                 <label style={labelStyle}>Brand / Label</label>
                 <input style={inputStyle} value={brand} onChange={e => setBrand(e.target.value)} placeholder="e.g. FabIndia, BIBA" />
               </div>
-            </div>
-          </div>
-
-          {/* Pricing */}
-          <div style={{ ...gridThreeStyle, ...sectionStyle }}>
-            <div>
-              <label style={labelStyle}>Selling Price ₹ *</label>
-              <input style={inputStyle} type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder="0.00" />
-            </div>
-            <div>
-              <label style={labelStyle}>Cost Price ₹</label>
-              <input style={inputStyle} type="number" value={costPrice} onChange={e => setCostPrice(e.target.value)} placeholder="0.00" />
-            </div>
-            <div>
-              <label style={labelStyle}>Margin %</label>
-              <input style={{ ...inputStyle, background: '#fdf8ff', color: '#9333ea', fontWeight: 600 }} value={margin} readOnly />
-            </div>
-          </div>
-
-          {/* Tax & Category */}
-          <div style={{ ...gridTwoStyle, ...sectionStyle }}>
-            <div>
-              <label style={labelStyle}>GST Rate</label>
-              <select style={inputStyle} value={gstRate} onChange={e => setGstRate(e.target.value)}>
-                <option value="0">0%</option>
-                <option value="5">5%</option>
-                <option value="12">12%</option>
-                <option value="18">18%</option>
-                <option value="28">28%</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Category</label>
-              {!showNewCat ? (
-                <select style={inputStyle} value={categoryId} onChange={e => {
-                  if (e.target.value === '__new__') { setShowNewCat(true); setCategoryId('') }
-                  else setCategoryId(e.target.value)
-                }}>
-                  <option value="">No category</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  <option value="__new__">+ Add New Category</option>
-                </select>
-              ) : (
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <input style={{ ...inputStyle, flex: 1 }} value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name" autoFocus />
-                  <button onClick={() => { setShowNewCat(false); setNewCatName('') }} style={{ padding: '0 8px', background: 'none', border: '1px solid #f3e8ff', borderRadius: '10px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>✕</button>
-                </div>
-              )}
             </div>
           </div>
 
@@ -553,6 +557,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
               }} />
             </button>
           </div>
+          </>)}
         </div>
 
         {/* Footer Buttons */}
@@ -560,16 +565,16 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
           <button onClick={onClose} style={{ padding: '11px 24px', background: 'white', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: '12px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
             Cancel
           </button>
-          {product && (
+          {product?.id && (
             <button onClick={() => handleSave(true)} disabled={saving} style={{ padding: '11px 20px', background: '#f5f3ff', color: '#9333ea', border: '1px solid #f3e8ff', borderRadius: '12px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
               Save & Continue
             </button>
           )}
-          <button onClick={() => handleSave(false)} disabled={saving || !name.trim() || !sku.trim() || !unitPrice} style={{
+          <button onClick={() => handleSave(false)} disabled={saving || !canSave} style={{
             padding: '11px 28px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-            opacity: saving || !name.trim() || !sku.trim() || !unitPrice ? 0.5 : 1
+            opacity: saving || !canSave ? 0.5 : 1
           }}>
-            {saving ? 'Saving...' : (product ? 'Update Product' : 'Save Product')}
+            {saving ? 'Saving...' : (product?.id ? 'Update Product' : 'Save Product')}
           </button>
         </div>
       </div>
