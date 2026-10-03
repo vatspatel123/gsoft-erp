@@ -5,6 +5,7 @@ import { calculateCustomerTier, getTierInfo, type CustomerTier } from '../../uti
 import { printCreditNote, sendCreditNoteWhatsApp } from '../../utils/printBill'
 import toast from 'react-hot-toast'
 import { sendWhatsApp } from '../../utils/whatsapp'
+import { fmtDate, fmtDateTime } from '../../utils/date'
 
 interface CustomerHistoryModalProps {
   customer: {
@@ -132,7 +133,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
     }
     const cleanPhone = customer.phone.replace(/\D/g, '')
     const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone
-    const dateStr = new Date(sale.created_at).toLocaleDateString('en-IN')
+    const dateStr = fmtDate(new Date(sale.created_at))
     const msg =
       `*🔔 PAYMENT REMINDER — OUTSTANDING BILL*%0A%0A` +
       `નમસ્તે *${customer.name}*,%0A` +
@@ -297,9 +298,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {sales.map(s => {
                         const isExpanded = expandedSaleId === s.id
-                        const dateStr = new Date(s.created_at).toLocaleDateString('en-IN', {
-                          day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-                        })
+                        const dateStr = fmtDateTime(new Date(s.created_at))
                         return (
                           <div key={s.id} style={{
                             border: '1px solid #f1f5f9', borderRadius: '12px', padding: '14px',
@@ -393,7 +392,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                                 {exc.exchange_no}
                               </div>
                               <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                                Orig. Invoice: #{exc.original_invoice_no} · {new Date(exc.created_at).toLocaleDateString('en-IN')}
+                                Orig. Invoice: #{exc.original_invoice_no} · {fmtDate(new Date(exc.created_at))}
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
@@ -440,7 +439,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                               </span>
                             </div>
                             <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
-                              Issued on {new Date(cn.created_at).toLocaleDateString('en-IN')} · Original: ₹{Number(cn.amount).toFixed(2)}
+                              Issued on {fmtDate(new Date(cn.created_at))} · Original: ₹{Number(cn.amount).toFixed(2)}
                             </div>
                           </div>
 
@@ -497,7 +496,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                           const dueTime = new Date(s.credit_due_date).getTime()
                           const nowTime = new Date().setHours(0,0,0,0)
                           const daysUntilDue = Math.ceil((dueTime - nowTime) / (1000 * 60 * 60 * 24))
-                          dueDateText = new Date(s.credit_due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                          dueDateText = fmtDate(new Date(s.credit_due_date))
                           if (daysUntilDue < 0) {
                             isOverdue = true
                             statusBadge = `⚠️ Overdue by ${Math.abs(daysUntilDue)} days`
@@ -534,7 +533,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                                 </span>
                               </div>
                               <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
-                                Bill Date: {billDate.toLocaleDateString('en-IN')} · Promised Due Date: <strong style={{ color: '#9333ea' }}>{dueDateText}</strong>
+                                Bill Date: {fmtDate(billDate)} · Promised Due Date: <strong style={{ color: '#9333ea' }}>{dueDateText}</strong>
                               </div>
                             </div>
 

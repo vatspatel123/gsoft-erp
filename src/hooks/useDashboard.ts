@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { getCachedProducts, getPendingSales } from '../utils/offlineCache';
+import { fmtDayMonth } from '../utils/date'
 
 // IST Timezone Constants & Helpers
 const IST_OFFSET = 5.5 * 60 * 60 * 1000
@@ -149,11 +150,7 @@ const getISTDateLabel = (utcDateStr: string) => {
   const istDate = new Date(
     utcDate.getTime() + IST_OFFSET
   )
-  return istDate.toLocaleDateString(
-    'en-IN', {
-      day: '2-digit', month: 'short'
-    }
-  )
+  return fmtDayMonth(istDate)
 }
 
 export interface DashboardData {

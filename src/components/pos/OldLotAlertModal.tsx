@@ -1,6 +1,7 @@
 import React from 'react'
 import type { Product } from '../../hooks/usePOS'
 import { colourToCSS } from '../../utils/design'
+import { fmtDate } from '../../utils/date'
 
 interface Props {
   scannedProduct: Product
@@ -20,11 +21,7 @@ export function OldLotAlertModal({
   const formatDate = (dateStr?: string | null) => {
     if (!dateStr) return 'N/A'
     try {
-      return new Date(dateStr).toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      })
+      return fmtDate(new Date(dateStr))
     } catch {
       return dateStr
     }

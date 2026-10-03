@@ -8,6 +8,7 @@ import { CustomerHistoryModal } from '../components/customers/CustomerHistoryMod
 import toast from 'react-hot-toast'
 import '../styles/customers.css'
 import { sendWhatsApp } from '../utils/whatsapp'
+import { fmtDate, fmtDayMonth } from '../utils/date'
 
 function CustomersPageComponent() {
   const {
@@ -346,10 +347,7 @@ function CustomersPageComponent() {
                   const tInfo = getTierInfo(customer.tier || 'New')
                   const hasBirthdayThisMonth = birthdayThisMonth.some(c => c.id === customer.id)
                   const formattedBirthday = customer.date_of_birth
-                    ? new Date(customer.date_of_birth).toLocaleDateString('en-IN', {
-                        day: '2-digit',
-                        month: 'short'
-                      })
+                    ? fmtDayMonth(new Date(customer.date_of_birth))
                     : '—'
 
                   return (
@@ -528,7 +526,7 @@ function CustomersPageComponent() {
                   <p className="panel-contact">📱 {selectedCustomer.phone}</p>
                   {selectedCustomer.email && <p className="panel-contact">📧 {selectedCustomer.email}</p>}
                   <p className="panel-member-since">
-                    Member since {new Date(selectedCustomer.created_at).toLocaleDateString()}
+                    Member since {fmtDate(new Date(selectedCustomer.created_at))}
                   </p>
                 </div>
               </div>
@@ -580,7 +578,7 @@ function CustomersPageComponent() {
                   <div key={purchase.id} className="purchase-row">
                     <div className="purchase-invoice">{purchase.invoice_number}</div>
                     <div className="purchase-date">
-                      {new Date(purchase.created_at).toLocaleDateString()}
+                      {fmtDate(new Date(purchase.created_at))}
                     </div>
                     <div className="purchase-amount">{formatCurrency(purchase.total_amount)}</div>
                     <div className="purchase-method">{purchase.payment_method}</div>

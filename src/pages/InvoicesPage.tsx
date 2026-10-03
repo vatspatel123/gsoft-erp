@@ -24,6 +24,7 @@ import { sendWhatsApp, sendWhatsAppDocument } from '../utils/whatsapp'
 import toast from 'react-hot-toast'
 import { EditSaleModal } from '../components/bills/EditSaleModal'
 import { BillHistoryModal } from '../components/bills/BillHistoryModal'
+import { fmtDate, fmtDateTime } from '../utils/date'
 
 export function InvoicesPage() {
   const {
@@ -116,7 +117,7 @@ export function InvoicesPage() {
     }
     const cleanPhone = invoice.customers.phone.replace(/\D/g, '')
     const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone
-    const dateStr = new Date(invoice.created_at).toLocaleDateString('en-IN')
+    const dateStr = fmtDate(new Date(invoice.created_at))
 
     const msg =
       `*🔔 PAYMENT REMINDER — OUTSTANDING BILL*%0A%0A` +
@@ -133,7 +134,7 @@ export function InvoicesPage() {
       ...inv,
       customer_name: inv.customers?.name || 'Walk-in',
       salesman_name: inv.users?.name || 'Unknown',
-      created_at: new Date(inv.created_at).toLocaleString('en-IN')
+      created_at: fmtDateTime(new Date(inv.created_at))
     }))
 
     const columns = [
@@ -405,7 +406,7 @@ export function InvoicesPage() {
                       <td>
                         <div className="date-time">
                           <div className="date-time-date">
-                            {new Date(invoice.created_at).toLocaleDateString('en-IN')}
+                            {fmtDate(new Date(invoice.created_at))}
                           </div>
                           <div className="date-time-time">
                             {new Date(invoice.created_at).toLocaleTimeString('en-IN', {
@@ -568,7 +569,7 @@ export function InvoicesPage() {
                 <div className="info-item">
                   <div className="info-label">Date & Time</div>
                   <div className="info-value">
-                    {new Date(selectedInvoice.created_at).toLocaleDateString('en-IN')}, {''}
+                    {fmtDate(new Date(selectedInvoice.created_at))}, {''}
                     {new Date(selectedInvoice.created_at).toLocaleTimeString('en-IN', {
                       hour: '2-digit',
                       minute: '2-digit'

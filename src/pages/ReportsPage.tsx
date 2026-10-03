@@ -7,6 +7,7 @@ import {
   BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, Cell
 } from 'recharts'
+import { fmtDayMonth } from '../utils/date'
 
 const IST_OFFSET = 5.5 * 60 * 60 * 1000
 
@@ -292,8 +293,7 @@ export default function ReportsPage() {
         Date.now() - i * 86400000)
       const ist = new Date(
         d.getTime() + IST_OFFSET)
-      const label = ist.toLocaleDateString(
-        'en-IN', { day: '2-digit', month: 'short' })
+      const label = fmtDayMonth(ist)
       const total = sales.filter(s => {
         const sd = new Date(
           new Date(s.created_at).getTime() +
@@ -1445,7 +1445,7 @@ export default function ReportsPage() {
                         rows: [
                           ['Opening float', cashPos.position.openingCash],
                           ['Cash from sales', cashPos.position.salesCash],
-                          ['Udhar collected in cash', cashPos.position.udharCollectedCash],
+                          ['Pending payments collected in cash', cashPos.position.udharCollectedCash],
                           ['Cash expenses', -cashPos.position.expensesCash],
                           ['Paid to suppliers in cash', -cashPos.position.supplierPaidCash]
                         ] as [string, number][]
@@ -1456,7 +1456,7 @@ export default function ReportsPage() {
                           ['Opening balance', cashPos.position.openingBank],
                           ['UPI from sales', cashPos.position.salesUpi],
                           ['Card from sales', cashPos.position.salesCard],
-                          ['Udhar collected digitally', cashPos.position.udharCollectedBank],
+                          ['Pending payments collected digitally', cashPos.position.udharCollectedBank],
                           ['Bank / UPI expenses', -cashPos.position.expensesBank],
                           ['Paid to suppliers digitally', -cashPos.position.supplierPaidBank]
                         ] as [string, number][]

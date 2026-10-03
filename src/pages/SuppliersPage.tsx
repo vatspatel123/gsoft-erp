@@ -7,6 +7,7 @@ import { useSuppliers, type Supplier } from '../hooks/useSuppliers'
 import { supabase } from '../lib/supabase'
 import { exportToCSV } from '../utils/exportCSV'
 import { Truck, Plus, Search, Edit3, Trash2, Phone, MessageCircle, FileText, X, Download } from 'lucide-react'
+import { fmtDate } from '../utils/date'
 
 const card: React.CSSProperties = {
   background: 'white', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '20px', marginBottom: '16px'
@@ -321,7 +322,7 @@ function SupplierLedger({ supplier, onClose, onNewPurchase }: { supplier: Suppli
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#9333ea', fontFamily: 'DM Mono, monospace' }}>{b.purchase_no}</div>
                 <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                  {new Date(b.created_at).toLocaleDateString('en-IN')}
+                  {fmtDate(new Date(b.created_at))}
                   {b.supplier_invoice_no ? ` · Inv ${b.supplier_invoice_no}` : ''}
                 </div>
               </div>

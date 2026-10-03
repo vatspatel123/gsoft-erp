@@ -3,6 +3,7 @@ import { X, Loader2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { billHistory, money, type BillEdit } from '../../utils/billEdits'
 import { S } from './billEditStyles'
+import { fmtDateTime } from '../../utils/date'
 
 interface Props {
   type: 'sale' | 'purchase'
@@ -81,7 +82,7 @@ export function BillHistoryModal({ type, billId, billNo, onClose }: Props) {
       diff('Cash', 'cash_amount', v => money(Number(v)))
       diff('UPI', 'upi_amount', v => money(Number(v)))
       diff('Card', 'card_amount', v => money(Number(v)))
-      diff('Udhar', 'credit_amount', v => money(Number(v)))
+      diff('Pending', 'credit_amount', v => money(Number(v)))
     } else {
       diff('Supplier', 'supplier_id', v => who(v))
       diff('Supplier invoice', 'supplier_invoice_no')
@@ -111,7 +112,7 @@ export function BillHistoryModal({ type, billId, billNo, onClose }: Props) {
           ) : edits.map(e => (
             <div key={e.id} style={{ border: '1px solid #f3e8ff', borderRadius: 12, padding: '12px 14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                <b>{new Date(e.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</b>
+                <b>{fmtDateTime(new Date(e.created_at))}</b>
                 <span style={S.muted}>
                   by {e.edited_by_login || 'shop login'}
                   {e.authorized_name && <> · salesman change approved by <b>{e.authorized_name}</b></>}

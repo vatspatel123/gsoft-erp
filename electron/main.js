@@ -21,6 +21,10 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
+// Indian date order everywhere Chromium draws one itself — the date pickers show
+// dd/mm/yyyy instead of the US mm/dd/yyyy. (Text dates use src/utils/date.ts.)
+app.commandLine.appendSwitch('lang', 'en-GB')
+
 let mainWindow
 
 function createWindow() {

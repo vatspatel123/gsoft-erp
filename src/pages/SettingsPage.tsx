@@ -422,7 +422,7 @@ function BillPrintTab() {
             <Toggle value={s.showGSTIN} onChange={v => set('showGSTIN', v)} label="GSTIN" sub="Show GST number on bill" />
             <Toggle value={s.showCustomer} onChange={v => set('showCustomer', v)} label="Customer Name & Phone" />
             <Toggle value={s.showSalesman} onChange={v => set('showSalesman', v)} label="Salesman Name" />
-            <Toggle value={s.showPaymentBreakdown} onChange={v => set('showPaymentBreakdown', v)} label="Payment Details" sub="Cash / UPI / Card / Udhar split" />
+            <Toggle value={s.showPaymentBreakdown} onChange={v => set('showPaymentBreakdown', v)} label="Payment Details" sub="Cash / UPI / Card / Pending split" />
             <Toggle value={s.showBarcode} onChange={v => set('showBarcode', v)} label="Barcode under each item" />
           </div>
 

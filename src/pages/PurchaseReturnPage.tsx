@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { sendWhatsApp } from '../utils/whatsapp'
+import { fmtDate } from '../utils/date'
 
 interface ReturnItem {
   product: any
@@ -259,7 +260,7 @@ export function PurchaseReturnPage() {
     }
     const cleanPhone = ret.supplierPhone.replace(/\D/g, '')
     const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone
-    const dateStr = new Date(ret.createdAt).toLocaleDateString('en-IN')
+    const dateStr = fmtDate(new Date(ret.createdAt))
 
     const msg =
       `*📦 PURCHASE RETURN / DEBIT NOTE*%0A%0A` +
@@ -571,7 +572,7 @@ export function PurchaseReturnPage() {
                         {ret.return_no}
                       </td>
                       <td style={{ padding: '12px 16px', color: '#64748b' }}>
-                        {new Date(ret.created_at).toLocaleDateString('en-IN')}
+                        {fmtDate(new Date(ret.created_at))}
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 600 }}>
                         {ret.supplier_name}

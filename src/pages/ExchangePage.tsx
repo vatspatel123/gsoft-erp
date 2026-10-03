@@ -8,6 +8,7 @@ import { getPendingSales } from '../utils/offlineCache'
 import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
 import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
 import { appliedTenders, type Tenders } from '../utils/tenders'
+import { fmtDate } from '../utils/date'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ReturnItem {
@@ -424,8 +425,8 @@ export function ExchangePage() {
     if (returnItems.length === 0) { toast.error('No return items selected'); return }
     if (due > 0 && short > 0.009) {
       toast.error(canUdhar
-        ? `₹${short.toFixed(2)} is not covered — collect it, or put it in Udhar`
-        : `Collect ₹${short.toFixed(2)} more — the original bill has no customer, so the balance can't go on udhar`)
+        ? `₹${short.toFixed(2)} is not covered — collect it, or mark it Pending`
+        : `Collect ₹${short.toFixed(2)} more — the original bill has no customer, so the balance can't be left pending`)
       return
     }
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
@@ -646,7 +647,7 @@ export function ExchangePage() {
                     {history.map(exc => (
                       <tr key={exc.id} style={{ borderBottom: '1px solid #fdf8ff' }}>
                         <td style={{ padding: '12px 14px', fontFamily: 'DM Mono, monospace', fontSize: '12px', color: '#9333ea', fontWeight: 600 }}>{exc.exchange_no}</td>
-                        <td style={{ padding: '12px 14px', fontSize: '12px', color: '#64748b' }}>{new Date(exc.created_at).toLocaleDateString('en-IN')}</td>
+                        <td style={{ padding: '12px 14px', fontSize: '12px', color: '#64748b' }}>{fmtDate(new Date(exc.created_at))}</td>
                         <td style={{ padding: '12px 14px', fontSize: '12px' }}>{exc.customers?.name || '—'}</td>
                         <td style={{ padding: '12px 14px', fontFamily: 'DM Mono, monospace', fontSize: '11px', color: '#94a3b8' }}>{exc.original_invoice_no}</td>
                         <td style={{ padding: '12px 14px', fontFamily: 'DM Mono, monospace', fontSize: '12px', color: '#ef4444' }}>₹{Number(exc.return_amount).toFixed(0)}</td>
@@ -758,7 +759,7 @@ export function ExchangePage() {
                           onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
                           <div>
                             <div style={{ fontWeight: 600, color: '#9333ea', fontSize: '13px', fontFamily: 'DM Mono, monospace' }}>{inv.invoice_no}</div>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>{new Date(inv.created_at).toLocaleDateString('en-IN')} · ₹{inv.net_amount}</div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>{fmtDate(new Date(inv.created_at))} · ₹{inv.net_amount}</div>
                           </div>
                           <ChevronRight size={14} color="#9333ea" />
                         </div>
@@ -791,7 +792,7 @@ export function ExchangePage() {
                         <div>
                           <div style={{ fontWeight: 700, color: '#16a34a', fontSize: '14px', fontFamily: 'DM Mono, monospace' }}>{originalInvoice.invoice_no}</div>
                           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                            {new Date(originalInvoice.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {daysSince} day{daysSince !== 1 ? 's' : ''} ago
+                            {fmtDate(new Date(originalInvoice.created_at))} · {daysSince} day{daysSince !== 1 ? 's' : ''} ago
                           </div>
                           {originalInvoice.customers && (
                             <div style={{ fontSize: '12px', color: '#1a0a2e', marginTop: '2px', fontWeight: 500 }}>
@@ -1084,7 +1085,7 @@ export function ExchangePage() {
                         {/* Split payment, as at the POS: type each part, or tap Full. */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {([['cash', '💵 Cash'], ['card', '💳 Card'], ['upi', '📱 UPI'],
-                            ...(canUdhar ? [['udhar', '📝 Udhar']] : [])] as [keyof Tenders | 'udhar', string][]).map(([k, label]) => (
+                            ...(canUdhar ? [['udhar', '📝 Pending']] : [])] as [keyof Tenders | 'udhar', string][]).map(([k, label]) => (
                             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span style={{ width: '64px', fontSize: '12px', color: '#92400e', fontWeight: 600 }}>{label}</span>
                               <input
@@ -1115,14 +1116,14 @@ export function ExchangePage() {
                           }}>
                             <span>{short > 0
                               ? canUdhar
-                                ? `₹${short.toFixed(2)} not covered — collect it or put it in Udhar`
-                                : `Collect ₹${short.toFixed(2)} more (walk-in: no udhar)`
+                                ? `₹${short.toFixed(2)} not covered — collect it or mark it Pending`
+                                : `Collect ₹${short.toFixed(2)} more (walk-in: can't be left pending)`
                               : change > 0 ? `✓ Paid · give ₹${change.toFixed(2)} change` : '✓ Fully covered'}</span>
                             {udhar > 0 && <span style={{ color: '#b45309' }}>
-                              Udhar ₹{udhar.toFixed(2)} → added to {originalInvoice?.customers?.name || 'customer'}'s dues
+                              Pending ₹{udhar.toFixed(2)} → added to {originalInvoice?.customers?.name || 'customer'}'s dues
                             </span>}
                             <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 500, color: '#64748b' }}>
-                              Paid now ₹{keptTotal.toFixed(2)}{udhar > 0 ? ` + Udhar ₹${udhar.toFixed(2)}` : ''} of ₹{due.toFixed(2)}
+                              Paid now ₹{keptTotal.toFixed(2)}{udhar > 0 ? ` + Pending ₹${udhar.toFixed(2)}` : ''} of ₹{due.toFixed(2)}
                             </span>
                           </div>
                         </div>
@@ -1220,7 +1221,7 @@ export function ExchangePage() {
                   ))}
                 </div>
                 <div style={{ borderTop: '2px solid #9333ea', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#9333ea', fontFamily: 'DM Mono, monospace' }}>
-                  <span>{exchangeComplete.balance === 0 ? 'Zero Balance Exchange' : exchangeComplete.balance > 0 ? (exchangeComplete.udhar > 0 ? `Customer Balance: ₹${exchangeComplete.balance.toFixed(2)} · Udhar ₹${exchangeComplete.udhar.toFixed(2)}` : `Customer Paid: ₹${exchangeComplete.balance.toFixed(2)}`) : `Store Credit: ₹${Math.abs(exchangeComplete.balance).toFixed(2)}`}</span>
+                  <span>{exchangeComplete.balance === 0 ? 'Zero Balance Exchange' : exchangeComplete.balance > 0 ? (exchangeComplete.udhar > 0 ? `Customer Balance: ₹${exchangeComplete.balance.toFixed(2)} · Pending ₹${exchangeComplete.udhar.toFixed(2)}` : `Customer Paid: ₹${exchangeComplete.balance.toFixed(2)}`) : `Store Credit: ₹${Math.abs(exchangeComplete.balance).toFixed(2)}`}</span>
                 </div>
               </div>
 

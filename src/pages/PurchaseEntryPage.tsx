@@ -8,6 +8,7 @@ import {
   ShoppingBag, Printer, Tag, RefreshCw
 } from 'lucide-react'
 import { printPurchaseA4 } from '../utils/printA4Purchase'
+import { fmtDate } from '../utils/date'
 
 // ─── Green theme tokens ───────────────────────────────────────────────────────
 const G = {
@@ -484,7 +485,7 @@ function PurchaseHistory({ history, loading, filter, setFilter, onRefresh }: any
                   >
                     <td style={{ padding: '12px', fontFamily: 'DM Mono', fontSize: '12px', color: G.primary, fontWeight: 600 }}>{b.purchase_no}</td>
                     <td style={{ padding: '12px', color: G.muted, fontSize: '12px' }}>
-                      {new Date(b.created_at).toLocaleDateString('en-IN')}
+                      {fmtDate(new Date(b.created_at))}
                     </td>
                     <td style={{ padding: '12px', color: '#1a0a2e', fontWeight: 500 }}>
                       {b.suppliers?.business_name || b.suppliers?.name || '—'}

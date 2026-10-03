@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { exportToCSV } from '../../utils/exportCSV';
+import { fmtDateTime, fmtDayMonth } from '../../utils/date'
 
 interface SalesmanDetailModalProps {
   salesmanName: string;
@@ -104,7 +105,7 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
         customer: s.customers?.name || 'Walk-in',
         amount: Number(s.net_amount || 0),
         payment: s.payment_mode || 'cash',
-        date: new Date(s.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        date: fmtDateTime(new Date(s.created_at))
       }));
 
       const revenue = allSalesData.reduce((sum: number, s: any) => sum + Number(s.net_amount || 0), 0);
@@ -142,12 +143,12 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
       const dailyMap: Record<string, number> = {};
       for (let i = 0; i < 7; i++) {
         const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const label = day.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        const label = fmtDayMonth(day);
         dailyMap[label] = 0;
       }
 
       (thisWeekData.data || []).forEach((sale: any) => {
-        const label = new Date(sale.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        const label = fmtDayMonth(new Date(sale.created_at));
         dailyMap[label] = (dailyMap[label] || 0) + Number(sale.net_amount || 0);
       });
 

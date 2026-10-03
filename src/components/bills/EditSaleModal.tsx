@@ -149,7 +149,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
       salesmanChanged ? { login: authLogin.trim(), password: authPw } : undefined)
     setSaving(false)
     if (!res.ok) { toast.error(res.error, { duration: 6000 }); return }
-    toast.success(`Bill ${sale.invoice_no} updated${res.udhar > 0 ? ` · udhar ${money(res.udhar)}` : ''}`)
+    toast.success(`Bill ${sale.invoice_no} updated${res.udhar > 0 ? ` · pending ${money(res.udhar)}` : ''}`)
     onSaved(saleId)
     onClose()
   }
@@ -160,7 +160,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
         <div style={S.head}>
           <div>
             <div style={S.title}>Edit bill {sale?.invoice_no || ''}</div>
-            <div style={S.sub}>Stock, udhar and loyalty points are adjusted by the difference. The old version is kept in the bill's history.</div>
+            <div style={S.sub}>Stock, pending amount and loyalty points are adjusted by the difference. The old version is kept in the bill's history.</div>
           </div>
           <button style={S.x} onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
@@ -309,7 +309,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
               <b style={{ fontSize: 16 }}>Net {money(totals.net)}</b>
               {Number(sale.net_amount) !== totals.net && <span style={S.changed}>was {money(Number(sale.net_amount))}</span>}
               <span style={{ color: totals.udhar > 0 ? '#b45309' : '#15803d', fontWeight: 600 }}>
-                {totals.udhar > 0 ? `Udhar ${money(totals.udhar)}` : 'Fully paid'}
+                {totals.udhar > 0 ? `Pending ${money(totals.udhar)}` : 'Fully paid'}
                 {totals.change > 0 && ` · change ${money(totals.change)} (saved as ${money(totals.paid)})`}
               </span>
             </div>

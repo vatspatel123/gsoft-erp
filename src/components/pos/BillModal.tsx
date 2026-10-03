@@ -4,6 +4,7 @@ import { printBill, buildBillHTML, buildBillMessage } from '../../utils/printBil
 import toast from 'react-hot-toast';
 import { getSettings } from '../../utils/settings';
 import { sendWhatsAppDocument } from '../../utils/whatsapp';
+import { fmtDate, fmtDateTime } from '../../utils/date'
 
 interface BillModalProps {
   saleData: any;
@@ -55,7 +56,7 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
             <div style={{ color: '#64748b', fontSize: '12px' }}>Fashion Edition</div>
           </div>
           <div className="preview-divider" />
-          <div className="preview-row"><span>Date:</span> <span>{saleData.date}</span></div>
+          <div className="preview-row"><span>Date:</span> <span>{fmtDateTime(saleData.date)}</span></div>
           {saleData.customer && (
             <div className="preview-row">
               <span>Customer:</span>
@@ -98,11 +99,11 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
               color: saleData.paymentMode === 'credit' ? '#dc2626' : '#9333ea',
               padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase'
             }}>
-              {saleData.paymentMode === 'credit' ? '⚠️ CREDIT (UDHAR)' : saleData.paymentMode}
+              {saleData.paymentMode === 'credit' ? '⚠️ CREDIT (PENDING)' : saleData.paymentMode}
             </span>
             {saleData.paymentMode === 'credit' && (
               <span style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 600 }}>
-                Due: {saleData.creditDueDate ? new Date(saleData.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'in 5 days'}
+                Due: {saleData.creditDueDate ? fmtDate(new Date(saleData.creditDueDate)) : 'in 5 days'}
               </span>
             )}
           </div>

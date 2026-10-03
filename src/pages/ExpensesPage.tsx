@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { Plus, X, Receipt } from 'lucide-react'
+import { fmtDate } from '../utils/date'
 
 // ─── Orange theme ─────────────────────────────────────────────────────────────
 const O = {
@@ -473,7 +474,7 @@ export function ExpensesPage() {
     const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1)
     if (d.toDateString() === today.toDateString()) return 'Today'
     if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    return fmtDate(d)
   }
 
   const deleteExpense = async (id: string) => {
@@ -564,7 +565,7 @@ export function ExpensesPage() {
                         <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a0a2e' }}>
                           {formatDateLabel(date)}
                           <span style={{ fontWeight: 400, color: O.muted, marginLeft: '6px', fontSize: '12px' }}>
-                            · {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            · {fmtDate(new Date(date + 'T00:00:00'))}
                           </span>
                         </div>
                         <div style={{ fontSize: '13px', fontWeight: 600, color: O.primary, fontFamily: 'DM Mono' }}>

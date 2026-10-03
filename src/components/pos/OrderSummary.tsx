@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { saveCustomerToCache } from '../../utils/offlineCache';
 import toast from 'react-hot-toast';
+import { fmtDate } from '../../utils/date'
 
 interface OrderSummaryProps {
   customer: Customer | null;
@@ -598,14 +599,14 @@ export function OrderSummary(props: OrderSummaryProps) {
             color: remaining > 0 ? '#b45309' : changeDue > 0 ? '#3b82f6' : '#16a34a'
           }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              {remaining > 0 ? <><BookOpen size={13} /> Remaining on udhar</> : changeDue > 0 ? 'Change to return' : '✓ Fully paid'}
+              {remaining > 0 ? <><BookOpen size={13} /> Remaining as pending</> : changeDue > 0 ? 'Change to return' : '✓ Fully paid'}
             </span>
             <span style={{ fontFamily: "'DM Mono', monospace" }}>
               ₹{(remaining > 0 ? remaining : changeDue).toFixed(2)}
             </span>
           </div>
 
-          {/* Credit Sale (Udhar / Pay Later) Due Date Terms */}
+          {/* Credit Sale (Pending / Pay Later) Due Date Terms */}
           {remaining > 0 && (
             <div style={{
               marginTop: '10px', background: '#faf5ff', border: '1px solid #e9d5ff',
@@ -673,7 +674,7 @@ export function OrderSummary(props: OrderSummaryProps) {
 
               <div style={{ fontSize: '11px', color: '#6b21a8', marginTop: '6px', fontWeight: 500 }}>
                 ⚠️ Payment Due Date: <strong style={{ color: '#9333ea' }}>
-                  {props.creditDueDate ? new Date(props.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not set'}
+                  {props.creditDueDate ? fmtDate(new Date(props.creditDueDate)) : 'Not set'}
                 </strong> ({props.creditDueDays || 0} days remaining)
               </div>
             </div>

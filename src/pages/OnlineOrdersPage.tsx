@@ -23,6 +23,7 @@ import {
 import { useOnlineOrders } from '../hooks/useOnlineOrders'
 import { useOnlineStore } from '../hooks/useOnlineStore'
 import type { OnlineOrder, OnlineOrderStatus } from '../types/ecommerce'
+import { fmtDateTime } from '../utils/date'
 
 const P = {
   primary: '#9333ea',
@@ -114,7 +115,7 @@ export const OnlineOrdersPage: React.FC = () => {
       qty: 1,
       unit_price: p.online_price || p.selling_price || 999,
       line_total: p.online_price || p.selling_price || 999,
-      image_url: p.primary_photo_url || p.photos?.[0]
+      image_url: p.photo_url || p.photos?.[0]
     }))
 
     if (sampleItems.length === 0) {
@@ -458,7 +459,7 @@ export const OnlineOrdersPage: React.FC = () => {
                           #{order.order_no}
                         </div>
                         <div style={{ fontSize: '11px', color: P.muted, marginTop: '2px' }}>
-                          {new Date(order.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                          {fmtDateTime(new Date(order.created_at))}
                         </div>
                         {order.tracking_number && (
                           <div style={{ marginTop: '4px', fontSize: '10px', background: '#e0e7ff', color: '#4338ca', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 600 }}>
@@ -649,7 +650,7 @@ export const OnlineOrdersPage: React.FC = () => {
                     Order #{selectedOrder.order_no}
                   </h3>
                   <div style={{ fontSize: '12px', color: P.muted, marginTop: '2px' }}>
-                    Placed on {new Date(selectedOrder.created_at).toLocaleString('en-IN')}
+                    Placed on {fmtDateTime(new Date(selectedOrder.created_at))}
                   </div>
                 </div>
                 <button

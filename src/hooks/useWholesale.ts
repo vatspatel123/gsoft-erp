@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
+import { fmtDateTime } from '../utils/date'
 
 export interface WholesaleCartItem {
   product: any
@@ -196,7 +197,7 @@ export function useWholesale() {
 
       const saleData = {
         invoiceNo,
-        date: new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        date: fmtDateTime(new Date()),
         party,
         cart,
         subtotal,

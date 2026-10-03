@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { exportToCSV } from '../utils/exportCSV'
 import toast from 'react-hot-toast'
 import { PackageX, Search, Download, RotateCcw, AlertTriangle } from 'lucide-react'
+import { fmtDate } from '../utils/date'
 
 const card: React.CSSProperties = {
   background: 'white', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '20px', marginBottom: '16px'
@@ -168,7 +169,7 @@ export function StockDamagePage() {
   const handleExport = () => {
     exportToCSV(
       filtered.map(r => ({
-        date: new Date(r.created_at).toLocaleDateString('en-IN'),
+        date: fmtDate(new Date(r.created_at)),
         product: r.products?.name || '—',
         sku: r.products?.sku || '',
         units: Math.abs(change(r)),
@@ -342,7 +343,7 @@ export function StockDamagePage() {
                   </div>
                   <div style={{ textAlign: 'right', fontFamily: 'DM Mono, monospace', color: '#ef4444' }}>{INR(lossValue(r))}</div>
                   <div style={{ fontSize: '12px', color: '#64748b', fontFamily: 'DM Mono, monospace' }}>{r.qty_after}</div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>{new Date(r.created_at).toLocaleDateString('en-IN')}</div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>{fmtDate(new Date(r.created_at))}</div>
                   <div style={{ textAlign: 'right' }}>
                     <button onClick={() => setConfirmReverse(r)} title="Reverse entry"
                       style={{ border: '1px solid #e5e7eb', background: 'white', padding: '6px 8px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', lineHeight: 0 }}>

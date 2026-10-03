@@ -1,6 +1,7 @@
 import { getSettings } from './settings'
 import { printHTML } from './printHTML'
 import { rupeesInWords } from './numberWords'
+import { fmtDate } from './date'
 
 /**
  * Purchase bills and purchase-return debit memos on A4, in the GST layout the
@@ -41,7 +42,7 @@ const n2 = (v: any) =>
 const dmy = (d: string | Date | undefined) => {
   if (!d) return ''
   const t = new Date(d)
-  return isNaN(t.getTime()) ? '' : t.toLocaleDateString('en-GB').replace(/\//g, '/')
+  return isNaN(t.getTime()) ? '' : fmtDate(t)
 }
 
 /** Minimum ruled rows, so a one-line bill still fills the page like theirs. */

@@ -7,6 +7,7 @@ import { exportToCSV } from '../utils/exportCSV'
 import { sendWhatsApp } from '../utils/whatsapp'
 import { getSettings } from '../utils/settings'
 import { Wallet, TrendingUp, TrendingDown, Ticket, Download, MessageCircle, Check, ArrowRight } from 'lucide-react'
+import { fmtDate, fmtDayMonth } from '../utils/date'
 
 const card: React.CSSProperties = {
   background: 'white', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '20px', marginBottom: '16px'
@@ -95,7 +96,7 @@ export function AccountingPage() {
         'receivables',
         [{ key: 'invoice', label: 'Invoice' }, { key: 'customer', label: 'Customer' }, { key: 'phone', label: 'Phone' },
          { key: 'date', label: 'Date' }, { key: 'due', label: 'Due Date' }, { key: 'days', label: 'Days Old' },
-         { key: 'udhar', label: 'Udhar Total' }, { key: 'paid', label: 'Paid So Far' }, { key: 'amount', label: 'Outstanding' }]
+         { key: 'udhar', label: 'Pending Total' }, { key: 'paid', label: 'Paid So Far' }, { key: 'amount', label: 'Outstanding' }]
       )
     } else {
       exportToCSV(
@@ -131,7 +132,7 @@ export function AccountingPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
           {[
             { label: 'You Owe (Payables)', value: INR(a.payableTotal), color: '#ef4444', sub: `${a.payables.length} unpaid bills` },
-            { label: 'Owed To You (Udhar)', value: INR(a.receivableTotal), color: '#f59e0b', sub: `${a.receivables.length} credit bills` },
+            { label: 'Owed To You (Pending)', value: INR(a.receivableTotal), color: '#f59e0b', sub: `${a.receivables.length} credit bills` },
             { label: 'Store Credit Liability', value: INR(a.creditNoteTotal), color: '#9333ea', sub: `${a.creditNotes.length} active notes` },
             { label: "Today's Net Cash Flow", value: INR(a.todayNet), color: a.todayNet >= 0 ? '#16a34a' : '#ef4444', sub: `In ${INR(a.todayCashIn)} · Out ${INR(a.todayCashOut)}` }
           ].map(s => (
@@ -222,7 +223,7 @@ export function AccountingPage() {
         ) : tab === 'receivables' ? (
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-              <div style={{ fontSize: '15px', fontWeight: 600, color: '#1a0a2e' }}>Customer Udhar</div>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: '#1a0a2e' }}>Customer Pending Payments</div>
               {a.overdueReceivables.length > 0 && (
                 <span style={{ background: '#fef2f2', color: '#ef4444', fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '99px' }}>
                   {a.overdueReceivables.length} past promised due date
@@ -232,7 +233,7 @@ export function AccountingPage() {
             <AgeingBar ageing={a.receivableAgeing} total={a.receivableTotal} />
 
             {a.receivables.length === 0 ? (
-              <EmptyState icon="✅" title="No outstanding udhar" subtitle="Every credit sale has been settled." />
+              <EmptyState icon="✅" title="No pending payments" subtitle="Every credit sale has been settled." />
             ) : (
               <div style={{ marginTop: '14px' }}>
                 {a.receivables.map(r => {
@@ -262,10 +263,10 @@ export function AccountingPage() {
                       </div>
                       <div style={{ display: 'flex', gap: '5px' }}>
                         {r.customers?.phone && (
-                          <button title="Send udhar reminder on WhatsApp"
+                          <button title="Send pending-payment reminder on WhatsApp"
                             onClick={() => sendWhatsApp(r.customers!.phone!,
                               `Dear ${r.customers?.name || 'Customer'},\n\nA friendly reminder: ${INR(receivableOutstanding(r))} is pending against bill ${r.invoice_no}` +
-                              `${r.credit_due_date ? ` (due ${new Date(r.credit_due_date).toLocaleDateString('en-IN')})` : ''}.\n\nThank you — ${getSettings().shopName || 'Team'}`)}
+                              `${r.credit_due_date ? ` (due ${fmtDate(new Date(r.credit_due_date))})` : ''}.\n\nThank you — ${getSettings().shopName || 'Team'}`)}
                             style={{ ...iconBtn, display: 'inline-flex', color: '#16a34a', borderColor: '#bbf7d0', background: '#f0fdf4' }}>
                             <MessageCircle size={13} />
                           </button>
@@ -313,14 +314,14 @@ export function AccountingPage() {
                     <div style={{ textAlign: 'right' }}>Cash In</div>
                     <div style={{ textAlign: 'right' }}>UPI In</div>
                     <div style={{ textAlign: 'right' }}>Card In</div>
-                    <div style={{ textAlign: 'right' }}>Udhar Given</div>
+                    <div style={{ textAlign: 'right' }}>Pending Given</div>
                     <div style={{ textAlign: 'right' }}>Expenses</div>
                     <div style={{ textAlign: 'right' }}>Net</div>
                   </div>
                   {a.dayBook.map(d => (
                     <div key={d.date} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 1fr 1fr 1fr 1fr', padding: '10px 12px', borderBottom: '1px solid #fdf8ff', fontSize: '12.5px', fontFamily: 'DM Mono, monospace' }}>
                       <div style={{ fontFamily: 'DM Sans, sans-serif', color: '#1a0a2e' }}>
-                        {new Date(d.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        {fmtDayMonth(new Date(d.date))}
                       </div>
                       <div style={{ textAlign: 'right', color: d.cashIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.cashIn)}</div>
                       <div style={{ textAlign: 'right', color: d.upiIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.upiIn)}</div>

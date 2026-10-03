@@ -547,7 +547,7 @@ export function usePOS(salesmanId: string | null = null) {
         gstAmount, totalDiscount,
         netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
         salesmanId, counterId: COUNTER_ID,
-        date: new Date().toLocaleString('en-IN')
+        date: new Date().toISOString()
       }
       savePendingSale(offlineSale)
       setLastSale(offlineSale)
@@ -716,7 +716,7 @@ export function usePOS(salesmanId: string | null = null) {
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanName,
         creditNoteDiscount,
-        date: new Date().toLocaleString('en-IN')
+        date: new Date().toISOString()
       }
 
       setLastSale(saleData)
@@ -733,7 +733,7 @@ export function usePOS(salesmanId: string | null = null) {
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanId, counterId: COUNTER_ID,
         creditNoteDiscount,
-        date: new Date().toLocaleString('en-IN')
+        date: new Date().toISOString()
       }
       savePendingSale(offlineSale)
       setLastSale(offlineSale)

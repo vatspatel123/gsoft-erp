@@ -8,6 +8,7 @@ import { money } from '../utils/billEdits'
 import { EditPurchaseModal } from '../components/bills/EditPurchaseModal'
 import { BillHistoryModal } from '../components/bills/BillHistoryModal'
 import { S } from '../components/bills/billEditStyles'
+import { fmtDate } from '../utils/date'
 
 /**
  * Every purchase bill in one place — there wasn't a list before, only each
@@ -113,7 +114,7 @@ export function PurchaseBillsPage() {
                           </button></div>
                         )}
                       </td>
-                      <td style={S.td}>{new Date(b.supplier_invoice_date || b.created_at).toLocaleDateString('en-IN')}</td>
+                      <td style={S.td}>{fmtDate(new Date(b.supplier_invoice_date || b.created_at))}</td>
                       <td style={S.td}>{suppliers[b.supplier_id]?.name || '—'}</td>
                       <td style={S.td}>{b.supplier_invoice_no || '—'}</td>
                       <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(b.net_amount)}</td>

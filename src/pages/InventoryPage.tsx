@@ -19,6 +19,7 @@ import { exportToCSV } from '../utils/exportCSV'
 import { PrintLabelsModal } from '../components/inventory/PrintLabelsModal'
 import toast from 'react-hot-toast'
 import '../styles/inventory.css'
+import { fmtDateTime } from '../utils/date'
 
 const COLOUR_MAP_INV: Record<string, string> = {
   red: '#ef4444', blue: '#3b82f6', black: '#1e293b', white: '#e2e8f0',
@@ -1079,9 +1080,9 @@ function InventoryPageComponent() {
                               `= ${adj.qty_after}`}
                           </span>
                           <div className="adj-time">
-                            {new Date(
+                            {fmtDateTime(new Date(
                               adj.created_at
-                            ).toLocaleString()}
+                            ))}
                           </div>
                         </div>
                       </div>

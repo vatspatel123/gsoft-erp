@@ -4,6 +4,7 @@ import { activeBillDesign, type BillDesign, type BillColKey } from './formatDesi
 import { printPurchaseA4 } from './printA4Purchase'
 import toast from 'react-hot-toast'
 import { sendWhatsApp } from './whatsapp'
+import { fmtDate, fmtDateTime } from './date'
 
 export function printExchangeBill(exchangeData: any) {
   const s = getSettings()
@@ -51,7 +52,7 @@ export function printExchangeBill(exchangeData: any) {
     </div>
     <div style="font-size:11px;color:#64748b">Exchange No: <strong>${exchangeData.exchangeNo}</strong></div>
     <div style="font-size:11px;color:#64748b">Original Bill: ${exchangeData.originalInvoiceNo}</div>
-    <div style="font-size:11px;color:#64748b">Date: ${new Date().toLocaleString('en-IN')}</div>
+    <div style="font-size:11px;color:#64748b">Date: ${fmtDateTime(new Date())}</div>
     ${exchangeData.customer ? `<div style="font-size:11px;color:#64748b">Customer: ${exchangeData.customer.name} · ${exchangeData.customer.phone}</div>` : ''}
     <div class="divider"></div>
     <div class="section-label">Items Returned</div>
@@ -64,7 +65,7 @@ export function printExchangeBill(exchangeData: any) {
     <div class="balance-row"><span>${balanceText}</span></div>
     ${exchangeData.balance > 0 && exchangeData.tenders ? `<div style="font-size:11px;margin-top:4px">${
       ([['Cash', exchangeData.tenders.cash], ['Card', exchangeData.tenders.card], ['UPI', exchangeData.tenders.upi],
-        ['Udhar', exchangeData.udhar || 0]] as [string, number][])
+        ['Pending', exchangeData.udhar || 0]] as [string, number][])
         .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ₹${Number(v).toFixed(2)}`).join(' · ')
     }</div>` : ''}
     <div class="divider"></div>
@@ -133,7 +134,7 @@ export function buildBillMessage(saleData: any, settingsOverride?: Partial<AppSe
 
   const when = date ? new Date(date) : new Date()
   const valid = !isNaN(when.getTime()) ? when : new Date()
-  const dateStr = valid.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const dateStr = fmtDate(valid)
 
   const lines: string[] = []
 
@@ -178,7 +179,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
 
   const when = date ? new Date(date) : new Date()
   const valid = !isNaN(when.getTime()) ? when : new Date()
-  const dateStr = valid.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const dateStr = fmtDate(valid)
   const timeStr = valid.toLocaleTimeString('en-IN', { hour12: false })
 
   // Class and content of each column; the designer only chooses which show.
@@ -233,7 +234,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
       ['Cash', Number(t.cash || 0)],
       ['UPI', Number(t.upi || 0)],
       ['Card', Number(t.card || 0)],
-      ['Udhar', Number(creditRemainder || 0)],
+      ['Pending', Number(creditRemainder || 0)],
     ]
     // No tender split recorded (older sales, or a single-mode sale) — show the
     // whole amount against the mode that was used rather than four zeroes.
@@ -360,9 +361,9 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
 
   ${creditRemainder > 0 ? `
     <div class="credit">
-      <div>** UDHAR / CREDIT ₹${money(creditRemainder)} **</div>
+      <div>** PENDING PAYMENT ₹${money(creditRemainder)} **</div>
       <div>Due: ${saleData.creditDueDate
-        ? new Date(saleData.creditDueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+        ? fmtDate(new Date(saleData.creditDueDate))
         : `${saleData.creditDueDays || 5} days`}</div>
     </div>
   ` : ''}
@@ -405,12 +406,8 @@ export function printCreditNote(noteData: {
   const s = getSettings()
   const shopName = s.shopName || 'Retail ERP'
   const shopPhone = s.shopPhone || ''
-  const dateStr = new Date(noteData.createdAt).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric'
-  })
-  const expStr = noteData.expiresAt ? new Date(noteData.expiresAt).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric'
-  }) : '90 Days'
+  const dateStr = fmtDate(new Date(noteData.createdAt))
+  const expStr = noteData.expiresAt ? fmtDate(new Date(noteData.expiresAt)) : '90 Days'
 
   const html = `
     <!DOCTYPE html>
@@ -470,7 +467,7 @@ export function sendCreditNoteWhatsApp(noteData: {
   }
   const s = getSettings()
   const shopName = s.shopName || 'Retail ERP'
-  const expStr = noteData.expiresAt ? new Date(noteData.expiresAt).toLocaleDateString('en-IN') : '90 Days'
+  const expStr = noteData.expiresAt ? fmtDate(new Date(noteData.expiresAt)) : '90 Days'
 
   const msg =
     `*🎫 STORE CREDIT NOTE — ${shopName}*%0A%0A` +

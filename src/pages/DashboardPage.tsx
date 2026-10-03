@@ -17,6 +17,7 @@ import { useAISummary } from '../hooks/useAISummary';
 import { Skeleton } from '../components/shared/Skeleton';
 import { RoleBadge } from '../components/shared/RoleBadge';
 import '../styles/dashboard.css';
+import { fmtLongDate } from '../utils/date'
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -51,12 +52,7 @@ export function DashboardPage() {
     return 'evening 👋';
   };
   
-  const currentDate = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
+  const currentDate = fmtLongDate(new Date());
 
   const rangeLabel = {
     today: 'Today',

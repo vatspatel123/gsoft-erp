@@ -214,7 +214,7 @@ export function useAccounts() {
       setReceivables(prev => settled
         ? prev.filter(r => r.id !== row.id)
         : prev.map(r => r.id === row.id ? { ...r, credit_paid: newPaid, credit_status: 'partial' } : r))
-      toast.success(settled ? 'Udhar fully cleared' : `Part payment of ₹${pay.toFixed(2)} recorded`)
+      toast.success(settled ? 'Pending amount fully cleared' : `Part payment of ₹${pay.toFixed(2)} recorded`)
       return true
     } catch (e: any) {
       toast.error('Could not record payment: ' + (e.message || 'unknown error'))
