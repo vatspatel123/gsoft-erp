@@ -137,7 +137,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
       is_bestseller: isBestseller,
       online_description: onlineDescription.trim() || null,
       photos: photoList,
-      primary_photo_url: photoUrl || photoList[0] || null
+      // (No primary_photo_url: the table has no such column; photo_url above is it.)
     }
 
     const ok = await onSave(data, product?.id)
