@@ -30,6 +30,8 @@ export interface PurchaseLine {
   name: string
   barcode?: string
   size?: string
+  design_no?: string
+  colour?: string
   qty: number
   unit_cost: number
   gst_rate: number
@@ -72,8 +74,11 @@ export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash:
 // ── the same arithmetic Purchase Entry uses: GST added on top ────────────────
 export function purchaseTotals(lines: PurchaseLine[], discount: number, freight: number) {
   const subtotal = lines.reduce((s, l) => s + l.qty * l.unit_cost, 0)
-  const gst = lines.reduce((s, l) => s + l.qty * l.unit_cost * (l.gst_rate || 0) / 100, 0)
-  const pre = subtotal - Math.max(0, discount || 0) + Math.max(0, freight || 0) + gst
+  // GST is on the value after the supplier's discount (same as Purchase Entry and edit_purchase).
+  const disc = Math.min(subtotal, Math.max(0, discount || 0))
+  const share = subtotal > 0 ? (subtotal - disc) / subtotal : 0
+  const gst = lines.reduce((s, l) => s + l.qty * l.unit_cost * (l.gst_rate || 0) / 100, 0) * share
+  const pre = subtotal - disc + Math.max(0, freight || 0) + gst
   const net = Math.round(pre)
   return { subtotal, gst, net, roundOff: Math.round((net - pre) * 100) / 100 }
 }

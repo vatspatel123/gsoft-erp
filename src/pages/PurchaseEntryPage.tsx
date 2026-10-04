@@ -37,102 +37,29 @@ const SIZES = ['XS','S','M','L','XL','2XL','3XL','4XL','5XL','6XL','7XL',
   'Free Size','One Size']
 const GST_RATES = [0, 5, 12, 18, 28]
 
-// ─── Product search cell ───────────────────────────────────────────────────────
-function ProductCell({
-  item,
-  onSelect,
-  onNameChange,
-}: {
-  item: any
-  onSelect: (product: any) => void
-  onNameChange: (name: string) => void
-}) {
-  const [q, setQ] = useState(item.productName || '')
-  const [results, setResults] = useState<any[]>([])
-  const [show, setShow] = useState(false)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (item.product) {
-      setQ(item.product.name || '')
-      setShow(false)
-      return
-    }
-  }, [item.product])
-
-  useEffect(() => {
-    // A row that already has a product selected (e.g. one just copied from another)
-    // must not pop the dropdown open by itself. Typing clears item.product first,
-    // so deliberately changing the product still searches as normal.
-    if (item.product) { setResults([]); setShow(false); return }
-    if (q.trim().length < 2) { setResults([]); setShow(false); return }
-    const t = setTimeout(async () => {
-      setLoading(true)
-      try {
-        const { data } = await supabase
-          .from('products')
-          .select('id,name,sku,design_no,pcode,size,colour,mrp,unit_price,cost_price,gst_rate,stock_qty,barcode')
-          .or(`name.ilike.%${q}%,sku.ilike.%${q}%,design_no.ilike.%${q}%,barcode.ilike.%${q}%`)
-          .eq('is_active', true)
-          .limit(8)
-        setResults(data || [])
-        setShow(true)
-      } finally { setLoading(false) }
-    }, 250)
-    return () => clearTimeout(t)
-  }, [q])
-
+// ─── Product name cell ────────────────────────────────────────────────────────
+// Suggests the shop's category names ("T-SHIRT") as plain text. It used to offer
+// existing products, and picking one turned the row — and every row copied from
+// it — into a restock of that old item, piling new stock and barcodes onto it.
+function ProductCell({ item, onNameChange }: { item: any; onNameChange: (name: string) => void }) {
   return (
-    <div style={{ position: 'relative', minWidth: '160px' }}>
-      <input
-        value={q}
-        onChange={e => {
-          setQ(e.target.value)
-          onNameChange(e.target.value)
-          if (item.product) onSelect(null)
-        }}
-        onFocus={() => results.length > 0 && setShow(true)}
-        onBlur={() => setTimeout(() => setShow(false), 200)}
-        placeholder="Product name..."
-        style={{
-          ...inputStyle,
-          border: item.product ? `1px solid ${G.border}` : '1px solid #e2e8f0',
-          background: item.product ? G.hover : 'white',
-          paddingRight: '24px',
-        }}
-      />
-      {loading && (
-        <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
-          width: '12px', height: '12px', border: `2px solid ${G.light}`, borderTopColor: G.primary,
-          borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
-      )}
-      {show && results.length > 0 && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 2px)', left: 0, zIndex: 9999,
-          background: 'white', border: '1px solid #e2e8f0', borderRadius: '10px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: '280px', maxHeight: '240px', overflowY: 'auto'
-        }}>
-          {results.map(p => (
-            <div
-              key={p.id}
-              onMouseDown={() => { onSelect(p); setQ(p.name); setShow(false) }}
-              style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f8fafc' }}
-              onMouseEnter={e => (e.currentTarget.style.background = G.hover)}
-              onMouseLeave={e => (e.currentTarget.style.background = 'white')}
-            >
-              <div style={{ fontWeight: 500, fontSize: '13px', color: '#1a0a2e' }}>{p.name}</div>
-              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                {[p.design_no, p.size, p.colour].filter(Boolean).join(' · ')}
-                {p.stock_qty !== null && <span style={{ color: p.stock_qty > 0 ? G.primary : '#ef4444', marginLeft: '6px' }}>
-                  Stock: {p.stock_qty}
-                </span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <input
+      list="purchase-product-names"
+      value={item.productName}
+      onChange={e => onNameChange(e.target.value)}
+      placeholder="Product name..."
+      style={{ ...inputStyle, minWidth: '140px' }}
+    />
   )
+}
+
+/** The names ProductCell suggests: the shop's categories. */
+function ProductNameList() {
+  const [names, setNames] = useState<string[]>([])
+  useEffect(() => {
+    supabase.from('categories').select('name').order('name').then(({ data }) => setNames((data || []).map(c => c.name)))
+  }, [])
+  return <datalist id="purchase-product-names">{names.map(n => <option key={n} value={n} />)}</datalist>
 }
 
 // ─── Supplier section ─────────────────────────────────────────────────────────
@@ -649,10 +576,11 @@ export function PurchaseEntryPage() {
                 </div>
 
                 <div ref={tableRef} style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '900px' }}>
+                  <ProductNameList />
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '1050px' }}>
                     <thead>
                       <tr style={{ borderBottom: `2px solid ${G.border}` }}>
-                        {['#', 'Product', 'Design', 'PCode', 'Size', 'Colour', 'MRP', 'Qty', 'Barcode', 'Cost', 'GST%', 'Amount', ''].map(h => (
+                        {['#', 'Product', 'Design', 'PCode', 'Size', 'Colour', 'MRP', 'Wholesale', 'Online', 'Qty', 'Barcode', 'Cost', 'GST%', 'Amount', ''].map(h => (
                           <th key={h} style={{ padding: '8px 6px', textAlign: 'left', fontSize: '10px', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
@@ -680,11 +608,7 @@ export function PurchaseEntryPage() {
 
                           {/* Product */}
                           <td style={{ padding: '4px 6px' }}>
-                            <ProductCell
-                              item={item}
-                              onSelect={p => hook.updateItem(item.id, 'product', p)}
-                              onNameChange={name => hook.updateItem(item.id, 'productName', name)}
-                            />
+                            <ProductCell item={item} onNameChange={name => hook.updateItem(item.id, 'productName', name)} />
                           </td>
 
                           {/* Design — dimmed on follow-on colour rows of the same design */}
@@ -720,6 +644,17 @@ export function PurchaseEntryPage() {
                               onChange={e => hook.updateItem(item.id, 'mrp', e.target.value === '' ? '' : parseFloat(e.target.value))}
                               placeholder="0" style={{ ...inputStyle, width: '70px' }} />
                           </td>
+
+                          {/* Wholesale and website prices for the new product */}
+                          {(['wholesale_price', 'online_price'] as const).map(k => (
+                            <td key={k} style={{ padding: '4px 6px' }}>
+                              <input type="number" value={item[k] === '' ? '' : item[k]}
+                                onChange={e => hook.updateItem(item.id, k, e.target.value === '' ? '' : parseFloat(e.target.value))}
+                                placeholder={k === 'online_price' ? String(item.mrp || 0) : '0'}
+                                title={k === 'online_price' ? 'Website price — blank uses the MRP' : 'Wholesale price'}
+                                style={{ ...inputStyle, width: '70px' }} />
+                            </td>
+                          ))}
 
                           {/* Qty */}
                           <td style={{ padding: '4px 6px' }}>
@@ -781,7 +716,7 @@ export function PurchaseEntryPage() {
                         {isSetEnd && (
                           <tr style={{ background: '#f7fdfa', borderBottom: '1px solid #f1f5f9' }}>
                             <td style={{ padding: '4px 6px' }}></td>
-                            <td colSpan={11} style={{ padding: '4px 6px' }}>
+                            <td colSpan={13} style={{ padding: '4px 6px' }}>
                               <span style={{ fontSize: '11px', color: '#059669', marginRight: '6px' }}>
                                 ↳ repeat these {setSize} colours in size
                               </span>

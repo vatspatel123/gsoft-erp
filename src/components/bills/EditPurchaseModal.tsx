@@ -38,7 +38,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     ;(async () => {
       const [{ data, error }, sup] = await Promise.all([
         supabase.from('purchase_bills')
-          .select('*, purchase_items(product_id, product_name, size, barcode, qty, unit_cost, gst_rate, products(id, name, barcode, size, stock_qty, gst_rate))')
+          .select('*, purchase_items(product_id, product_name, design_no, colour, size, barcode, qty, unit_cost, gst_rate, products(id, name, barcode, design_no, colour, size, stock_qty, gst_rate))')
           .eq('id', billId).single(),
         supabase.from('suppliers').select('id, name').order('name'),
       ])
@@ -57,6 +57,8 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
         name: i.products?.name || i.product_name || 'Product',
         barcode: i.barcode || i.products?.barcode,
         size: i.size || i.products?.size,
+        design_no: i.design_no || i.products?.design_no,
+        colour: i.colour || i.products?.colour,
         qty: Number(i.qty),
         unit_cost: Number(i.unit_cost),
         gst_rate: Number(i.gst_rate ?? i.products?.gst_rate) || 0,
@@ -100,7 +102,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     const q = query.trim().replace(/[,()%]/g, '')
     if (!q) return
     const { data } = await supabase.from('products')
-      .select('id, name, barcode, sku, size, stock_qty, gst_rate, cost_price')
+      .select('id, name, barcode, sku, size, design_no, colour, stock_qty, gst_rate, cost_price')
       .eq('is_active', true)
       .or(`barcode.eq.${q},sku.eq.${q},name.ilike.%${q}%,design_no.ilike.%${q}%`)
       .limit(8)
@@ -114,7 +116,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
       if (at >= 0) return ls.map((l, j) => (j === at ? { ...l, qty: l.qty + 1 } : l))
       const wasOnBill = removed.find(r => r.product_id === p.id)
       return [...ls, {
-        product_id: p.id, name: p.name, barcode: p.barcode || p.sku, size: p.size,
+        product_id: p.id, name: p.name, barcode: p.barcode || p.sku, size: p.size, design_no: p.design_no, colour: p.colour,
         qty: 1, unit_cost: Number(p.cost_price) || 0, gst_rate: Number(p.gst_rate) || 0,
         orig_qty: wasOnBill?.orig_qty || 0, stock_qty: Number(p.stock_qty) || 0,
       }]
@@ -200,8 +202,8 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
                   {lines.map((l, i) => (
                     <tr key={l.product_id + i}>
                       <td style={S.td}>
-                        <div style={{ fontWeight: 600 }}>{l.name}</div>
-                        <div style={S.muted}>{[l.barcode, l.size, `in stock ${l.stock_qty}`].filter(Boolean).join(' · ')}
+                        <div style={{ fontWeight: 600 }}>{l.name}{l.design_no && <span style={{ fontWeight: 500, color: '#7c3aed' }}> · D: {l.design_no}</span>}</div>
+                        <div style={S.muted}>{[l.barcode, l.size, l.colour, `in stock ${l.stock_qty}`].filter(Boolean).join(' · ')}
                           {l.orig_qty !== l.qty && <span style={S.changed}> was {l.orig_qty}</span>}</div>
                       </td>
                       <td style={S.td}><input style={S.num} type="number" min={1} step={1} value={l.qty}

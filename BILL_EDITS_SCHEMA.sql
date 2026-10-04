@@ -359,7 +359,7 @@ BEGIN
     IF v_cost < 0 THEN RAISE EXCEPTION 'Cost for % cannot be negative', v_prod.name; END IF;
     IF v_rate < 0 OR v_rate > 28 THEN RAISE EXCEPTION 'GST for % must be 0–28%%', v_prod.name; END IF;
     v_subtotal := v_subtotal + v_qty * v_cost;
-    v_gst := v_gst + v_qty * v_cost * v_rate / 100;           -- GST on top, as Purchase Entry does
+    v_gst := v_gst + v_qty * v_cost * v_rate / 100;           -- before discount; scaled below
     -- keep the line's own labels (MRP, design, size) where the product was already on the bill
     SELECT x INTO v_prev FROM jsonb_array_elements(v_old_items) x WHERE (x ->> 'product_id')::uuid = v_prod.id LIMIT 1;
     v_new_items := v_new_items || jsonb_build_object(
@@ -393,6 +393,9 @@ BEGIN
 
   v_discount := greatest(0, coalesce((p_changes ->> 'discount_amount')::numeric, v_old.discount_amount, 0));
   v_freight  := greatest(0, coalesce((p_changes ->> 'freight')::numeric, v_old.freight, 0));
+  -- GST is on the value after the supplier's discount, as in Purchase Entry.
+  v_discount := least(v_discount, v_subtotal);
+  IF v_subtotal > 0 THEN v_gst := v_gst * (v_subtotal - v_discount) / v_subtotal; END IF;
   v_pre := v_subtotal - v_discount + v_freight + v_gst;
   v_net := round(v_pre);
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { saveProductsToCache } from '../utils/offlineCache'
@@ -31,6 +31,8 @@ export interface PurchaseItem {
   barcode: string
   unit_cost: number | ''
   gst_rate: number
+  wholesale_price: number | ''
+  online_price: number | ''
   line_total: number
   // Set when a row was copied from another, so the UI can show them as one design
   // in several colours.
@@ -49,18 +51,14 @@ export interface PurchaseComplete {
 const makeBarcode = () =>
   Date.now().toString().slice(-6) + Math.floor(Math.random() * 1000).toString().padStart(3, '0')
 
-// Copying a set creates several rows in the same millisecond, so a plain timestamp
-// would repeat. Check against the rows that already exist before handing one out —
-// duplicate barcodes on real stock would break scanning at the counter.
-const uniqueBarcode = (existing: { barcode?: string }[]): string => {
-  for (let i = 0; i < 25; i++) {
-    const code = makeBarcode()
-    if (!existing.some(it => it.barcode === code)) return code
-  }
-  return makeBarcode() + Math.floor(Math.random() * 10)
-}
+// The shop numbers its stock in sequence (…46091, 46092). New rows carry on from
+// the highest such code: short numeric barcodes only, so a stray long or random
+// code can't throw the sequence off.
+const isSeqCode = (c?: string) => /^\d{1,7}$/.test(String(c || '').trim())
+const nextCode = (last: number, rows: { barcode?: string }[]) =>
+  String(Math.max(last, ...rows.filter(r => isSeqCode(r.barcode)).map(r => Number(r.barcode))) + 1)
 
-const EMPTY_ITEM = (): PurchaseItem => ({
+const EMPTY_ITEM = (barcode = makeBarcode()): PurchaseItem => ({
   id: Math.random().toString(36).slice(2),
   product: null,
   productName: '',
@@ -70,9 +68,11 @@ const EMPTY_ITEM = (): PurchaseItem => ({
   colour: '',
   mrp: '',
   qty: '',
-  barcode: makeBarcode(),
+  barcode,
   unit_cost: '',
   gst_rate: 5,
+  wholesale_price: '',
+  online_price: '',
   line_total: 0,
 })
 
@@ -106,6 +106,16 @@ export function usePurchaseEntry() {
 
   // Items
   const [items, setItems] = useState<PurchaseItem[]>([EMPTY_ITEM()])
+  // Highest sequence barcode already in stock — see nextCode.
+  const lastCode = useRef(0)
+  const loadLastCode = async () => {
+    const { data } = await supabase.from('products').select('barcode').not('barcode', 'is', null)
+    lastCode.current = Math.max(0, ...(data || []).filter(r => isSeqCode(r.barcode)).map(r => Number(r.barcode)))
+    // Rows made before the number was known get theirs now, in order.
+    setItems(prev => prev.reduce<PurchaseItem[]>((out, r) =>
+      [...out, isSeqCode(r.barcode) || r.product ? r : { ...r, barcode: nextCode(lastCode.current, out) }], []))
+  }
+  useEffect(() => { void loadLastCode() }, [])
   // Default false: the "Also list on website" control was removed from Purchase Entry,
   // so purchased items must not silently auto-publish to the online catalogue.
   const [listOnWebsite, setListOnWebsite] = useState(false)
@@ -179,18 +189,20 @@ export function usePurchaseEntry() {
     return sum + qty * cost
   }, 0)
 
-  const effectiveDiscount = discountMode === 'percent'
+  const effectiveDiscount = Math.min(subtotal, discountMode === 'percent'
     ? subtotal * discountPct / 100
-    : discountAmt
+    : discountAmt)
 
   const afterDiscount = subtotal - effectiveDiscount + freightAmt
 
+  // GST is on what the goods actually cost after the supplier's discount, not on
+  // the list total. The discount is shared across lines in proportion to value.
+  const afterDiscountShare = subtotal > 0 ? (subtotal - effectiveDiscount) / subtotal : 0
   const totalGST = items.reduce((sum, item) => {
     const qty = typeof item.qty === 'number' ? item.qty : 0
     const cost = typeof item.unit_cost === 'number' ? item.unit_cost : 0
-    const lineTotal = qty * cost
-    return sum + lineTotal * (item.gst_rate / 100)
-  }, 0)
+    return sum + qty * cost * (item.gst_rate / 100)
+  }, 0) * afterDiscountShare
 
   const preRound = afterDiscount + totalGST
   const roundOff = Math.round(preRound) - preRound
@@ -205,7 +217,7 @@ export function usePurchaseEntry() {
   }, 0)
 
   // ── Item operations ───────────────────────────────────────────────────────
-  const addItem = () => setItems(prev => [...prev, EMPTY_ITEM()])
+  const addItem = () => setItems(prev => [...prev, EMPTY_ITEM(nextCode(lastCode.current, prev))])
 
   // Copy a whole colour set to another size. Every row sharing this groupId is cloned
   // with the new size, keeping colour, qty, MRP, cost and GST. Batch is cleared because
@@ -216,14 +228,14 @@ export function usePurchaseEntry() {
       const members = prev.filter(i => i.groupId === groupId)
       if (members.length === 0) return prev
       const newGroup = Math.random().toString(36).slice(2)
-      const clones: PurchaseItem[] = members.map(m => ({
+      const clones: PurchaseItem[] = members.reduce<PurchaseItem[]>((out, m) => [...out, {
         ...m,
         id: Math.random().toString(36).slice(2),
         groupId: newGroup,
         size: newSize,
         // Each variant needs its own barcode, never the source row's.
-        barcode: uniqueBarcode(prev)
-      }))
+        barcode: nextCode(lastCode.current, [...prev, ...out])
+      }], [])
       const lastIdx = prev.map(i => i.groupId).lastIndexOf(groupId)
       return [...prev.slice(0, lastIdx + 1), ...clones, ...prev.slice(lastIdx + 1)]
     })
@@ -244,7 +256,7 @@ export function usePurchaseEntry() {
         id: Math.random().toString(36).slice(2),
         groupId,
         colour: '',
-        barcode: uniqueBarcode(prev)
+        barcode: nextCode(lastCode.current, prev)
       }
       const tagged = prev.map(i => (i.id === id ? { ...i, groupId } : i))
       return [...tagged.slice(0, idx + 1), copy, ...tagged.slice(idx + 1)]
@@ -293,7 +305,7 @@ export function usePurchaseEntry() {
   }
 
   const generateBarcode = (id: string) => {
-    setItems(prev => prev.map(i => (i.id === id ? { ...i, barcode: uniqueBarcode(prev) } : i)))
+    setItems(prev => prev.map(i => (i.id === id ? { ...i, barcode: nextCode(lastCode.current, prev) } : i)))
   }
 
   // ── Reset form ────────────────────────────────────────────────────────────
@@ -308,7 +320,8 @@ export function usePurchaseEntry() {
     setDiscountPct(0)
     setFreightAmt(0)
     setNotes('')
-    setItems([EMPTY_ITEM()])
+    setItems([EMPTY_ITEM('')])
+    void loadLastCode()     // the bill just saved used up some numbers
   }
 
   // ── Save new supplier ─────────────────────────────────────────────────────
@@ -434,26 +447,22 @@ export function usePurchaseEntry() {
 
       if (billError) throw billError
 
-      await supabase.from('purchase_items').insert(
-        validItems.map(item => ({
-          purchase_id: bill.id,
-          product_id: item.product?.id || null,
-          product_name: item.product?.name || item.productName,
-          design_no: item.design_no || null,
-          pcode: item.pcode || null,
-          size: item.size || null,
-          colour: item.colour || null,
-          barcode: item.barcode || null,
-          qty: typeof item.qty === 'number' ? item.qty : 0,
-          unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
-          mrp: typeof item.mrp === 'number' ? item.mrp : null,
-          gst_rate: item.gst_rate,
-          line_total: item.line_total,
-        }))
-      )
+      // Products are named by their category here ("T-SHIRT"), so file each new one
+      // under that category, creating it the first time a name is used.
+      const { data: cats } = await supabase.from('categories').select('id, name')
+      const catIds = new Map((cats || []).map(c => [c.name.trim().toLowerCase(), c.id]))
+      const categoryFor = async (name: string): Promise<string | null> => {
+        const k = name.trim().toLowerCase()
+        if (!k) return null
+        if (!catIds.has(k)) {
+          const { data: c } = await supabase.from('categories').insert({ name: name.trim() }).select('id').single()
+          catIds.set(k, c?.id || null)
+        }
+        return catIds.get(k) || null
+      }
 
       // Update inventory and ensure barcodes exist for each item
-      const processedItems = []
+      const processedItems: any[] = []
       for (const item of validItems) {
         const qty = typeof item.qty === 'number' ? item.qty : 0
         const cost = typeof item.unit_cost === 'number' ? item.unit_cost : 0
@@ -467,8 +476,9 @@ export function usePurchaseEntry() {
             .eq('id', item.product.id)
             .single()
 
-          // The barcode entered on the row wins — it is what gets printed on the label.
-          const currentBarcode = item.barcode || prod?.barcode || makeBarcode()
+          // An existing product keeps its barcode: its labels are already on the shelf,
+          // and overwriting it is what made old stock stop scanning.
+          const currentBarcode = prod?.barcode || item.barcode || makeBarcode()
           const newStock = (prod?.stock_qty || 0) + qty
 
           const { data: updatedProd } = await supabase
@@ -489,14 +499,18 @@ export function usePurchaseEntry() {
             product: updatedProd || { ...item.product, stock_qty: newStock, barcode: currentBarcode, mrp, cost_price: cost }
           })
         } else if (item.productName.trim()) {
-          const newSku = 'SKU-' + Date.now().toString().slice(-6)
           const generatedBarcode = item.barcode || makeBarcode()
-          
+          // One per barcode: a timestamp repeated when several rows saved in the same moment.
+          const newSku = 'SKU-' + generatedBarcode
+          const wholesale = typeof item.wholesale_price === 'number' ? item.wholesale_price : null
+          const online = typeof item.online_price === 'number' ? item.online_price : unitPrice
+
           const { data: newProd, error: prodErr } = await supabase
             .from('products')
             .insert({
               name: item.productName.trim(),
               sku: newSku,
+              category_id: await categoryFor(item.productName),
               design_no: item.design_no || null,
               pcode: item.pcode || null,
               size: item.size || null,
@@ -508,7 +522,8 @@ export function usePurchaseEntry() {
               gst_rate: item.gst_rate,
               is_active: true,
               is_online: listOnWebsite,
-              online_price: unitPrice,
+              online_price: online,
+              wholesale_price: wholesale,
               barcode: generatedBarcode,
             })
             .select()
@@ -520,8 +535,10 @@ export function usePurchaseEntry() {
               product: newProd
             })
           } else {
+            if (prodErr) toast.error(`${item.productName} (${generatedBarcode}): ${prodErr.message}`)
             processedItems.push({
               ...item,
+              unsaved: true,
               product: {
                 id: crypto.randomUUID(),
                 name: item.productName.trim(),
@@ -535,6 +552,25 @@ export function usePurchaseEntry() {
           }
         }
       }
+
+      // Bill lines, linked to the product each one created or restocked.
+      await supabase.from('purchase_items').insert(
+        processedItems.map((item: any) => ({
+          purchase_id: bill.id,
+          product_id: item.product?.id && !item.unsaved ? item.product.id : null,
+          product_name: item.product?.name || item.productName,
+          design_no: item.design_no || null,
+          pcode: item.pcode || null,
+          size: item.size || null,
+          colour: item.colour || null,
+          barcode: item.barcode || null,
+          qty: typeof item.qty === 'number' ? item.qty : 0,
+          unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
+          mrp: typeof item.mrp === 'number' ? item.mrp : null,
+          gst_rate: item.gst_rate,
+          line_total: item.line_total,
+        }))
+      )
 
       // Refresh product cache for offline and instant POS sync
       try {
