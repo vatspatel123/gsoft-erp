@@ -218,7 +218,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
 
             <div style={S.row}>
               <input style={{ ...S.input, flex: 1 }} placeholder="Add item — scan barcode or type name / design no"
-                value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProducts()} />
+                data-enter="own" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProducts()} />
               <button style={S.btnOutline} onClick={searchProducts}><Search size={15} /> Find</button>
             </div>
             {results.length > 0 && (
@@ -239,7 +239,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                 <div style={S.section}>Customer</div>
                 <div style={S.row}>
                   <input style={{ ...S.input, flex: 1 }} placeholder="Phone number" value={phone}
-                    onChange={e => setPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && findCustomer()} />
+                    data-enter="own" onChange={e => setPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && findCustomer()} />
                   <button style={S.btnOutline} onClick={findCustomer}>Find</button>
                 </div>
                 <div style={S.muted}>
@@ -323,7 +323,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
 
         <div style={S.foot}>
           <button style={S.btnOutline} onClick={onClose} disabled={saving}>Cancel</button>
-          <button style={S.btnPrimary} onClick={save} disabled={saving || loading}>
+          <button data-enter-submit style={S.btnPrimary} onClick={save} disabled={saving || loading}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>

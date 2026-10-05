@@ -272,6 +272,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
           type="text"
           value={query}
           onChange={handleChange}
+          data-enter="own"
           onKeyDown={handleKeyDown}
           onFocus={() => { setInputFocused(true); if (results.length > 0) setShow(true) }}
           onBlur={() => { setInputFocused(false); setTimeout(() => setShow(false), 200) }}

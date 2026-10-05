@@ -728,7 +728,7 @@ export function ExchangePage() {
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <input style={{ ...inputStyle, flex: 1 }} value={invoiceInput}
                           onChange={e => setInvoiceInput(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && loadInvoiceByNo(invoiceInput)}
+                          data-enter="own" onKeyDown={e => e.key === 'Enter' && loadInvoiceByNo(invoiceInput)}
                           placeholder="INV-20260325-0001" />
                         <button onClick={() => loadInvoiceByNo(invoiceInput)} disabled={loadingInvoice}
                           style={{ ...btnPrimary, whiteSpace: 'nowrap', opacity: loadingInvoice ? 0.6 : 1 }}>
@@ -745,7 +745,7 @@ export function ExchangePage() {
                       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                         <input style={{ ...inputStyle, flex: 1 }} value={phoneInput}
                           onChange={e => setPhoneInput(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && loadInvoicesByPhone()}
+                          data-enter="own" onKeyDown={e => e.key === 'Enter' && loadInvoicesByPhone()}
                           placeholder="9924145535" />
                         <button onClick={loadInvoicesByPhone} disabled={loadingInvoice}
                           style={{ ...btnPrimary, whiteSpace: 'nowrap', opacity: loadingInvoice ? 0.6 : 1 }}>
@@ -774,7 +774,7 @@ export function ExchangePage() {
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <input style={{ ...inputStyle, flex: 1 }} value={barcodeInput}
                           onChange={e => setBarcodeInput(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && loadInvoiceByBarcode(barcodeInput)}
+                          data-enter="own" onKeyDown={e => e.key === 'Enter' && loadInvoiceByBarcode(barcodeInput)}
                           placeholder="Scan or type barcode..." autoFocus />
                         <button onClick={() => loadInvoiceByBarcode(barcodeInput)} disabled={loadingInvoice}
                           style={{ ...btnPrimary, whiteSpace: 'nowrap', opacity: loadingInvoice ? 0.6 : 1 }}>
@@ -1166,6 +1166,7 @@ export function ExchangePage() {
 
                 {/* Complete Button */}
                 <button
+                  data-enter-submit
                   onClick={processExchange}
                   disabled={processing || returnItems.length === 0 || (due > 0 && short > 0.009)}
                   style={{

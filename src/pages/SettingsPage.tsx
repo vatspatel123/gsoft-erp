@@ -117,7 +117,7 @@ function Toggle({ value, onChange, label, sub }: { value: boolean; onChange: (v:
 
 function SaveBtn({ onClick, loading }: { onClick: () => void; loading?: boolean }) {
   return (
-    <button onClick={onClick} disabled={loading} style={{
+    <button data-enter-submit onClick={onClick} disabled={loading} style={{
       width: '100%', padding: '13px', background: '#9333ea', color: 'white',
       border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
       cursor: loading ? 'not-allowed' : 'pointer', fontFamily: "'DM Sans', sans-serif",

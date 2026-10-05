@@ -5,6 +5,7 @@ import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useNotifications } from './hooks/useNotifications'
 import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale } from './utils/offlineCache'
 import { pullShopSettings } from './utils/settings'
+import { enterToNextField } from './utils/enterNavigation'
 import { supabase } from './lib/supabase'
 import toast from 'react-hot-toast'
 import { SplashScreen } from './components/shared/SplashScreen'
@@ -79,6 +80,12 @@ function AppContent() {
       { id: 'session-expired', duration: 8000 })
     window.addEventListener('erp:session-expired', onExpired)
     return () => window.removeEventListener('erp:session-expired', onExpired)
+  }, [])
+
+  // Enter moves to the next field everywhere — see utils/enterNavigation.ts.
+  useEffect(() => {
+    window.addEventListener('keydown', enterToNextField)
+    return () => window.removeEventListener('keydown', enterToNextField)
   }, [])
 
   // Splash screen — 2 seconds

@@ -202,6 +202,7 @@ function ProductSearchBar({ onAdd }: { onAdd: (p: any) => void }) {
         <input
           ref={inputRef} type="text" value={q}
           onChange={e => setQ(e.target.value)}
+          data-enter="own"
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setShow(true)}
           onBlur={() => setTimeout(() => setShow(false), 200)}
@@ -570,6 +571,7 @@ export function WholesalePage() {
             </div>
 
             <button
+              data-enter-submit
               onClick={handleComplete}
               disabled={!canComplete}
               style={{ width: '100%', padding: '13px', background: canComplete ? B.primary : '#bfdbfe', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 700, cursor: canComplete ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans', transition: 'background 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>

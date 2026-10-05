@@ -754,6 +754,7 @@ export function OrderSummary(props: OrderSummaryProps) {
         <button
           className="btn-complete"
           disabled={!canComplete}
+          data-enter-submit
           onClick={props.completeSale}
           style={{
             background: canComplete ? '#9333ea' : '#e9d5ff',
