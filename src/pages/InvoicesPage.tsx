@@ -17,13 +17,15 @@ import {
   ArrowLeftRight,
   Search,
   Loader2,
-  Pencil
+  Pencil,
+  Trash2
 } from 'lucide-react'
 import '../styles/invoices.css'
 import { sendWhatsApp, sendWhatsAppDocument } from '../utils/whatsapp'
 import toast from 'react-hot-toast'
 import { EditSaleModal } from '../components/bills/EditSaleModal'
 import { BillHistoryModal } from '../components/bills/BillHistoryModal'
+import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 import { fmtDate, fmtDateTime } from '../utils/date'
 
 export function InvoicesPage() {
@@ -53,6 +55,7 @@ export function InvoicesPage() {
   const [isRefunding, setIsRefunding] = useState(false)
   const [editingSale, setEditingSale] = useState<string | null>(null)
   const [historySale, setHistorySale] = useState<{ id: string; no: string } | null>(null)
+  const [deletingSale, setDeletingSale] = useState<{ id: string; no: string } | null>(null)
   // Bills saved offline have no database row yet, so there is nothing to edit.
   const editable = (inv: Invoice) => !inv.is_return && /^[0-9a-f-]{36}$/i.test(String(inv.id))
 
@@ -520,6 +523,16 @@ export function InvoicesPage() {
                               <Pencil size={16} />
                             </button>
                           )}
+                          {editable(invoice) && (
+                            <button
+                              className="action-btn"
+                              onClick={() => setDeletingSale({ id: invoice.id, no: invoice.invoice_no })}
+                              title="Delete bill (admin password)"
+                              style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                           {!invoice.is_return && (
                             <button
                               className="action-btn refund"
@@ -729,6 +742,10 @@ export function InvoicesPage() {
             </div>
           </div>
         </div>
+      )}
+      {deletingSale && (
+        <DeleteBillModal type="sale" billId={deletingSale.id} billNo={deletingSale.no}
+          onClose={() => setDeletingSale(null)} onDeleted={() => fetchInvoices()} />
       )}
       {editingSale && (
         <EditSaleModal saleId={editingSale} onClose={() => setEditingSale(null)} onSaved={() => fetchInvoices()} />

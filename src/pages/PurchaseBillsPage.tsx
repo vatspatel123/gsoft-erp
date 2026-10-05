@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Printer, Pencil, Search, Loader2 } from 'lucide-react'
+import { Printer, Pencil, Search, Loader2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
@@ -7,6 +7,7 @@ import { printPurchaseA4 } from '../utils/printA4Purchase'
 import { money } from '../utils/billEdits'
 import { EditPurchaseModal } from '../components/bills/EditPurchaseModal'
 import { BillHistoryModal } from '../components/bills/BillHistoryModal'
+import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 import { S } from '../components/bills/billEditStyles'
 import { fmtDate } from '../utils/date'
 
@@ -21,6 +22,7 @@ export function PurchaseBillsPage() {
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [history, setHistory] = useState<{ id: string; no: string } | null>(null)
+  const [deleting, setDeleting] = useState<{ id: string; no: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -123,6 +125,8 @@ export function PurchaseBillsPage() {
                         <div style={S.row}>
                           <button style={S.btnOutline} onClick={() => print(b)} title="Print on A4"><Printer size={14} /></button>
                           <button style={S.btnOutline} onClick={() => setEditing(b.id)}><Pencil size={14} /> Edit</button>
+                          <button style={{ ...S.btnOutline, color: '#dc2626', borderColor: '#fecaca' }} title="Delete this purchase bill"
+                            onClick={() => setDeleting({ id: b.id, no: b.purchase_no })}><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>
@@ -138,6 +142,7 @@ export function PurchaseBillsPage() {
       </div>
 
       {editing && <EditPurchaseModal billId={editing} onClose={() => setEditing(null)} onSaved={() => load()} />}
+      {deleting && <DeleteBillModal type="purchase" billId={deleting.id} billNo={deleting.no} onClose={() => setDeleting(null)} onDeleted={() => load()} />}
       {history && <BillHistoryModal type="purchase" billId={history.id} billNo={history.no} onClose={() => setHistory(null)} />}
     </Layout>
   )
