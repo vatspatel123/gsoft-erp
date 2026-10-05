@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -9,11 +9,20 @@ export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const isPOS = location.pathname === '/' || location.pathname === '/pos'
 
+  // The menu can be tucked away for more room (☰ or Ctrl+B); the choice is kept per PC.
+  const [menuHidden, setMenuHidden] = useState(() => { try { return localStorage.getItem('erp_menu_hidden') === '1' } catch { return false } })
+  const toggleMenu = () => setMenuHidden(h => { try { localStorage.setItem('erp_menu_hidden', h ? '0' : '1') } catch {} ; return !h })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleMenu() } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
-      <Sidebar />
+      {!menuHidden && <Sidebar />}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-page)', overflow: 'hidden' }}>
-        <Topbar />
+        <Topbar onToggleSidebar={toggleMenu} sidebarHidden={menuHidden} />
         <OfflineBanner />
         <main style={{ flex: 1, overflow: 'auto' }}>
           {children}

@@ -32,6 +32,7 @@ export interface PurchaseLine {
   size?: string
   design_no?: string
   colour?: string
+  mrp?: number
   qty: number
   unit_cost: number
   gst_rate: number
@@ -115,7 +116,7 @@ export async function editPurchase(
   const { data, error } = await supabase.rpc('edit_purchase', {
     p_bill_id: billId,
     p_changes: changes,
-    p_items: lines.map(l => ({ product_id: l.product_id, qty: l.qty, unit_cost: l.unit_cost, gst_rate: l.gst_rate })),
+    p_items: lines.map(l => ({ product_id: l.product_id, qty: l.qty, unit_cost: l.unit_cost, gst_rate: l.gst_rate, mrp: l.mrp ?? null })),
     p_reason: reason,
   })
   if (error) return { ok: false, error: clean(error) }
@@ -154,3 +155,13 @@ export async function staffWithPassword(): Promise<Set<string>> {
 
 export const money = (n: number) =>
   '₹' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** Delete a bill for good. Needs the admin's login password; stock is put back. */
+export async function deleteBill(
+  type: 'sale' | 'purchase', billId: string, reason: string, password: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = type === 'sale'
+    ? await supabase.rpc('delete_sale', { p_sale_id: billId, p_reason: reason, p_admin_password: password })
+    : await supabase.rpc('delete_purchase', { p_bill_id: billId, p_reason: reason, p_admin_password: password })
+  return error ? { ok: false, error: clean(error) } : { ok: true }
+}

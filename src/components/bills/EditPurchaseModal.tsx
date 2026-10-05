@@ -38,7 +38,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     ;(async () => {
       const [{ data, error }, sup] = await Promise.all([
         supabase.from('purchase_bills')
-          .select('*, purchase_items(product_id, product_name, design_no, colour, size, barcode, qty, unit_cost, gst_rate, products(id, name, barcode, design_no, colour, size, stock_qty, gst_rate))')
+          .select('*, purchase_items(product_id, product_name, design_no, colour, size, barcode, qty, unit_cost, mrp, gst_rate, products(id, name, barcode, design_no, colour, size, mrp, stock_qty, gst_rate))')
           .eq('id', billId).single(),
         supabase.from('suppliers').select('id, name').order('name'),
       ])
@@ -59,6 +59,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
         size: i.size || i.products?.size,
         design_no: i.design_no || i.products?.design_no,
         colour: i.colour || i.products?.colour,
+        mrp: Number(i.mrp ?? i.products?.mrp) || undefined,
         qty: Number(i.qty),
         unit_cost: Number(i.unit_cost),
         gst_rate: Number(i.gst_rate ?? i.products?.gst_rate) || 0,
@@ -102,7 +103,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     const q = query.trim().replace(/[,()%]/g, '')
     if (!q) return
     const { data } = await supabase.from('products')
-      .select('id, name, barcode, sku, size, design_no, colour, stock_qty, gst_rate, cost_price')
+      .select('id, name, barcode, sku, size, design_no, colour, mrp, stock_qty, gst_rate, cost_price')
       .eq('is_active', true)
       .or(`barcode.eq.${q},sku.eq.${q},name.ilike.%${q}%,design_no.ilike.%${q}%`)
       .limit(8)
@@ -116,7 +117,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
       if (at >= 0) return ls.map((l, j) => (j === at ? { ...l, qty: l.qty + 1 } : l))
       const wasOnBill = removed.find(r => r.product_id === p.id)
       return [...ls, {
-        product_id: p.id, name: p.name, barcode: p.barcode || p.sku, size: p.size, design_no: p.design_no, colour: p.colour,
+        product_id: p.id, name: p.name, barcode: p.barcode || p.sku, size: p.size, design_no: p.design_no, colour: p.colour, mrp: Number(p.mrp) || undefined,
         qty: 1, unit_cost: Number(p.cost_price) || 0, gst_rate: Number(p.gst_rate) || 0,
         orig_qty: wasOnBill?.orig_qty || 0, stock_qty: Number(p.stock_qty) || 0,
       }]
@@ -193,6 +194,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
                     <th style={S.th}>Item</th>
                     <th style={{ ...S.th, width: 80 }}>Qty</th>
                     <th style={{ ...S.th, width: 110 }}>Cost ₹</th>
+                    <th style={{ ...S.th, width: 100 }} title="MRP — also the selling price">MRP ₹</th>
                     <th style={{ ...S.th, width: 80 }}>GST %</th>
                     <th style={{ ...S.th, width: 110, textAlign: 'right' }}>Amount</th>
                     <th style={{ ...S.th, width: 40 }} />
@@ -210,6 +212,8 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
                         onChange={e => setLine(i, { qty: Math.max(0, parseInt(e.target.value) || 0) })} /></td>
                       <td style={S.td}><input style={S.num} type="number" min={0} step="0.01" value={l.unit_cost}
                         onChange={e => setLine(i, { unit_cost: Math.max(0, Number(e.target.value) || 0) })} /></td>
+                      <td style={S.td}><input style={S.num} type="number" min={0} step="1" value={l.mrp ?? ''} placeholder="—"
+                        onChange={e => setLine(i, { mrp: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0) })} /></td>
                       <td style={S.td}>
                         <select style={S.num} value={l.gst_rate} onChange={e => setLine(i, { gst_rate: Number(e.target.value) })}>
                           {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}</option>)}
@@ -232,7 +236,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
 
             <div style={S.row}>
               <input style={{ ...S.input, flex: 1 }} placeholder="Add an existing product — scan barcode or type name / design no"
-                value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProducts()} />
+                data-enter="own" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProducts()} />
               <button style={S.btnOutline} onClick={searchProducts}><Search size={15} /> Find</button>
             </div>
             {results.length > 0 && (
@@ -286,7 +290,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
 
         <div style={S.foot}>
           <button style={S.btnOutline} onClick={onClose} disabled={saving}>Cancel</button>
-          <button style={S.btnPrimary} onClick={save} disabled={saving || loading}>
+          <button data-enter-submit style={S.btnPrimary} onClick={save} disabled={saving || loading}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>

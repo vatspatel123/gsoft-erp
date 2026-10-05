@@ -27,6 +27,9 @@ const inputStyle: React.CSSProperties = {
   outline: 'none', color: '#1a0a2e', background: 'white', boxSizing: 'border-box',
 }
 
+// Item-row boxes: tighter sides so the whole row fits the screen.
+const cellInput: React.CSSProperties = { ...inputStyle, padding: '7px 6px' }
+
 const labelStyle: React.CSSProperties = {
   display: 'block', fontSize: '11px', fontWeight: 600, color: '#64748b',
   textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px',
@@ -48,7 +51,7 @@ function ProductCell({ item, onNameChange }: { item: any; onNameChange: (name: s
       value={item.productName}
       onChange={e => onNameChange(e.target.value)}
       placeholder="Product name..."
-      style={{ ...inputStyle, minWidth: '140px' }}
+      style={{ ...cellInput, minWidth: '110px' }}
     />
   )
 }
@@ -520,10 +523,12 @@ export function PurchaseEntryPage() {
 
         {/* ── TAB 1: NEW PURCHASE ─────────────────────────────────────────── */}
         {hook.tab === 'new' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '65fr 35fr', gap: '16px', alignItems: 'start' }}>
+          // Side by side when the screen has room; otherwise the totals drop below the
+          // items, so the bill never needs scrolling sideways.
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-start' }}>
 
             {/* LEFT PANEL */}
-            <div>
+            <div style={{ flex: '999 1 900px', minWidth: 0 }}>
               {/* Supplier */}
               <SupplierSection
                 supplier={hook.supplier}
@@ -577,11 +582,12 @@ export function PurchaseEntryPage() {
 
                 <div ref={tableRef} style={{ overflowX: 'auto' }}>
                   <ProductNameList />
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '1050px' }}>
+                  <datalist id="purchase-sizes">{SIZES.map(sz => <option key={sz} value={sz} />)}</datalist>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '900px' }}>
                     <thead>
                       <tr style={{ borderBottom: `2px solid ${G.border}` }}>
                         {['#', 'Product', 'Design', 'PCode', 'Size', 'Colour', 'MRP', 'Wholesale', 'Online', 'Qty', 'Barcode', 'Cost', 'GST%', 'Amount', ''].map(h => (
-                          <th key={h} style={{ padding: '8px 6px', textAlign: 'left', fontSize: '10px', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={h} style={{ padding: '8px 3px', textAlign: 'left', fontSize: '10px', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -607,68 +613,66 @@ export function PurchaseEntryPage() {
                           </td>
 
                           {/* Product */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <ProductCell item={item} onNameChange={name => hook.updateItem(item.id, 'productName', name)} />
                           </td>
 
                           {/* Design — dimmed on follow-on colour rows of the same design */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <input value={item.design_no} onChange={e => hook.updateItem(item.id, 'design_no', e.target.value)}
-                              placeholder="D001" style={{ ...inputStyle, width: '70px', opacity: isFollowOn ? 0.45 : 1 }} />
+                              placeholder="D001" style={{ ...cellInput, width: '56px', opacity: isFollowOn ? 0.45 : 1 }} />
                           </td>
 
                           {/* PCode */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <input value={item.pcode} onChange={e => hook.updateItem(item.id, 'pcode', e.target.value)}
-                              placeholder="PC01" style={{ ...inputStyle, width: '70px', opacity: isFollowOn ? 0.45 : 1 }} />
+                              placeholder="PC01" style={{ ...cellInput, width: '56px', opacity: isFollowOn ? 0.45 : 1 }} />
                           </td>
 
                           {/* Size */}
-                          <td style={{ padding: '4px 6px' }}>
-                            <select value={item.size} onChange={e => hook.updateItem(item.id, 'size', e.target.value)}
-                              style={{ ...inputStyle, width: '70px' }}>
-                              <option value="">—</option>
-                              {SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
+                          <td style={{ padding: '4px 3px' }}>
+                            {/* Pick a standard size or type any other (9XL, 40-42…). */}
+                            <input list="purchase-sizes" value={item.size} onChange={e => hook.updateItem(item.id, 'size', e.target.value)}
+                              placeholder="Size" style={{ ...cellInput, width: '58px' }} />
                           </td>
 
                           {/* Colour */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <input value={item.colour} onChange={e => hook.updateItem(item.id, 'colour', e.target.value)}
-                              placeholder="Blue" style={{ ...inputStyle, width: '70px' }} />
+                              placeholder="Blue" style={{ ...cellInput, width: '60px' }} />
                           </td>
 
                           {/* MRP */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <input type="number" value={item.mrp === '' ? '' : item.mrp}
                               onChange={e => hook.updateItem(item.id, 'mrp', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                              placeholder="0" style={{ ...inputStyle, width: '70px' }} />
+                              placeholder="0" style={{ ...cellInput, width: '62px' }} />
                           </td>
 
                           {/* Wholesale and website prices for the new product */}
                           {(['wholesale_price', 'online_price'] as const).map(k => (
-                            <td key={k} style={{ padding: '4px 6px' }}>
+                            <td key={k} style={{ padding: '4px 3px' }}>
                               <input type="number" value={item[k] === '' ? '' : item[k]}
                                 onChange={e => hook.updateItem(item.id, k, e.target.value === '' ? '' : parseFloat(e.target.value))}
                                 placeholder={k === 'online_price' ? String(item.mrp || 0) : '0'}
                                 title={k === 'online_price' ? 'Website price — blank uses the MRP' : 'Wholesale price'}
-                                style={{ ...inputStyle, width: '70px' }} />
+                                style={{ ...cellInput, width: '62px' }} />
                             </td>
                           ))}
 
                           {/* Qty */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <input type="number" value={item.qty === '' ? '' : item.qty}
                               onChange={e => hook.updateItem(item.id, 'qty', e.target.value === '' ? '' : parseInt(e.target.value, 10))}
                               placeholder="0" min="0"
-                              style={{ ...inputStyle, width: '60px', fontSize: '14px', fontWeight: 700, color: G.primary }} />
+                              style={{ ...cellInput, width: '48px', fontSize: '14px', fontWeight: 700, color: G.primary }} />
                           </td>
 
                           {/* Barcode — auto-filled on every new row, and editable */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                               <input value={item.barcode} onChange={e => hook.updateItem(item.id, 'barcode', e.target.value)}
-                                placeholder="Barcode" style={{ ...inputStyle, width: '100px', fontFamily: 'DM Mono' }} />
+                                placeholder="Barcode" style={{ ...cellInput, width: '66px', fontFamily: 'DM Mono' }} />
                               <button onClick={() => hook.generateBarcode(item.id)} title="Generate a new barcode"
                                 style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px 5px', cursor: 'pointer', color: G.muted, fontSize: '9px', whiteSpace: 'nowrap' }}>
                                 Auto
@@ -677,28 +681,28 @@ export function PurchaseEntryPage() {
                           </td>
 
                           {/* Cost */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <input type="number" value={item.unit_cost === '' ? '' : item.unit_cost}
                               onChange={e => hook.updateItem(item.id, 'unit_cost', e.target.value === '' ? '' : parseFloat(e.target.value))}
                               placeholder="0" min="0"
-                              style={{ ...inputStyle, width: '80px' }} />
+                              style={{ ...cellInput, width: '64px' }} />
                           </td>
 
                           {/* GST% */}
-                          <td style={{ padding: '4px 6px' }}>
+                          <td style={{ padding: '4px 3px' }}>
                             <select value={item.gst_rate} onChange={e => hook.updateItem(item.id, 'gst_rate', parseFloat(e.target.value))}
-                              style={{ ...inputStyle, width: '60px' }}>
+                              style={{ ...cellInput, width: '56px', padding: '8px 4px' }}>
                               {GST_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                             </select>
                           </td>
 
                           {/* Amount */}
-                          <td style={{ padding: '4px 6px', fontFamily: 'DM Mono', fontWeight: 600, color: '#1a0a2e', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '4px 3px', fontFamily: 'DM Mono', fontWeight: 600, color: '#1a0a2e', whiteSpace: 'nowrap' }}>
                             ₹{item.line_total.toLocaleString('en-IN')}
                           </td>
 
                           {/* Actions */}
-                          <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '4px 3px', whiteSpace: 'nowrap' }}>
                             <button onClick={() => hook.duplicateItem(item.id)}
                               title="Copy this row below — same design, new colour"
                               style={{ background: 'none', border: 'none', cursor: 'pointer', color: G.primary, padding: '4px' }}>
@@ -752,7 +756,7 @@ export function PurchaseEntryPage() {
             </div>
 
             {/* RIGHT PANEL — Bill Summary */}
-            <div style={{ position: 'sticky', top: '24px' }}>
+            <div style={{ position: 'sticky', top: '24px', flex: '1 1 300px', maxWidth: '420px', marginLeft: 'auto' }}>
               <div style={{ background: 'white', border: `1px solid ${G.border}`, borderRadius: '14px', padding: '20px' }}>
 
                 {/* Purchase No */}
@@ -875,6 +879,7 @@ export function PurchaseEntryPage() {
 
                 {/* Save button */}
                 <button
+                  data-enter-submit
                   onClick={hook.savePurchase}
                   disabled={hook.loading}
                   style={{ width: '100%', padding: '13px', background: hook.loading ? '#86efac' : G.primary, color: 'white', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: hook.loading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans', transition: 'background 0.15s' }}

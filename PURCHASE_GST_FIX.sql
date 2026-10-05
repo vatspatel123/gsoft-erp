@@ -58,7 +58,7 @@ BEGIN
       'design_no', coalesce(v_prev ->> 'design_no', v_prod.design_no), 'pcode', coalesce(v_prev ->> 'pcode', v_prod.pcode),
       'size', coalesce(v_prev ->> 'size', v_prod.size), 'colour', coalesce(v_prev ->> 'colour', v_prod.colour),
       'batch_no', v_prev ->> 'batch_no', 'barcode', coalesce(v_prev ->> 'barcode', v_prod.barcode),
-      'qty', v_qty, 'unit_cost', v_cost, 'mrp', coalesce((v_prev ->> 'mrp')::numeric, v_prod.mrp),
+      'qty', v_qty, 'unit_cost', v_cost, 'mrp', coalesce(nullif(v_item ->> 'mrp', '')::numeric, (v_prev ->> 'mrp')::numeric, v_prod.mrp),
       'gst_rate', v_rate, 'line_total', round(v_qty * v_cost, 2));
   END LOOP;
 
@@ -81,6 +81,11 @@ BEGIN
   UPDATE products p SET cost_price = (x ->> 'unit_cost')::numeric
     FROM jsonb_array_elements(v_new_items) x
    WHERE p.id = (x ->> 'product_id')::uuid AND p.cost_price IS DISTINCT FROM (x ->> 'unit_cost')::numeric;
+  -- A corrected MRP is the product's MRP and selling price from now on (they are the same here).
+  UPDATE products p SET mrp = (x ->> 'mrp')::numeric, unit_price = (x ->> 'mrp')::numeric
+    FROM jsonb_array_elements(v_new_items) x
+   WHERE p.id = (x ->> 'product_id')::uuid AND (x ->> 'mrp') IS NOT NULL
+     AND p.mrp IS DISTINCT FROM (x ->> 'mrp')::numeric;
 
   v_discount := greatest(0, coalesce((p_changes ->> 'discount_amount')::numeric, v_old.discount_amount, 0));
   v_freight  := greatest(0, coalesce((p_changes ->> 'freight')::numeric, v_old.freight, 0));

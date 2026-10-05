@@ -16,9 +16,21 @@ const pageNames: Record<string, string> = {
   '/suppliers':       'Suppliers',
   '/accounting':      'Accounting',
   '/reports':         'Reports',
+  '/exchange':        'Exchange / Return',
+  '/wholesale':       'Wholesale',
+  '/purchase-entry':  'Purchase Entry',
+  '/purchase-bills':  'Purchase Bills',
+  '/purchase-returns':'Purchase Returns',
+  '/staff':           'Staff',
+  '/settings':        'Settings',
+  '/expenses':        'Expenses',
+  '/formats':         'Bill & Label Designer',
+  '/online-listings': 'Website Listings',
+  '/online-orders':   'Online Orders',
+  '/website-settings':'Website CMS',
 };
 
-export function Topbar() {
+export function Topbar({ onToggleSidebar, sidebarHidden }: { onToggleSidebar?: () => void; sidebarHidden?: boolean }) {
   const [time, setTime] = useState(new Date());
   const [pendingCount, setPendingCount] = useState(getPendingCount());
   const isOnline = useOnlineStatus();
@@ -47,7 +59,14 @@ export function Topbar() {
       boxShadow: '0 1px 4px rgba(147,51,234,0.06)',
       fontFamily: "'DM Sans', sans-serif"
     }}>
-      <div style={{ fontWeight: 500, fontSize: '15px', color: '#1a0a2e' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 500, fontSize: '15px', color: '#1a0a2e' }}>
+        {onToggleSidebar && (
+          <button onClick={onToggleSidebar} title={`${sidebarHidden ? 'Show' : 'Hide'} menu (Ctrl+B)`} aria-label="Toggle menu"
+            style={{ border: '1px solid #f3e8ff', background: sidebarHidden ? '#f3e8ff' : 'white', color: '#7c3aed',
+                     borderRadius: '8px', width: '34px', height: '32px', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}>
+            ☰
+          </button>
+        )}
         {currentPage}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>

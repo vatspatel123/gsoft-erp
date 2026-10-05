@@ -23,7 +23,6 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
   const [name, setName] = useState(product?.name || '')
   const [sku, setSku] = useState(product?.sku || '')
   const [barcode, setBarcode] = useState(product?.barcode || '')
-  const [unitPrice, setUnitPrice] = useState(product?.unit_price?.toString() || '')
   const [costPrice, setCostPrice] = useState(product?.cost_price?.toString() || '')
   const [gstRate, setGstRate] = useState(product?.gst_rate?.toString() || '18')
   const [categoryId, setCategoryId] = useState(product?.category_id || '')
@@ -67,8 +66,8 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
 
   const finalSize = size === 'Custom' ? customSize : size
 
-  const margin = (unitPrice || mrp) && costPrice
-    ? (((parseFloat(unitPrice || mrp) - parseFloat(costPrice)) / parseFloat(unitPrice || mrp)) * 100).toFixed(1)
+  const margin = mrp && costPrice
+    ? (((parseFloat(mrp) - parseFloat(costPrice)) / parseFloat(mrp)) * 100).toFixed(1)
     : '—'
 
   const autoSku = () => setSku('SKU-' + Date.now().toString().slice(-6))
@@ -81,10 +80,10 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
     reader.readAsDataURL(file)
   }
 
-  // Name, SKU and selling price sit under More options, so each has a default:
-  // name = the category (how this shop's products are already named), a fresh
-  // SKU, and the MRP as the selling price.
-  const sellPrice = unitPrice || mrp
+  // Name and SKU sit under More options, so each has a default: name = the
+  // category (how this shop's products are already named) and a fresh SKU.
+  // The shop sells at MRP, so there is no separate selling price.
+  const sellPrice = mrp
   const catName = showNewCat ? newCatName.trim() : (categories.find(c => c.id === categoryId)?.name || '')
   const finalName = name.trim() || catName || designNo.trim()
   const canSave = !!finalName && !!sellPrice
@@ -309,6 +308,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
             <div>
               <label style={labelStyle}>Cost Price ₹</label>
               <input style={inputStyle} type="number" value={costPrice} onChange={e => setCostPrice(e.target.value)} placeholder="0.00" />
+              {margin !== '—' && <div style={helperStyle}>Margin {margin}%</div>}
             </div>
           </div>
 
@@ -316,7 +316,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
             width: '100%', padding: '10px', marginBottom: '16px', background: '#f5f3ff', border: '1px dashed #d8b4fe',
             borderRadius: '10px', color: '#9333ea', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif'
           }}>
-            {showMore ? '▲ Hide options' : '▼ More options (photo, name, SKU, selling price, GST, batch, HSN, stock, website…)'}
+            {showMore ? '▲ Hide options' : '▼ More options (photo, name, SKU, GST, batch, HSN, stock, website…)'}
           </button>
 
           {showMore && (<>
@@ -358,18 +358,6 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
                 <option value="18">18%</option>
                 <option value="28">28%</option>
               </select>
-            </div>
-          </div>
-
-          <div style={{ ...gridThreeStyle, ...sectionStyle }}>
-            <div>
-              <label style={labelStyle}>Selling Price ₹</label>
-              <input style={inputStyle} type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder={mrp || '0.00'} />
-              <div style={helperStyle}>Blank = MRP</div>
-            </div>
-            <div>
-              <label style={labelStyle}>Margin %</label>
-              <input style={{ ...inputStyle, background: '#fdf8ff', color: '#9333ea', fontWeight: 600 }} value={margin} readOnly />
             </div>
           </div>
 
@@ -486,9 +474,9 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
                       type="number"
                       value={onlinePrice}
                       onChange={e => setOnlinePrice(e.target.value)}
-                      placeholder={unitPrice || '0.00'}
+                      placeholder={mrp || '0.00'}
                     />
-                    <div style={helperStyle}>Leave empty to use POS price (₹{unitPrice || '0'})</div>
+                    <div style={helperStyle}>Leave empty to use the MRP (₹{mrp || '0'})</div>
                   </div>
                   <div>
                     <label style={labelStyle}>Badges / Tags</label>
@@ -570,7 +558,7 @@ export function ProductForm({ product, categories, onSave, onAddCategory, onClos
               Save & Continue
             </button>
           )}
-          <button onClick={() => handleSave(false)} disabled={saving || !canSave} style={{
+          <button data-enter-submit onClick={() => handleSave(false)} disabled={saving || !canSave} style={{
             padding: '11px 28px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
             opacity: saving || !canSave ? 0.5 : 1
           }}>
