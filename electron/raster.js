@@ -42,6 +42,26 @@ function getWin() {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
+/**
+ * The next frame the offscreen window paints at its current size, falling back
+ * to a plain capture. A frame of the wrong shape is one painted before a resize
+ * landed — accepting it cut a bill off at the window's old height.
+ */
+function freshFrame(w) {
+  const [cw, ch] = w.getContentSize()
+  const rightShape = (image) => {
+    const { width, height } = image.getSize()
+    return width > 0 && Math.abs(height / width - ch / cw) < 0.01
+  }
+  const painted = new Promise(resolve => {
+    const onPaint = (_e, _dirty, image) => { if (!image.isEmpty() && rightShape(image)) { w.webContents.off('paint', onPaint); resolve(image) } }
+    w.webContents.on('paint', onPaint)
+    setTimeout(() => { w.webContents.off('paint', onPaint); resolve(null) }, 2000)
+  })
+  w.webContents.invalidate()
+  return painted.then(img => img || w.webContents.capturePage())
+}
+
 /** Dots across a width, rounded to whole bytes as both command sets require. */
 const dotsFor = (mm) => Math.max(8, Math.round(mm * DOTS_PER_MM / 8) * 8)
 
@@ -80,8 +100,6 @@ async function doRender(html, { widthMm, heightMm = 0, settleMs = 250, threshold
     const pxH = Math.min(16000, Math.ceil(cssH * zoom))
     w.setContentSize(dots, pxH)
     await sleep(150)
-    w.webContents.invalidate()
-    await sleep(120)
 
     // Where a placeholder sits, in dots — the label leaves an empty box for the
     // printer to draw its own barcode into.
@@ -90,7 +108,10 @@ async function doRender(html, { widthMm, heightMm = 0, settleMs = 250, threshold
                 const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height } })()`)
       : null
 
-    let img = await w.webContents.capturePage()
+    // A frame painted now, after this document loaded. A bare capturePage() can
+    // hand back the last frame on screen — on a slow PC that was the previous
+    // label, so its details printed over the next label's barcode.
+    let img = await freshFrame(w)
     let { width, height } = img.getSize()
     if (!width || !height) throw new Error('Nothing was drawn to print')
     if (width !== dots) {
@@ -189,9 +210,16 @@ async function billJob(html, widthMm) {
  */
 async function labelJob(labelHtmls, g) {
   const cache = new Map()
+  const inked = (b) => b.data.some(x => x)
   const bitsFor = async (html) => {
     if (!cache.has(html)) {
-      cache.set(html, await renderBits(html, { widthMm: g.widthMm, heightMm: g.heightMm, settleMs: 350, mark: '#bc' }))
+      const opts = { widthMm: g.widthMm, heightMm: g.heightMm, settleMs: 350, mark: '#bc' }
+      let bits = await renderBits(html, opts)
+      // A label always has text on it. Blank means the page wasn't drawn in
+      // time: try once more, slower, rather than print a barcode-only sticker.
+      if (!inked(bits)) bits = await renderBits(html, { ...opts, settleMs: 1200 })
+      if (!inked(bits)) throw new Error('A label came out blank twice — nothing was printed. Please try again.')
+      cache.set(html, bits)
     }
     return cache.get(html)
   }

@@ -93,12 +93,24 @@ public class RawPrinter {
       if (!StartDocPrinter(h, 1, di)) throw new Exception("The printer refused the job (StartDocPrinter)");
       try {
         if (!StartPagePrinter(h)) throw new Exception("The printer refused the job (StartPagePrinter)");
-        IntPtr p = Marshal.AllocCoTaskMem(bytes.Length);
+        // Windows may take only part of a write. A long label run is about 1 MB,
+        // and the part it didn't take used to be dropped without a word, losing
+        // labels mid-roll. Send in pieces and keep going until every byte is in.
+        const int CHUNK = 65536;
+        IntPtr p = Marshal.AllocCoTaskMem(CHUNK);
         try {
-          Marshal.Copy(bytes, 0, p, bytes.Length);
-          int written;
-          if (!WritePrinter(h, p, bytes.Length, out written))
-            throw new Exception("Could not write to the printer (error " + Marshal.GetLastWin32Error() + ")");
+          int sent = 0;
+          while (sent < bytes.Length) {
+            int n = Math.Min(CHUNK, bytes.Length - sent);
+            Marshal.Copy(bytes, sent, p, n);
+            int written;
+            if (!WritePrinter(h, p, n, out written))
+              throw new Exception("Could not write to the printer (error " + Marshal.GetLastWin32Error() + ")");
+            if (written <= 0)
+              throw new Exception("The printer stopped accepting data after " + sent + " of " + bytes.Length + " bytes");
+            // Only part of this piece went in: send the rest of it next.
+            sent += written;
+          }
         } finally { Marshal.FreeCoTaskMem(p); }
         EndPagePrinter(h);
       } finally { EndDocPrinter(h); }
