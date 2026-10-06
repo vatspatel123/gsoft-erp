@@ -55,6 +55,15 @@ export default function POSScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addProductBarcode, setAddProductBarcode] = useState('');
   const [billNote, setBillNote] = useState('');
+  // Bumped after every bill: the search box and payment panel start over blank,
+  // and so does the salesman — the next bill is a new sale, not a copy of the last.
+  const [billKey, setBillKey] = useState(0);
+  const startFresh = () => {
+    pos.clearCart();
+    setBillNote('');
+    setSelectedSalesman(null);
+    setBillKey(k => k + 1);
+  };
 
   const handleCompleteSale = async () => {
     if (!selectedSalesman) {
@@ -67,15 +76,13 @@ export default function POSScreen() {
       // Store sale data BEFORE clearing cart so the modal can still display it
       setCompletedSaleData(saleData);
       setShowModal(true);
-      // Clear cart & note for next sale (behind the modal)
-      pos.clearCart();
-      setBillNote('');
+      // Everything back to blank for the next sale (behind the modal)
+      startFresh();
     }
   };
 
   const handleNewSale = () => {
-    pos.clearCart()
-    setBillNote('')
+    startFresh()
     setTimeout(() => {
       const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement
       if (searchInput) searchInput.focus()
@@ -245,7 +252,7 @@ export default function POSScreen() {
             }}>
               {/* Search bar — takes all space */}
               <div style={{ flex: 1 }}>
-                <ProductSearch 
+                <ProductSearch key={billKey}
                   onSelect={pos.addToCart}
                   onOpenAddProduct={handleOpenAddProduct}
                 />
@@ -360,7 +367,7 @@ export default function POSScreen() {
         </div>
         
         <div className="pos-right">
-          <OrderSummary 
+          <OrderSummary key={billKey} 
             {...pos}
             cartLength={pos.cart.length}
             completeSale={handleCompleteSale}
