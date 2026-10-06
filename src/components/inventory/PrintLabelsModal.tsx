@@ -13,14 +13,14 @@ interface Props {
 type Format = '38x38' | '50x25' | '50x30' | '58mm'
 
 const FORMAT_OPTIONS: { value: Format; label: string; desc: string }[] = [
-  { value: '58mm', label: '58mm Thermal', desc: '58mm Bluetooth/USB thermal printer (1 label per row)' },
   { value: '38x38', label: '38×38mm Double', desc: 'Standard fashion label (2 per row)' },
+  { value: '58mm', label: '58mm Thermal', desc: '58mm Bluetooth/USB thermal printer (1 label per row)' },
   { value: '50x25', label: '50×25mm', desc: 'Small barcode label' },
   { value: '50x30', label: '50×30mm', desc: 'Medium label' },
 ]
 
 export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
-  const [format, setFormat] = useState<Format>('58mm')
+  const [format, setFormat] = useState<Format>('38x38')   // the shop's label stock
   const [globalCopies, setGlobalCopies] = useState(1)
   const [rows, setRows] = useState(() =>
     products.map(p => ({
@@ -181,7 +181,7 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
                 <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderBottom: '1px solid #fdf8ff', background: row.included ? 'white' : '#fafafa', opacity: row.included ? 1 : 0.5 }}>
                   <input type="checkbox" checked={row.included} onChange={() => toggleRow(row.id)} style={{ accentColor: '#9333ea', flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 500, color: '#1a0a2e', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{row.product.name}</div>
+                    <div style={{ fontSize: '12px', fontWeight: 500, color: '#1a0a2e', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{row.product.name}{row.product.design_no && <span style={{ color: '#7c3aed', fontWeight: 600 }}> · D: {row.product.design_no}</span>}</div>
                     <div style={{ fontSize: '10px', color: '#94a3b8' }}>
                       {[row.product.size, row.product.colour].filter(Boolean).join(' · ') || row.product.sku}
                     </div>

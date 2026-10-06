@@ -25,7 +25,7 @@ export interface LabelData {
 export function printBarcodeLabels(
   products: any[],
   copies: number = 1,
-  format: '38x38' | '50x25' | '50x30' | '58mm' = '58mm'
+  format: '38x38' | '50x25' | '50x30' | '58mm' = '38x38'
 ) {
   const settings = JSON.parse(localStorage.getItem('erp_settings') || '{}')
   const shopName = settings.shopName || 'Retail ERP'
