@@ -6,7 +6,10 @@ import toast from 'react-hot-toast'
 import { sendWhatsApp } from './whatsapp'
 import { fmtDate, fmtDateTime } from './date'
 
-export function printExchangeBill(exchangeData: any) {
+type IssuedCreditNote = { credit_note_no: string; amount: number; balance_amount?: number; expires_at?: string } | null | undefined
+
+/** The exchange receipt; a credit note issued with it prints on the same slip. */
+export function printExchangeBill(exchangeData: any, creditNote?: IssuedCreditNote) {
   const s = getSettings()
   const shopName = s.shopName || 'Retail ERP'
 
@@ -68,6 +71,13 @@ export function printExchangeBill(exchangeData: any) {
         ['Pending', exchangeData.udhar || 0]] as [string, number][])
         .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ₹${Number(v).toFixed(2)}`).join(' · ')
     }</div>` : ''}
+    ${creditNote ? `
+    <div style="border:1.5px dashed #9333ea;border-radius:8px;padding:8px;margin-top:10px;text-align:center">
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:#9333ea">STORE CREDIT NOTE</div>
+      <div style="font-size:14px;font-weight:800;margin-top:3px">${creditNote.credit_note_no}</div>
+      <div style="font-size:16px;font-weight:800;margin-top:3px">₹${Number(creditNote.balance_amount ?? creditNote.amount).toFixed(2)}</div>
+      <div style="font-size:10px;color:#64748b;margin-top:3px">Valid until ${creditNote.expires_at ? fmtDate(creditNote.expires_at) : '90 days'} · show this slip on your next visit</div>
+    </div>` : ''}
     <div class="divider"></div>
     <div class="footer">
       <div style="font-size:12px;font-weight:600;color:#9333ea">Exchange Completed ✓</div>
@@ -79,7 +89,8 @@ export function printExchangeBill(exchangeData: any) {
   printHTML(html)
 }
 
-export function sendExchangeWhatsApp(exchangeData: any) {
+/** One message for the exchange, including any credit note issued with it. */
+export function sendExchangeWhatsApp(exchangeData: any, creditNote?: IssuedCreditNote) {
   const phone = exchangeData.customer?.phone
   if (!phone) { alert('No customer phone found'); return }
   const clean = phone.replace(/\D/g, '')
@@ -109,6 +120,12 @@ export function sendExchangeWhatsApp(exchangeData: any) {
     `*Given:*%0A${newList}%0A` +
     `━━━━━━━━━━━━━━%0A` +
     `${balanceMsg}%0A%0A` +
+    (creditNote
+      ? `🎫 *Credit Note:* ${creditNote.credit_note_no}%0A` +
+        `Balance: ₹${Number(creditNote.balance_amount ?? creditNote.amount).toFixed(2)} · ` +
+        `Valid until ${creditNote.expires_at ? fmtDate(creditNote.expires_at) : '90 days'}%0A` +
+        `_Redeem it on your next visit._%0A%0A`
+      : '') +
     `Thank you for shopping! 🛍️%0A` +
     `_Retail ERP Fashion Edition_`
 

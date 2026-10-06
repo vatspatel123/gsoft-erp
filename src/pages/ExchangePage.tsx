@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
-import { printExchangeBill, sendExchangeWhatsApp, printCreditNote, sendCreditNoteWhatsApp } from '../utils/printBill'
+import { printExchangeBill, sendExchangeWhatsApp } from '../utils/printBill'
 import { getPendingSales } from '../utils/offlineCache'
 import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
 import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
@@ -100,7 +100,6 @@ export function ExchangePage() {
   const [replSearch, setReplSearch] = useState('')
   const [replResults, setReplResults] = useState<any[]>([])
   const [replLoading, setReplLoading] = useState(false)
-  const [quickVariants, setQuickVariants] = useState<any[]>([])
   const replInputRef = useRef<HTMLInputElement>(null)
 
   // Right panel
@@ -326,19 +325,8 @@ export function ExchangePage() {
     if (items.length === 0) { toast.error('Select at least one item to return'); return }
     setReturnItems(items)
     // Pre-load quick variants for first returned item
-    if (items[0]?.product?.name) loadQuickVariants(items[0].product.name, items[0].product.id)
     setStep(3)
     setTimeout(() => replInputRef.current?.focus(), 100)
-  }
-
-  const loadQuickVariants = async (name: string, excludeId: string) => {
-    const { data } = await supabase
-      .from('products')
-      .select('*')
-      .ilike('name', name)
-      .eq('is_active', true)
-      .neq('id', excludeId)
-    setQuickVariants(data || [])
   }
 
   // ── Replacement search ────────────────────────────────────────────────────
@@ -576,7 +564,7 @@ export function ExchangePage() {
   const resetAll = () => {
     setOriginalInvoice(null); setStep(1); setInvoiceInput(''); setPhoneInput('')
     setBarcodeInput(''); setPhoneResults([]); setReturnItems([]); setNewItems([])
-    setReplSearch(''); setReplResults([]); setQuickVariants([]); setExchangeNotes('')
+    setReplSearch(''); setReplResults([]); setExchangeNotes('')
     setShowSuccessModal(false); setExchangeComplete(null)
     setSelectedItems({}); setReturnQtys({}); setReturnReasons({})
   }
@@ -921,27 +909,6 @@ export function ExchangePage() {
                     <button onClick={() => setStep(2)} style={{ ...btnOutline, padding: '6px 14px', fontSize: '12px' }}>← Back</button>
                   </div>
 
-                  {/* Quick variants of the returned item */}
-                  {quickVariants.length > 0 && (
-                    <div style={{ marginBottom: '16px' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: '#9333ea', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
-                        Same Item — Different Size/Colour:
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {quickVariants.map(v => (
-                          <button key={v.id} onClick={() => addNewItem(v)}
-                            style={{ padding: '5px 12px', borderRadius: '99px', border: '1px solid #e9d5ff', background: '#fdf8ff', cursor: 'pointer', fontSize: '12px', color: '#1a0a2e', display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'DM Sans, sans-serif' }}>
-                            {v.colour && <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: colourDot(v.colour), border: '1px solid rgba(0,0,0,0.1)' }} />}
-                            {v.size && <span style={{ fontWeight: 700, color: '#9333ea' }}>{v.size}</span>}
-                            {v.colour && <span>{v.colour}</span>}
-                            <span style={{ color: '#9333ea', fontWeight: 600, fontFamily: 'DM Mono, monospace' }}>₹{v.unit_price}</span>
-                            <span style={{ fontSize: '10px', color: v.stock_qty > 0 ? '#16a34a' : '#ef4444' }}>{v.stock_qty} pcs</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Search replacement */}
                   <div style={{ position: 'relative', marginBottom: '14px' }}>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -1228,54 +1195,25 @@ export function ExchangePage() {
 
               {/* Action buttons */}
               <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                {issuedCreditNote && (
+                  <div style={{ background: '#fdf4ff', border: '1px solid #f0abfc', borderRadius: '12px', padding: '10px 12px',
+                                fontSize: '12px', fontWeight: 700, color: '#9333ea', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>🎫 Credit Note {issuedCreditNote.credit_note_no}</span>
+                    <span>₹{issuedCreditNote.amount.toFixed(2)}</span>
+                  </div>
+                )}
+                {/* One print and one WhatsApp, as on a sales bill — the credit note,
+                    if any, goes on the same slip and in the same message. */}
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => printExchangeBill(exchangeComplete)} style={{ ...btnPrimary, flex: 1 }}>🖨️ Print Receipt</button>
+                  <button data-enter-submit onClick={() => printExchangeBill(exchangeComplete, issuedCreditNote)} style={{ ...btnPrimary, flex: 1 }}>🖨️ Print</button>
                   <button
-                    onClick={() => sendExchangeWhatsApp(exchangeComplete)}
+                    onClick={() => sendExchangeWhatsApp(exchangeComplete, issuedCreditNote)}
                     disabled={!exchangeComplete.customer?.phone}
+                    title={exchangeComplete.customer?.phone ? '' : 'No phone number on this bill'}
                     style={{ flex: 1, background: '#16a34a', color: 'white', border: 'none', borderRadius: '10px', padding: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: exchangeComplete.customer?.phone ? 1 : 0.4 }}>
                     💬 WhatsApp
                   </button>
                 </div>
-
-                {issuedCreditNote && (
-                  <div style={{ background: '#fdf4ff', border: '1px solid #f0abfc', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#9333ea', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>🎫 Credit Note Issued: {issuedCreditNote.credit_note_no}</span>
-                      <span>₹{issuedCreditNote.amount.toFixed(2)}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        onClick={() => printCreditNote({
-                          creditNoteNo: issuedCreditNote.credit_note_no,
-                          customerName: issuedCreditNote.customer_name || 'Customer',
-                          customerPhone: issuedCreditNote.customer_phone,
-                          amount: issuedCreditNote.amount,
-                          balanceAmount: issuedCreditNote.balance_amount,
-                          notes: issuedCreditNote.notes,
-                          expiresAt: issuedCreditNote.expires_at,
-                          createdAt: issuedCreditNote.created_at
-                        })}
-                        style={{ flex: 1, padding: '8px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-                        🖨️ Print Credit Note
-                      </button>
-                      {issuedCreditNote.customer_phone && (
-                        <button
-                          onClick={() => sendCreditNoteWhatsApp({
-                            creditNoteNo: issuedCreditNote.credit_note_no,
-                            customerName: issuedCreditNote.customer_name || 'Customer',
-                            customerPhone: issuedCreditNote.customer_phone,
-                            amount: issuedCreditNote.amount,
-                            balanceAmount: issuedCreditNote.balance_amount,
-                            expiresAt: issuedCreditNote.expires_at
-                          })}
-                          style={{ flex: 1, padding: '8px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-                          💬 WhatsApp Voucher
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 <button onClick={() => { resetAll(); setIssuedCreditNote(null); setPageTab('history') }} style={{ ...btnOutline, width: '100%' }}>
                   <RotateCcw size={14} style={{ marginRight: '6px' }} /> New Transaction
