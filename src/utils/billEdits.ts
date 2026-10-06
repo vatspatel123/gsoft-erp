@@ -26,13 +26,17 @@ export interface SaleLine {
 }
 
 export interface PurchaseLine {
-  product_id: string
+  product_id: string            // '' for a new product added on the edit screen
+  key?: string
   name: string
   barcode?: string
   size?: string
   design_no?: string
   colour?: string
   mrp?: number
+  wholesale_price?: number
+  online_price?: number
+  pcode?: string
   qty: number
   unit_cost: number
   gst_rate: number
@@ -116,7 +120,12 @@ export async function editPurchase(
   const { data, error } = await supabase.rpc('edit_purchase', {
     p_bill_id: billId,
     p_changes: changes,
-    p_items: lines.map(l => ({ product_id: l.product_id, qty: l.qty, unit_cost: l.unit_cost, gst_rate: l.gst_rate, mrp: l.mrp ?? null })),
+    p_items: lines.map(l => ({
+      product_id: l.product_id || null, product_name: l.name, design_no: l.design_no ?? '', pcode: l.pcode ?? '',
+      size: l.size ?? '', colour: l.colour ?? '', barcode: l.barcode ?? '',
+      qty: l.qty, unit_cost: l.unit_cost, gst_rate: l.gst_rate, mrp: l.mrp ?? null,
+      wholesale_price: l.wholesale_price ?? '', online_price: l.online_price ?? '',
+    })),
     p_reason: reason,
   })
   if (error) return { ok: false, error: clean(error) }

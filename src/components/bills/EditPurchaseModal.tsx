@@ -12,11 +12,16 @@ interface Props {
 }
 
 /**
- * Edit a purchase bill: items (qty, cost, GST), supplier and invoice details,
- * discount and freight. Stock moves by the difference; stock that has already
- * been sold can't be taken off the bill. Brand-new products still go through
- * Purchase Entry, which gives them barcodes and labels.
+ * Edit a purchase bill the way it was entered: every column of every line, new
+ * lines (new products, next barcode in sequence), supplier and invoice details,
+ * discount and freight. Details typed on a line become the product's details.
+ * Stock moves by the difference; stock already sold can't be taken off the bill.
  */
+const SIZES = ['2XL', '3XL', '4XL', '5XL', '6XL', '7XL', '8XL', '9XL', '10XL', '2XL-3XL', '3XL-4XL', '4XL-5XL',
+  '36', '38', '40', '42', '44', '46', '48', '50', 'FREE']
+const isSeqCode = (c?: string) => /^\d{1,7}$/.test(String(c || '').trim())
+const cellStyle = { ...S.num, padding: '6px 6px' }
+
 export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
   const [loading, setLoading] = useState(true)
   const [bill, setBill] = useState<any>(null)
@@ -32,15 +37,20 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
+  const [lastCode, setLastCode] = useState(0)   // highest sequence barcode in stock
+  const [categories, setCategories] = useState<string[]>([])
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       const [{ data, error }, sup] = await Promise.all([
         supabase.from('purchase_bills')
-          .select('*, purchase_items(product_id, product_name, design_no, colour, size, barcode, qty, unit_cost, mrp, gst_rate, products(id, name, barcode, design_no, colour, size, mrp, stock_qty, gst_rate))')
+          .select('*, purchase_items(product_id, product_name, design_no, pcode, colour, size, barcode, qty, unit_cost, mrp, gst_rate, products(id, name, barcode, design_no, pcode, colour, size, mrp, wholesale_price, online_price, stock_qty, gst_rate))')
           .eq('id', billId).single(),
         supabase.from('suppliers').select('id, name').order('name'),
+        supabase.from('categories').select('name').order('name').then(({ data }) => setCategories((data || []).map(c => c.name))),
+        supabase.from('products').select('barcode').not('barcode', 'is', null)
+          .then(({ data }) => setLastCode(Math.max(0, ...(data || []).filter(r => isSeqCode(r.barcode)).map(r => Number(r.barcode))))),
       ])
       if (!alive) return
       if (error || !data) { toast.error('Could not load this purchase bill'); onClose(); return }
@@ -54,11 +64,15 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
       setNotes(data.notes || '')
       setLines((data.purchase_items || []).filter((i: any) => i.product_id).map((i: any) => ({
         product_id: i.product_id,
+        key: Math.random().toString(36).slice(2),
         name: i.products?.name || i.product_name || 'Product',
-        barcode: i.barcode || i.products?.barcode,
-        size: i.size || i.products?.size,
-        design_no: i.design_no || i.products?.design_no,
-        colour: i.colour || i.products?.colour,
+        barcode: i.products?.barcode || i.barcode,
+        size: i.products?.size ?? i.size,
+        design_no: i.products?.design_no ?? i.design_no,
+        colour: i.products?.colour ?? i.colour,
+        pcode: i.products?.pcode ?? i.pcode ?? '',
+        wholesale_price: i.products?.wholesale_price != null ? Number(i.products.wholesale_price) : undefined,
+        online_price: i.products?.online_price != null ? Number(i.products.online_price) : undefined,
         mrp: Number(i.mrp ?? i.products?.mrp) || undefined,
         qty: Number(i.qty),
         unit_cost: Number(i.unit_cost),
@@ -81,6 +95,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
   const stockProblems = useMemo(() => {
     const byProduct = new Map<string, { name: string; less: number; stock: number }>()
     for (const l of lines) {
+      if (!l.product_id) continue                     // a new product: nothing to take off
       const e = byProduct.get(l.product_id) || { name: l.name, less: 0, stock: l.stock_qty }
       e.less += l.orig_qty - l.qty
       byProduct.set(l.product_id, e)
@@ -95,7 +110,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)))
 
   const removeLine = (i: number) => {
-    setRemoved(r => [...r, lines[i]])
+    if (lines[i].product_id) setRemoved(r => [...r, lines[i]])
     setLines(ls => ls.filter((_, j) => j !== i))
   }
 
@@ -125,9 +140,25 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     setResults([]); setQuery('')
   }
 
+  // A new line: a new product, with the next barcode in the shop's sequence.
+  const addNewLine = () => setLines(ls => {
+    const next = Math.max(lastCode, ...ls.filter(l => isSeqCode(l.barcode)).map(l => Number(l.barcode))) + 1
+    const prev = ls[ls.length - 1]
+    return [...ls, {
+      product_id: '', key: Math.random().toString(36).slice(2), name: prev?.name || '', design_no: prev?.design_no || '',
+      pcode: prev?.pcode || '', size: '', colour: '', barcode: String(next), mrp: prev?.mrp, qty: 1,
+      unit_cost: prev?.unit_cost || 0, gst_rate: prev?.gst_rate ?? 5, orig_qty: 0, stock_qty: 0,
+    }]
+  })
+
   const save = async () => {
     if (!lines.length) { toast.error('A purchase bill needs at least one item'); return }
     if (lines.some(l => !Number.isInteger(l.qty) || l.qty < 1)) { toast.error('Every quantity must be a whole number, 1 or more'); return }
+    if (lines.some(l => !String(l.name || '').trim())) { toast.error('Every item needs a product name'); return }
+    if (lines.some(l => !String(l.barcode || '').trim())) { toast.error('Every item needs a barcode'); return }
+    const codes = lines.map(l => String(l.barcode).trim())
+    const dup = codes.find((c, i) => codes.indexOf(c) !== i)
+    if (dup) { toast.error(`Barcode ${dup} is on two lines`); return }
     const problem = stockProblems[0] || removedProblems[0]
     if (problem) { toast.error(`${problem.name}: some of it is already sold, so it can't come off this bill`); return }
     if (reason.trim().length < 3) { toast.error('Please write why this bill is being edited'); return }
@@ -149,7 +180,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
 
   return (
     <div style={S.overlay} onClick={onClose}>
-      <div style={S.card} onClick={e => e.stopPropagation()}>
+      <div style={{ ...S.card, maxWidth: 1400 }} onClick={e => e.stopPropagation()}>
         <div style={S.head}>
           <div>
             <div style={S.title}>Edit purchase {bill?.purchase_no || ''}</div>
@@ -188,45 +219,64 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
 
             <div style={S.section}>Items</div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={S.table}>
+              <datalist id="edit-purchase-names">{categories.map(n => <option key={n} value={n} />)}</datalist>
+              <datalist id="edit-purchase-sizes">{SIZES.map(sz => <option key={sz} value={sz} />)}</datalist>
+              <table style={{ ...S.table, minWidth: 1180 }}>
                 <thead>
                   <tr>
-                    <th style={S.th}>Item</th>
-                    <th style={{ ...S.th, width: 80 }}>Qty</th>
-                    <th style={{ ...S.th, width: 110 }}>Cost ₹</th>
-                    <th style={{ ...S.th, width: 100 }} title="MRP — also the selling price">MRP ₹</th>
-                    <th style={{ ...S.th, width: 80 }}>GST %</th>
-                    <th style={{ ...S.th, width: 110, textAlign: 'right' }}>Amount</th>
-                    <th style={{ ...S.th, width: 40 }} />
+                    {['Product', 'Design', 'PCode', 'Size', 'Colour', 'MRP ₹', 'Wholesale', 'Online', 'Qty', 'Barcode', 'Cost ₹', 'GST %'].map(h =>
+                      <th key={h} style={S.th}>{h}</th>)}
+                    <th style={{ ...S.th, textAlign: 'right' }}>Amount</th>
+                    <th style={{ ...S.th, width: 34 }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={l.product_id + i}>
-                      <td style={S.td}>
-                        <div style={{ fontWeight: 600 }}>{l.name}{l.design_no && <span style={{ fontWeight: 500, color: '#7c3aed' }}> · D: {l.design_no}</span>}</div>
-                        <div style={S.muted}>{[l.barcode, l.size, l.colour, `in stock ${l.stock_qty}`].filter(Boolean).join(' · ')}
-                          {l.orig_qty !== l.qty && <span style={S.changed}> was {l.orig_qty}</span>}</div>
-                      </td>
-                      <td style={S.td}><input style={S.num} type="number" min={1} step={1} value={l.qty}
-                        onChange={e => setLine(i, { qty: Math.max(0, parseInt(e.target.value) || 0) })} /></td>
-                      <td style={S.td}><input style={S.num} type="number" min={0} step="0.01" value={l.unit_cost}
-                        onChange={e => setLine(i, { unit_cost: Math.max(0, Number(e.target.value) || 0) })} /></td>
-                      <td style={S.td}><input style={S.num} type="number" min={0} step="1" value={l.mrp ?? ''} placeholder="—"
-                        onChange={e => setLine(i, { mrp: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0) })} /></td>
-                      <td style={S.td}>
-                        <select style={S.num} value={l.gst_rate} onChange={e => setLine(i, { gst_rate: Number(e.target.value) })}>
-                          {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                      </td>
-                      <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(l.qty * l.unit_cost)}</td>
-                      <td style={S.td}>
-                        <button style={S.iconBtn} title="Remove item" onClick={() => removeLine(i)}><Trash2 size={15} /></button>
-                      </td>
-                    </tr>
-                  ))}
+                  {lines.map((l, i) => {
+                    const txt = (k: keyof PurchaseLine, w: number, ph = '', extra: any = {}) => (
+                      <td style={S.td}><input style={{ ...cellStyle, width: w }} value={(l[k] as any) ?? ''} placeholder={ph} {...extra}
+                        onChange={e => setLine(i, { [k]: e.target.value } as any)} /></td>)
+                    const num = (k: keyof PurchaseLine, w: number, ph = '') => (
+                      <td style={S.td}><input style={{ ...cellStyle, width: w }} type="number" min={0} value={(l[k] as any) ?? ''} placeholder={ph}
+                        onChange={e => setLine(i, { [k]: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0) } as any)} /></td>)
+                    return (
+                      <tr key={l.key || l.product_id + i} style={{ background: l.product_id ? undefined : '#f0fdf4' }}>
+                        <td style={S.td}>
+                          <input style={{ ...cellStyle, width: 120 }} list="edit-purchase-names" value={l.name} placeholder="Product"
+                            onChange={e => setLine(i, { name: e.target.value })} />
+                          <div style={{ ...S.muted, fontSize: 11 }}>
+                            {l.product_id ? `in stock ${l.stock_qty}` : 'new product'}
+                            {l.orig_qty !== l.qty && l.product_id && <span style={S.changed}> · was {l.orig_qty}</span>}
+                          </div>
+                        </td>
+                        {txt('design_no', 76)}
+                        {txt('pcode', 56)}
+                        {txt('size', 66, '', { list: 'edit-purchase-sizes' })}
+                        {txt('colour', 70)}
+                        {num('mrp', 72)}
+                        {num('wholesale_price', 72)}
+                        {num('online_price', 72, l.mrp ? String(l.mrp) : '')}
+                        <td style={S.td}><input style={{ ...cellStyle, width: 56, fontWeight: 700 }} type="number" min={1} step={1} value={l.qty}
+                          onChange={e => setLine(i, { qty: Math.max(0, parseInt(e.target.value) || 0) })} /></td>
+                        {txt('barcode', 76)}
+                        <td style={S.td}><input style={{ ...cellStyle, width: 72 }} type="number" min={0} step="0.01" value={l.unit_cost}
+                          onChange={e => setLine(i, { unit_cost: Math.max(0, Number(e.target.value) || 0) })} /></td>
+                        <td style={S.td}>
+                          <select style={{ ...cellStyle, width: 58 }} value={l.gst_rate} onChange={e => setLine(i, { gst_rate: Number(e.target.value) })}>
+                            {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ ...S.td, textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{money(l.qty * l.unit_cost)}</td>
+                        <td style={S.td}>
+                          <button style={S.iconBtn} title="Remove item" onClick={() => removeLine(i)}><Trash2 size={15} /></button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
+            </div>
+            <div>
+              <button style={S.btnOutline} onClick={addNewLine}><Plus size={15} /> Add item</button>
             </div>
             {[...stockProblems, ...removedProblems.map(r => ({ name: r.name, less: r.orig_qty, stock: r.stock_qty }))].map(p => (
               <div key={p.name} style={S.error}>
