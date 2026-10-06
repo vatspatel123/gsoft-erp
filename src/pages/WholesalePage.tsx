@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Layout } from '../components/shared/Layout'
 import { useWholesale } from '../hooks/useWholesale'
 import { printWholesaleBill, sendWholesaleWhatsApp } from '../utils/printWholesaleBill'
+import { EwayBillModal } from '../components/wholesale/EwayBillModal'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import {
@@ -250,7 +251,9 @@ function ProductSearchBar({ onAdd }: { onAdd: (p: any) => void }) {
 // ─── Success Modal ────────────────────────────────────────────────────────────
 function SuccessModal({ saleData, onNewSale, onClose }: { saleData: any; onNewSale: () => void; onClose: () => void }) {
   const [sent, setSent] = useState(false)
+  const [showEway, setShowEway] = useState(false)
   return (
+    <>
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, padding: '20px' }}
       onClick={onClose}>
       <div style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '440px', padding: '28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', fontFamily: 'DM Sans, sans-serif' }}
@@ -309,6 +312,17 @@ function SuccessModal({ saleData, onNewSale, onClose }: { saleData: any; onNewSa
               </button>
             )}
 
+            <button onClick={() => setShowEway(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'white', border: `1px solid ${B.border}`, borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', width: '100%', textAlign: 'left' }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = B.primary)}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = B.border)}>
+              <span style={{ fontSize: '18px' }}>🚚</span>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a0a2e' }}>E-Way Bill</div>
+                <div style={{ fontSize: '10px', color: B.muted }}>Download JSON for the portal + PDF</div>
+              </div>
+            </button>
+
             <button onClick={async () => { printWholesaleBill(saleData); await new Promise(r => setTimeout(r, 500)); sendWholesaleWhatsApp(saleData); setSent(true) }}
               style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'linear-gradient(135deg,#eff6ff,#f0fdf4)', border: `1px solid ${B.border}`, borderRadius: '10px', padding: '11px 14px', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
               <span style={{ fontSize: '18px' }}>🖨️💬</span>
@@ -326,6 +340,8 @@ function SuccessModal({ saleData, onNewSale, onClose }: { saleData: any; onNewSa
         </button>
       </div>
     </div>
+    {showEway && <EwayBillModal saleData={saleData} onClose={() => setShowEway(false)} />}
+    </>
   )
 }
 

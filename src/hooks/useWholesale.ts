@@ -49,14 +49,17 @@ export function useWholesale() {
   const [lastSale, setLastSale] = useState<any>(null)
 
   // ─── Derived totals ───────────────────────────────────────────────────────
-  const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0)
+  // Subtotal is the lines as billed (after any line discount). The bill discount
+  // comes off before GST — GST is charged on what the party actually pays for
+  // the goods, as the invoice and the e-way bill must both show.
+  const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price * (1 - i.discount_pct / 100), 0)
   const billDiscAmt = subtotal * (discountPct / 100)
   const afterDiscount = subtotal - billDiscAmt
   const itemGstTotal = cart.reduce((s, i) => {
     const taxable = i.qty * i.unit_price * (1 - i.discount_pct / 100)
     return s + taxable * (i.gst_rate / 100)
   }, 0)
-  const gstAmount = itemGstTotal
+  const gstAmount = itemGstTotal * (1 - discountPct / 100)
   const rawNet = afterDiscount + gstAmount + freight
   const roundOff = Math.round(rawNet) - rawNet
   const netAmount = rawNet + roundOff

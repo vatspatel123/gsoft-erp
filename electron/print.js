@@ -146,7 +146,8 @@ async function runRender(html, widthMm) {
           el.textContent = '@page { size: ${widthMm}mm ' + mm + 'mm; margin: 0; }';
           document.head.appendChild(el); return mm; })()`).catch(() => {})
     }
-    const pdf = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: widthMm > 0 })
+    // A page that sets its own size (an A4 e-way bill passes widthMm 0) keeps it.
+    const pdf = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true })
     return { ok: true, base64: Buffer.from(pdf).toString('base64') }
   } catch (e) {
     return { ok: false, error: (e && e.message) || 'Could not build the PDF' }
