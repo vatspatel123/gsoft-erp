@@ -79,19 +79,37 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
     setLoading(true)
     try {
       let candidateList: any[] = []
+      let serverAnswered = false
 
       if (navigator.onLine) {
         try {
-          const { data } = await supabase
-            .from('products')
-            .select('*, categories(name)')
-          if (data && data.length > 0) candidateList = data
+          // Ask only for what was scanned. This used to download every product
+          // (over 1 MB) on each scan, which is what made scanning slow.
+          const safe = searchCode.replace(/[,()*%"\\]/g, '')
+          const exact = await supabase.from('products').select('*, categories(name)')
+            .or(['barcode', 'sku', 'design_no', 'batch_no', 'pcode'].map(f => `${f}.ilike."${safe}"`).join(','))
+            .limit(50)
+          if (exact.data?.length) {
+            candidateList = exact.data
+          } else {
+            // No code matched: the same name / design / category search as before.
+            const { data: cats } = await supabase.from('categories').select('id').ilike('name', `%${safe}%`)
+            const catIds = (cats || []).map(c => c.id)
+            const { data } = await supabase.from('products').select('*, categories(name)')
+              .or(`name.ilike."%${safe}%",sku.ilike."%${safe}%",design_no.ilike."%${safe}%"` +
+                  (catIds.length ? `,category_id.in.(${catIds.join(',')})` : ''))
+              .limit(200)
+            if (data && data.length > 0) candidateList = data
+          }
+          serverAnswered = !exact.error
         } catch (dbErr) {
           console.warn('DB fetch error during search, using cache:', dbErr)
         }
       }
 
-      if (candidateList.length === 0) {
+      // This PC's copy only when the server couldn't be asked — a server "not
+      // found" is the truth, not a reason to sell from an old copy.
+      if (candidateList.length === 0 && !serverAnswered) {
         candidateList = getCachedProducts() || []
       }
 

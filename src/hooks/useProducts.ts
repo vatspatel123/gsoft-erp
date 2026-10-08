@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
+import { useLiveRefresh } from './useLiveRefresh'
 
 export function useProducts() {
   const [products, setProducts] = useState<any[]>([])
@@ -77,6 +78,7 @@ export function useProducts() {
   useEffect(() => {
     fetchProducts()
   }, [fetchProducts])
+  useLiveRefresh(['products'], fetchProducts)
 
   useEffect(() => {
     fetchCategories()

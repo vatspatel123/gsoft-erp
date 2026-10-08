@@ -10,6 +10,7 @@ import { BillHistoryModal } from '../components/bills/BillHistoryModal'
 import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 import { S } from '../components/bills/billEditStyles'
 import { fmtDate } from '../utils/date'
+import { useLiveRefresh } from '../hooks/useLiveRefresh'
 
 /**
  * Every purchase bill in one place — there wasn't a list before, only each
@@ -39,6 +40,7 @@ export function PurchaseBillsPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+  useLiveRefresh(['purchase_bills'], load)
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase()

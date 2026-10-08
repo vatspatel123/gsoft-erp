@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { saveProductsToCache } from '../utils/offlineCache'
+import { useLiveRefresh } from './useLiveRefresh'
 
 export interface Supplier {
   id: string
@@ -161,6 +162,7 @@ export function usePurchaseEntry() {
   useEffect(() => {
     if (tab === 'history') fetchHistory()
   }, [tab, historyFilter])
+  useLiveRefresh(['purchase_bills'], () => { if (tab === 'history') fetchHistory() })
 
   const fetchHistory = async () => {
     setHistoryLoading(true)
@@ -424,9 +426,26 @@ export function usePurchaseEntry() {
         new Date().toISOString().slice(0, 10).replace(/-/g, '') +
         '-' + String(counter).padStart(4, '0')
 
-      const { data: bill, error: billError } = await supabase
-        .from('purchase_bills')
-        .insert({
+      // One trip: the bill, its new products, restocks and lines are saved together
+      // in the database (save_purchase), or not at all. This used to be one request
+      // per item and then a download of every product — 10–20 s on a big bill.
+      const lines = validItems.map(item => {
+        const qty = typeof item.qty === 'number' ? item.qty : 0
+        const cost = typeof item.unit_cost === 'number' ? item.unit_cost : 0
+        const mrp = typeof item.mrp === 'number' ? item.mrp : (cost ? Math.round(cost * 1.4) : null)
+        const unitPrice = typeof item.mrp === 'number' ? item.mrp : Math.round(cost * 1.3)
+        return {
+          product_id: item.product?.id || null,
+          name: (item.product?.name || item.productName).trim(),
+          design_no: item.design_no || '', pcode: item.pcode || '', size: item.size || '', colour: item.colour || '',
+          barcode: item.barcode || makeBarcode(),
+          qty, unit_cost: cost, mrp, unit_price: unitPrice, gst_rate: item.gst_rate, line_total: item.line_total,
+          online_price: typeof item.online_price === 'number' ? item.online_price : unitPrice,
+          wholesale_price: typeof item.wholesale_price === 'number' ? item.wholesale_price : null,
+        }
+      })
+      const { data: saved, error: saveError } = await supabase.rpc('save_purchase', {
+        p_bill: {
           purchase_no: purchaseNo,
           supplier_id: finalSupplierId,
           supplier_invoice_no: supplierInvoiceNo || null,
@@ -441,149 +460,16 @@ export function usePurchaseEntry() {
           payment_mode: paymentMode,
           payment_status: paymentStatus,
           notes: notes || null,
-        })
-        .select()
-        .single()
+        },
+        p_items: lines,
+        p_list_online: listOnWebsite,
+      })
+      if (saveError) throw saveError
+      const bill = saved.bill
+      const processedItems = validItems.map((item, i) => ({ ...item, barcode: lines[i].barcode, product: saved.products[i] }))
 
-      if (billError) throw billError
-
-      // Products are named by their category here ("T-SHIRT"), so file each new one
-      // under that category, creating it the first time a name is used.
-      const { data: cats } = await supabase.from('categories').select('id, name')
-      const catIds = new Map((cats || []).map(c => [c.name.trim().toLowerCase(), c.id]))
-      const categoryFor = async (name: string): Promise<string | null> => {
-        const k = name.trim().toLowerCase()
-        if (!k) return null
-        if (!catIds.has(k)) {
-          const { data: c } = await supabase.from('categories').insert({ name: name.trim() }).select('id').single()
-          catIds.set(k, c?.id || null)
-        }
-        return catIds.get(k) || null
-      }
-
-      // Update inventory and ensure barcodes exist for each item
-      const processedItems: any[] = []
-      for (const item of validItems) {
-        const qty = typeof item.qty === 'number' ? item.qty : 0
-        const cost = typeof item.unit_cost === 'number' ? item.unit_cost : 0
-        const mrp = typeof item.mrp === 'number' ? item.mrp : (cost ? Math.round(cost * 1.4) : null)
-        const unitPrice = typeof item.mrp === 'number' ? item.mrp : Math.round(cost * 1.3)
-
-        if (item.product?.id) {
-          const { data: prod } = await supabase
-            .from('products')
-            .select('*')
-            .eq('id', item.product.id)
-            .single()
-
-          // An existing product keeps its barcode: its labels are already on the shelf,
-          // and overwriting it is what made old stock stop scanning.
-          const currentBarcode = prod?.barcode || item.barcode || makeBarcode()
-          const newStock = (prod?.stock_qty || 0) + qty
-
-          const { data: updatedProd } = await supabase
-            .from('products')
-            .update({
-              stock_qty: newStock,
-              cost_price: cost,
-              mrp: mrp ?? prod?.mrp,
-              unit_price: prod?.unit_price || unitPrice,
-              barcode: currentBarcode,
-            })
-            .eq('id', item.product.id)
-            .select()
-            .single()
-
-          processedItems.push({
-            ...item,
-            product: updatedProd || { ...item.product, stock_qty: newStock, barcode: currentBarcode, mrp, cost_price: cost }
-          })
-        } else if (item.productName.trim()) {
-          const generatedBarcode = item.barcode || makeBarcode()
-          // One per barcode: a timestamp repeated when several rows saved in the same moment.
-          const newSku = 'SKU-' + generatedBarcode
-          const wholesale = typeof item.wholesale_price === 'number' ? item.wholesale_price : null
-          const online = typeof item.online_price === 'number' ? item.online_price : unitPrice
-
-          const { data: newProd, error: prodErr } = await supabase
-            .from('products')
-            .insert({
-              name: item.productName.trim(),
-              sku: newSku,
-              category_id: await categoryFor(item.productName),
-              design_no: item.design_no || null,
-              pcode: item.pcode || null,
-              size: item.size || null,
-              colour: item.colour || null,
-              cost_price: cost,
-              unit_price: unitPrice,
-              mrp: mrp,
-              stock_qty: qty,
-              gst_rate: item.gst_rate,
-              is_active: true,
-              is_online: listOnWebsite,
-              online_price: online,
-              wholesale_price: wholesale,
-              barcode: generatedBarcode,
-            })
-            .select()
-            .single()
-
-          if (!prodErr && newProd) {
-            processedItems.push({
-              ...item,
-              product: newProd
-            })
-          } else {
-            if (prodErr) toast.error(`${item.productName} (${generatedBarcode}): ${prodErr.message}`)
-            processedItems.push({
-              ...item,
-              unsaved: true,
-              product: {
-                id: crypto.randomUUID(),
-                name: item.productName.trim(),
-                sku: newSku,
-                barcode: generatedBarcode,
-                mrp,
-                stock_qty: qty,
-                cost_price: cost
-              }
-            })
-          }
-        }
-      }
-
-      // Bill lines, linked to the product each one created or restocked.
-      await supabase.from('purchase_items').insert(
-        processedItems.map((item: any) => ({
-          purchase_id: bill.id,
-          product_id: item.product?.id && !item.unsaved ? item.product.id : null,
-          product_name: item.product?.name || item.productName,
-          design_no: item.design_no || null,
-          pcode: item.pcode || null,
-          size: item.size || null,
-          colour: item.colour || null,
-          barcode: item.barcode || null,
-          qty: typeof item.qty === 'number' ? item.qty : 0,
-          unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
-          mrp: typeof item.mrp === 'number' ? item.mrp : null,
-          gst_rate: item.gst_rate,
-          line_total: item.line_total,
-        }))
-      )
-
-      // Refresh product cache for offline and instant POS sync
-      try {
-        const { data: allProds } = await supabase
-          .from('products')
-          .select('*')
-          .eq('is_active', true)
-        if (allProds) {
-          saveProductsToCache(allProds)
-        }
-      } catch (cacheErr) {
-        console.warn('Product cache refresh warning:', cacheErr)
-      }
+      // The POS copy gets just these products, not a fresh download of all of them.
+      try { saveProductsToCache(saved.products) } catch (cacheErr) { console.warn('Product cache refresh warning:', cacheErr) }
 
       // Update supplier balance if credit
       if (finalSupplierId && paymentStatus === 'pending') {

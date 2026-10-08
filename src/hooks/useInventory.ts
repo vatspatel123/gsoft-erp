@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
+import { useLiveRefresh } from './useLiveRefresh'
 
 // stock_damage_log.type only accepts these four. The UI collects a free-text
 // reason, so map it; anything unrecognised is recorded as generic damage.
@@ -66,6 +67,7 @@ export function useInventory() {
     fetchProducts()
     fetchAdjustments()
   }, [])
+  useLiveRefresh(['products'], fetchProducts)
 
   const adjustStock = async (
     productId: string,
