@@ -207,6 +207,15 @@ export default function ReportsPage() {
       .sort((a: any, b: any) => b.revenue - a.revenue)
       .slice(0, 10)
   })()
+  // Totals for every product sold in the period, not only the top 10 shown.
+  const productTotals = (() => {
+    const names = new Set(items.map(i => i.products?.name || 'Unknown'))
+    const units = items.reduce((s, i) => s + (i.qty || 0), 0)
+    const amount = items.reduce((s, i) => s + (i.line_total || 0), 0)
+    const topUnits = topProducts.reduce((s: number, p: any) => s + p.qty, 0)
+    const topAmount = topProducts.reduce((s: number, p: any) => s + p.revenue, 0)
+    return { products: names.size, units, amount, topUnits, topAmount }
+  })()
 
   const salesmanData = (() => {
     const map: Record<string, any> = {}
@@ -601,6 +610,20 @@ export default function ReportsPage() {
                       Export CSV
                     </button>
                   </div>
+                  {/* The whole period at a glance: every product sold, not only the top 10. */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                    {([
+                      ['Total units', productTotals.units.toLocaleString('en-IN')],
+                      ['Total amount', '₹' + Math.round(productTotals.amount).toLocaleString('en-IN')],
+                      ['Products sold', productTotals.products.toLocaleString('en-IN')],
+                      ['Average per unit', productTotals.units ? '₹' + Math.round(productTotals.amount / productTotals.units).toLocaleString('en-IN') : '—'],
+                    ] as [string, string][]).map(([label, value]) => (
+                      <div key={label} style={{ background: '#faf5ff', border: '1px solid #f3e8ff', borderRadius: '12px', padding: '10px 14px' }}>
+                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+                        <div style={{ fontSize: '20px', fontWeight: 700, color: '#1a0a2e', fontFamily: 'DM Mono, monospace', marginTop: '2px' }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
                   <table style={{
                     width: '100%',
                     borderCollapse: 'collapse',
@@ -704,6 +727,23 @@ export default function ReportsPage() {
                           </td>
                         </tr>
                       ))}
+                      {topProducts.length > 0 && (
+                        <tr style={{ borderTop: '2px solid #e9d5ff', background: '#faf5ff' }}>
+                          <td />
+                          <td style={{ padding: '10px 8px', fontWeight: 700, color: '#1a0a2e' }}>
+                            {productTotals.products > topProducts.length ? `Top ${topProducts.length} total` : 'Total'}
+                          </td>
+                          <td style={{ padding: '10px 8px', fontWeight: 700, color: '#1a0a2e' }}>{productTotals.topUnits}</td>
+                          <td style={{ padding: '10px 8px', fontWeight: 700, color: '#9333ea', fontFamily: 'DM Mono' }}>
+                            ₹{Math.round(productTotals.topAmount).toLocaleString('en-IN')}
+                          </td>
+                          <td style={{ padding: '10px 8px', fontSize: '12px', color: '#64748b' }}>
+                            {productTotals.products > topProducts.length
+                              ? `All ${productTotals.products} products: ${productTotals.units} units · ₹${Math.round(productTotals.amount).toLocaleString('en-IN')}`
+                              : ''}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
