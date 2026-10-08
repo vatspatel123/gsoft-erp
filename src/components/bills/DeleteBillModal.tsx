@@ -5,8 +5,9 @@ import { deleteBill } from '../../utils/billEdits'
 import { S } from './billEditStyles'
 
 /** Confirm deleting a sales or purchase bill with the admin password. */
-export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted }: {
-  type: 'sale' | 'purchase'; billId: string; billNo: string; onClose: () => void; onDeleted: () => void
+export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted, title, note }: {
+  type: 'sale' | 'purchase' | 'exchange'; billId: string; billNo: string; onClose: () => void; onDeleted: () => void
+  title?: string; note?: string
 }) {
   const [reason, setReason] = useState('')
   const [password, setPassword] = useState('')
@@ -29,11 +30,13 @@ export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted }: {
       <div style={{ ...S.card, maxWidth: 440 }} onClick={e => e.stopPropagation()}>
         <div style={S.head}>
           <div>
-            <div style={S.title}>Delete {type === 'sale' ? 'bill' : 'purchase'} {billNo}?</div>
+            <div style={S.title}>{title || `Delete ${type === 'sale' ? 'bill' : type === 'exchange' ? 'exchange' : 'purchase'} ${billNo}?`}</div>
             <div style={S.sub}>
-              {type === 'sale'
+              {note || (type === 'sale'
                 ? 'The pieces go back into stock and the customer’s points and spend are reversed.'
-                : 'The pieces this bill brought in come back out of stock.'} A copy is kept in the history.
+                : type === 'exchange'
+                  ? 'Stock goes back to how it was before the exchange, and its credit note or loyalty points are taken back.'
+                  : 'The pieces this bill brought in come back out of stock.')} A copy is kept in the history.
             </div>
           </div>
           <button style={S.x} onClick={onClose} aria-label="Close"><X size={18} /></button>

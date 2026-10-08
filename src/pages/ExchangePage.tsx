@@ -9,6 +9,7 @@ import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
 import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
 import { appliedTenders, type Tenders } from '../utils/tenders'
 import { fmtDate } from '../utils/date'
+import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ReturnItem {
@@ -448,7 +449,8 @@ export function ExchangePage() {
             credit_status: udhar > 0.009 ? 'unpaid' : 'paid',
             credit_due_date: udhar > 0.009 ? udharDue : null,
             notes: exchangeNotes || null,
-            status: 'completed'
+            status: 'completed',
+            refund_mode: balance < 0 ? creditOption : null
           })
           .select().single()
 
@@ -524,6 +526,8 @@ export function ExchangePage() {
             notes: `Exchange Return Balance for Invoice ${originalInvoice.invoice_no}`
           })
           setIssuedCreditNote(cnResult)
+          // Linked, so deleting the exchange takes this credit note back.
+          if (exchangeId && cnResult?.id) await supabase.from('exchange_bills').update({ credit_note_id: cnResult.id }).eq('id', exchangeId)
         } else if (creditOption === 'loyalty' && originalInvoice.customer_id) {
           try {
             const pointsToAdd = Math.floor(Math.abs(balance) * 4)
@@ -562,12 +566,30 @@ export function ExchangePage() {
   }
 
   // ── History ───────────────────────────────────────────────────────────────
+  // Delete, or "edit": an exchange ties items, stock and refunds together, so it
+  // is undone and made again from the same original bill rather than patched.
+  const [removing, setRemoving] = useState<{ exc: any; redo: boolean } | null>(null)
+  const reprint = (exc: any) => {
+    const sign = exc.balance_type === 'customer_pays' ? 1 : exc.balance_type === 'store_credit' ? -1 : 0
+    const lines = (rows: any[]) => (rows || []).map((i: any) => ({
+      product: i.products || { name: 'Product' }, qty: Number(i.qty), line_total: Number(i.line_total) }))
+    printExchangeBill({
+      exchangeNo: exc.exchange_no, originalInvoiceNo: exc.original_invoice_no, customer: exc.customers,
+      returnItems: lines(exc.exchange_return_items), newItems: lines(exc.exchange_new_items),
+      balance: sign * Number(exc.balance_amount || 0),
+      tenders: sign > 0 ? { cash: Number(exc.cash_amount) || 0, card: Number(exc.card_amount) || 0, upi: Number(exc.upi_amount) || 0 } : null,
+      udhar: Number(exc.credit_amount) || 0,
+    }, exc.credit_notes)
+  }
+
   const fetchHistory = async () => {
     setHistoryLoading(true)
     try {
       const { data } = await supabase
         .from('exchange_bills')
-        .select('*, customers(name, phone)')
+        .select('*, customers(name, phone), credit_notes:credit_note_id(*), ' +
+          'exchange_return_items(qty, unit_price, line_total, products(name, size, colour)), ' +
+          'exchange_new_items(qty, unit_price, line_total, products(name, size, colour))')
         .order('created_at', { ascending: false })
         .limit(50)
       setHistory(data || [])
@@ -643,10 +665,20 @@ export function ExchangePage() {
                           </span>
                         </td>
                         <td style={{ padding: '12px 14px' }}>
-                          <button onClick={() => { /* reprint */ }} title="Reprint"
-                            style={{ background: '#f5f3ff', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#9333ea', fontSize: '11px' }}>
-                            🖨️
-                          </button>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button onClick={() => reprint(exc)} title="Reprint"
+                              style={{ background: '#f5f3ff', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#9333ea', fontSize: '11px' }}>
+                              🖨️
+                            </button>
+                            <button onClick={() => setRemoving({ exc, redo: true })} title="Edit — undo this exchange and make it again"
+                              style={{ background: '#eff6ff', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#1d4ed8', fontSize: '11px' }}>
+                              ✏️
+                            </button>
+                            <button onClick={() => setRemoving({ exc, redo: false })} title="Delete (admin password)"
+                              style={{ background: '#fef2f2', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#dc2626', fontSize: '11px' }}>
+                              🗑
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -655,6 +687,18 @@ export function ExchangePage() {
               </div>
             )}
           </div>
+        )}
+
+        {removing && (
+          <DeleteBillModal type="exchange" billId={removing.exc.id} billNo={removing.exc.exchange_no}
+            title={removing.redo ? `Edit exchange ${removing.exc.exchange_no}?` : undefined}
+            note={removing.redo ? `This exchange is undone (stock, credit note and points put back), then New Exchange opens with bill ${removing.exc.original_invoice_no} so you can make it again correctly.` : undefined}
+            onClose={() => setRemoving(null)}
+            onDeleted={() => {
+              const { exc, redo } = removing
+              fetchHistory()
+              if (redo) { setPageTab('new'); setInvoiceInput(exc.original_invoice_no); void loadInvoiceByNo(exc.original_invoice_no) }
+            }} />
         )}
 
         {/* ═══════ NEW EXCHANGE TAB ═══════ */}

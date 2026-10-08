@@ -167,10 +167,12 @@ export const money = (n: number) =>
 
 /** Delete a bill for good. Needs the admin's login password; stock is put back. */
 export async function deleteBill(
-  type: 'sale' | 'purchase', billId: string, reason: string, password: string,
+  type: 'sale' | 'purchase' | 'exchange', billId: string, reason: string, password: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const { error } = type === 'sale'
     ? await supabase.rpc('delete_sale', { p_sale_id: billId, p_reason: reason, p_admin_password: password })
-    : await supabase.rpc('delete_purchase', { p_bill_id: billId, p_reason: reason, p_admin_password: password })
+    : type === 'exchange'
+      ? await supabase.rpc('delete_exchange', { p_exchange_id: billId, p_reason: reason, p_admin_password: password })
+      : await supabase.rpc('delete_purchase', { p_bill_id: billId, p_reason: reason, p_admin_password: password })
   return error ? { ok: false, error: clean(error) } : { ok: true }
 }
