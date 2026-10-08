@@ -1,7 +1,7 @@
 {
   "name": "gsoft-erp",
   "private": true,
-  "version": "1.0.25",
+  "version": "1.0.26",
   "author": "GSoft Ahmedabad",
   "description": "Retail ERP Fashion Edition",
   "main": "electron/main.js",
