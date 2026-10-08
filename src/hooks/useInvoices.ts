@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getPendingSales } from '../utils/offlineCache'
+import { useLiveRefresh } from './useLiveRefresh'
 
 export interface Invoice {
   id: string
@@ -61,38 +62,20 @@ export function useInvoices() {
   const [search, setSearch] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('all')
   const [salesmanFilter, setSalesmanFilter] = useState('all')
-  const [dateRange, setDateRange] = useState('today')
+  const [dateRange, setDateRange] = useState('month')
   const [salesmen, setSalesmen] = useState<Salesman[]>([])
 
-  const getDateFilter = () => {
+  // Day boundaries in the shop's own time (this PC's clock), not UTC. The list
+  // opens on This Month: opening on Today hid yesterday's bills, which looked
+  // like they had been lost.
+  const getDateFilter = (): { from: string | null; to: string | null } => {
     const now = new Date()
-    const today = now.toISOString().split('T')[0]
-
-    if (dateRange === 'today') {
-      return { from: today, to: today }
-    }
-
-    if (dateRange === 'week') {
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-      return {
-        from: weekAgo.toISOString().split('T')[0],
-        to: today
-      }
-    }
-
-    if (dateRange === 'month') {
-      const monthStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        1
-      )
-      return {
-        from: monthStart.toISOString().split('T')[0],
-        to: today
-      }
-    }
-
-    return { from: today, to: today }
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const tomorrow = new Date(startOfDay(now).getTime() + 86400000).toISOString()
+    if (dateRange === 'all') return { from: null, to: null }
+    if (dateRange === 'week') return { from: new Date(startOfDay(now).getTime() - 6 * 86400000).toISOString(), to: tomorrow }
+    if (dateRange === 'month') return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: tomorrow }
+    return { from: startOfDay(now).toISOString(), to: tomorrow }
   }
 
   const fetchInvoices = async () => {
@@ -120,9 +103,8 @@ export function useInvoices() {
           const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
           query = query.eq('payment_mode', 'credit').lte('created_at', fifteenDaysAgo)
         } else {
-          query = query
-            .gte('created_at', from + 'T00:00:00')
-            .lte('created_at', to + 'T23:59:59')
+          if (from) query = query.gte('created_at', from)
+          if (to) query = query.lt('created_at', to)
 
           if (paymentFilter !== 'all') {
             query = query.eq('payment_mode', paymentFilter)
@@ -208,6 +190,7 @@ export function useInvoices() {
   useEffect(() => {
     fetchInvoices()
   }, [dateRange, paymentFilter, salesmanFilter])
+  useLiveRefresh(['sales'], fetchInvoices)
 
   useEffect(() => {
     fetchSalesmen()
@@ -235,12 +218,19 @@ export function useInvoices() {
   const avgBillValue =
     invoices.length > 0 ? totalRevenue / invoices.length : 0
 
-  const paymentBreakdown = {
-    cash: invoices.filter((i) => i.payment_mode === 'cash'),
-    card: invoices.filter((i) => i.payment_mode === 'card'),
-    upi: invoices.filter((i) => i.payment_mode === 'upi'),
-    credit: invoices.filter((i) => i.payment_mode === 'credit')
+  // Money in by how it was actually paid. A ₹1,500 bill paid ₹1,300 UPI + ₹200
+  // cash adds ₹200 to Cash and ₹1,300 to UPI — counting the whole bill under its
+  // single payment_mode put all ₹1,500 in one place. Bills saved before the split
+  // was recorded have no tender amounts; those still count by payment_mode.
+  const tenderOf = (i: Invoice, mode: 'cash' | 'card' | 'upi' | 'credit'): number => {
+    const t = { cash: i.cash_amount, card: i.card_amount, upi: i.upi_amount, credit: i.credit_amount }
+    const recorded = Object.values(t).some(v => Number(v) > 0)
+    return recorded ? Number(t[mode]) || 0 : (i.payment_mode === mode ? Number(i.net_amount) || 0 : 0)
   }
+  const paymentBreakdown = Object.fromEntries((['cash', 'card', 'upi', 'credit'] as const).map(mode => {
+    const bills = invoices.filter(i => !i.is_return && tenderOf(i, mode) > 0)
+    return [mode, { count: bills.length, total: bills.reduce((s, i) => s + tenderOf(i, mode), 0) }]
+  })) as Record<'cash' | 'card' | 'upi' | 'credit', { count: number; total: number }>
 
   const processRefund = async (invoice: Invoice) => {
     try {

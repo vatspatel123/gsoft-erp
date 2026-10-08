@@ -513,13 +513,18 @@ export function usePOS(salesmanId: string | null = null) {
           .order('created_at', { ascending: false })
           .limit(200)
         if (!error) {
+          // A deleted bill's number is never handed out again: otherwise the same
+          // INV number shows a different bill from one day to the next.
+          const { data: gone } = await supabase.from('bill_edits')
+            .select('bill_no').eq('bill_type', 'sale').like('reason', 'DELETED:%')
           // ponytail: max of the latest 200, not a DB sequence. Two tills closing
           // a sale in the same instant can still draw the same number — the same
           // race the per-day counter had. A Postgres sequence fixes it for good.
-          const last = (data || []).reduce((m: number, r: any) => {
-            const hit = /^INV-(\d+)$/.exec(String(r.invoice_no || ''))
-            return hit ? Math.max(m, Number(hit[1])) : m
-          }, 0)
+          const last = [...(data || []).map((r: any) => r.invoice_no), ...(gone || []).map((r: any) => r.bill_no)]
+            .reduce((m: number, no: any) => {
+              const hit = /^INV-(\d+)$/.exec(String(no || ''))
+              return hit ? Math.max(m, Number(hit[1])) : m
+            }, 0)
           return `INV-${String(last + 1).padStart(4, '0')}`
         }
       }
@@ -605,7 +610,9 @@ export function usePOS(salesmanId: string | null = null) {
           line_total: i.line_total
         })))
 
-      for (const item of cart) {
+      // Every item's stock at once — each is a different product. Waiting for them
+      // one by one added a round trip per item to every sale.
+      await Promise.all(cart.map(async (item) => {
         try {
           // Attempt RPC first
           const { error: rpcErr } = await supabase.rpc('decrement_stock', {
@@ -618,7 +625,7 @@ export function usePOS(salesmanId: string | null = null) {
           const newStock = Math.max(0, item.product.stock_qty - item.qty);
           await supabase.from('products').update({ stock_qty: newStock }).eq('id', item.product.id);
         }
-      }
+      }))
 
       // Update local cache inventory
       try {

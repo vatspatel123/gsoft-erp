@@ -248,6 +248,12 @@ export function InvoicesPage() {
               >
                 This Month
               </button>
+              <button
+                className={`date-btn ${dateRange === 'all' ? 'active' : ''}`}
+                onClick={() => setDateRange('all')}
+              >
+                All
+              </button>
             </div>
           </div>
         </div>
@@ -338,9 +344,9 @@ export function InvoicesPage() {
         {/* Payment Summary */}
         {invoices.length > 0 && (
           <div className="payment-summary">
-            {Object.entries(paymentBreakdown).map(([mode, bills]) => {
-              if (bills.length === 0) return null
-              const total = bills.reduce((sum, b) => sum + b.net_amount, 0)
+            {Object.entries(paymentBreakdown).map(([mode, { count, total }]) => {
+              if (count === 0) return null
+              const bills = { length: count }
               return (
                 <div key={mode} className="payment-item">
                   <span className={`payment-badge ${getPaymentModeColor(mode)}`}>
@@ -462,6 +468,13 @@ export function InvoicesPage() {
                         >
                           {invoice.payment_mode.charAt(0).toUpperCase() + invoice.payment_mode.slice(1)}
                         </span>
+                        {/* A split bill shows each part — the mode alone hides it. */}
+                        {[invoice.cash_amount, invoice.upi_amount, invoice.card_amount, invoice.credit_amount].filter(v => Number(v) > 0).length > 1 && (
+                          <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px', whiteSpace: 'nowrap' }}>
+                            {([['Cash', invoice.cash_amount], ['UPI', invoice.upi_amount], ['Card', invoice.card_amount], ['Pending', invoice.credit_amount]] as [string, number | undefined][])
+                              .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ₹${Number(v).toLocaleString('en-IN')}`).join(' · ')}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <div
