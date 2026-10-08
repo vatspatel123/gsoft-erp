@@ -692,6 +692,40 @@ function BillPrintTab() {
 
 // ─── TAB 3: Staff & PIN ──────────────────────────────────────────────────────
 
+// One Admin password, known only to the owner: it approves changing the salesman
+// on a bill and deleting a bill. Until it's set, the shop's sign-in password works.
+function AdminPasswordCard() {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [again, setAgain] = useState('')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    if (next.length < 4) { toast.error('The new password needs at least 4 characters'); return }
+    if (next !== again) { toast.error('The two new passwords are not the same'); return }
+    setBusy(true)
+    const { error } = await supabase.rpc('set_admin_password', { p_current: current, p_new: next })
+    setBusy(false)
+    if (error) { toast.error(String(error.message).replace(/^.*?ERROR:\s*/i, '')); return }
+    toast.success('Admin password saved')
+    setCurrent(''); setNext(''); setAgain('')
+  }
+  return (
+    <Card style={{ marginBottom: '16px' }}>
+      <SectionTitle sub="Asked when changing the salesman on a bill or deleting a bill. The first time, the current password is the shop's sign-in password.">
+        Admin Password
+      </SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', alignItems: 'end' }}>
+        <Field label="Current password"><input type="password" autoComplete="current-password" style={inputStyle} value={current} onChange={e => setCurrent(e.target.value)} /></Field>
+        <Field label="New password"><input type="password" autoComplete="new-password" style={inputStyle} value={next} onChange={e => setNext(e.target.value)} /></Field>
+        <Field label="New password again"><input type="password" autoComplete="new-password" style={inputStyle} value={again} onChange={e => setAgain(e.target.value)} /></Field>
+        <button data-enter-submit onClick={save} disabled={busy} style={{ padding: '11px 18px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", opacity: busy ? 0.6 : 1, marginBottom: '2px' }}>
+          {busy ? 'Saving…' : 'Save admin password'}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
 function StaffPINTab() {
   const [staff, setStaff] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -780,6 +814,8 @@ function StaffPINTab() {
   const ROLE_COLORS: Record<string, string> = { owner: '#9333ea', manager: '#2563eb', cashier: '#16a34a', staff: '#64748b' }
 
   return (
+    <>
+    <AdminPasswordCard />
     <Card>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <SectionTitle sub="Manage staff accounts and PINs">Staff & PIN Management</SectionTitle>
@@ -885,6 +921,7 @@ function StaffPINTab() {
         ))
       )}
     </Card>
+    </>
   )
 }
 

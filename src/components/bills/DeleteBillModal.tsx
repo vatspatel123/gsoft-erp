@@ -44,7 +44,7 @@ export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted }: {
             <input style={S.input} value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Entered twice by mistake" autoFocus />
           </label>
           <div style={S.authBox}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>Admin password (the one used to sign in)</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>Admin password</div>
             <input style={{ ...S.input, width: '100%' }} type="password" placeholder="Admin password" autoComplete="new-password"
               data-enter="own" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
           </div>

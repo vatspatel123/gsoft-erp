@@ -13,8 +13,8 @@ interface Props {
 }
 
 /**
- * Edit a sales bill: items, customer, bill discount, payment split and — with a
- * staff ID and password — the salesman. The database applies it in one go and
+ * Edit a sales bill: items, customer, bill discount, payment split and — with
+ * the admin password — the salesman. The database applies it in one go and
  * keeps the previous version in the bill's history.
  */
 export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
@@ -26,7 +26,6 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
   const [salesmen, setSalesmen] = useState<{ id: string; name: string }[]>([])
   const [salesmanId, setSalesmanId] = useState('')
   const [salesmanUnlocked, setSalesmanUnlocked] = useState(false)
-  const [authLogin, setAuthLogin] = useState('')
   const [authPw, setAuthPw] = useState('')
   const [discount, setDiscount] = useState(0)
   const [tenders, setTenders] = useState({ cash: 0, card: 0, upi: 0 })
@@ -134,7 +133,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     if (stockProblems.length) { toast.error(`Not enough stock of ${stockProblems[0].name}`); return }
     if (discount < minDiscount) { toast.error(`Discount can't go below ${money(minDiscount)} — loyalty points were used`); return }
     if (reason.trim().length < 3) { toast.error('Please write why this bill is being edited'); return }
-    if (salesmanChanged && (!authLogin.trim() || !authPw)) { toast.error('Changing the salesman needs your staff ID and password'); return }
+    if (salesmanChanged && !authPw) { toast.error('Changing the salesman needs the admin password'); return }
 
     // Save what the shop kept; change handed back is not income.
     const changes: Record<string, unknown> = {
@@ -146,7 +145,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
 
     setSaving(true)
     const res = await editSale(saleId, changes, lines, reason.trim(),
-      salesmanChanged ? { login: authLogin.trim(), password: authPw } : undefined)
+      salesmanChanged ? { login: '', password: authPw } : undefined)
     setSaving(false)
     if (!res.ok) { toast.error(res.error, { duration: 6000 }); return }
     toast.success(`Bill ${sale.invoice_no} updated${res.udhar > 0 ? ` · pending ${money(res.udhar)}` : ''}`)
@@ -266,10 +265,8 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                     </select>
                     {salesmanChanged && (
                       <div style={S.authBox}>
-                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}><Unlock size={13} /> Your staff ID and password</div>
-                        <input style={{ ...S.input, width: '100%', marginBottom: 6 }} placeholder="Staff ID (email)" autoComplete="off"
-                          value={authLogin} onChange={e => setAuthLogin(e.target.value)} />
-                        <input style={{ ...S.input, width: '100%' }} type="password" placeholder="Password" autoComplete="new-password"
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}><Unlock size={13} /> Admin password</div>
+                        <input style={{ ...S.input, width: '100%' }} type="password" placeholder="Admin password" autoComplete="new-password"
                           value={authPw} onChange={e => setAuthPw(e.target.value)} />
                       </div>
                     )}
