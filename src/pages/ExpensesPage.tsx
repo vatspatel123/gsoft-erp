@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { Plus, X, Receipt } from 'lucide-react'
 import { fmtDate } from '../utils/date'
+import { useLiveRefresh } from '../hooks/useLiveRefresh'
 
 // ─── Orange theme ─────────────────────────────────────────────────────────────
 const O = {
@@ -139,6 +140,7 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         created_at: new Date().toISOString()
       }
 
+      let savedOnline = false
       if (navigator.onLine) {
         try {
           const { error } = await supabase.from('expenses').insert({
@@ -155,12 +157,14 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
             month: expenseRecord.month
           })
           if (error) console.warn('DB expense save warning:', error.message)
+          else savedOnline = true
         } catch (dbErr) {
           console.warn('DB expense save notice, saving locally:', dbErr)
         }
       }
 
-      saveExpenseToCache(expenseRecord)
+      // _pending: not on the server yet, so the list keeps showing it from this PC.
+      saveExpenseToCache({ ...expenseRecord, _pending: !savedOnline })
       toast.success('Expense saved!')
       onSaved()
       onClose()
@@ -401,6 +405,7 @@ export function ExpensesPage() {
   const fetchExpenses = async () => {
     setLoading(true)
     let fetched: any[] = []
+    let fetchedOk = false
     try {
       if (navigator.onLine) {
         let q = supabase
@@ -418,6 +423,7 @@ export function ExpensesPage() {
         const { data, error } = await q
         if (!error && data) {
           fetched = data
+          fetchedOk = true
           for (const item of data) saveExpenseToCache(item)
         }
       }
@@ -425,7 +431,9 @@ export function ExpensesPage() {
       console.warn('Network error loading expenses, using cache:', e)
     }
 
-    const cached = getCachedExpenses()
+    // With the server's list in hand, this PC's copy only adds expenses still
+    // waiting to upload. Re-adding the rest is what brought deleted ones back.
+    const cached = getCachedExpenses().filter(c => !fetchedOk || c._pending)
     const map = new Map<string, any>()
     for (const c of cached) map.set(c.expense_no || c.id, c)
     for (const f of fetched) map.set(f.expense_no || f.id, f)
@@ -439,6 +447,7 @@ export function ExpensesPage() {
   }
 
   useEffect(() => { fetchExpenses() }, [dateFrom, dateTo, categoryFilter])
+  useLiveRefresh(['expenses'], fetchExpenses)
 
   // ── Stats ──
   const now = new Date()
@@ -479,8 +488,14 @@ export function ExpensesPage() {
 
   const deleteExpense = async (id: string) => {
     if (!window.confirm('Delete this expense?')) return
+    const gone = expenses.find(x => x.id === id)
     const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) { toast.error('Error deleting'); return }
+    // Off this PC's copy too, or the list brings it straight back.
+    try {
+      localStorage.setItem('gsoft_expenses_cache', JSON.stringify(getCachedExpenses()
+        .filter((x: any) => x.id !== id && !(gone?.expense_no && x.expense_no === gone.expense_no))))
+    } catch { /* storage unavailable: the server list is still right */ }
     toast.success('Deleted')
     fetchExpenses()
   }
