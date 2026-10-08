@@ -23,6 +23,7 @@ import { StaffPage } from './pages/StaffPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ExchangePage } from './pages/ExchangePage'
 import { WholesalePage } from './pages/WholesalePage'
+import { WholesaleBillsPage } from './pages/WholesaleBillsPage'
 import { PurchaseEntryPage } from './pages/PurchaseEntryPage'
 import { PurchaseReturnPage } from './pages/PurchaseReturnPage'
 import { PurchaseBillsPage } from './pages/PurchaseBillsPage'
@@ -260,6 +261,7 @@ function AppContent() {
         <Route path="/formats" element={<FormatDesignerPage />} />
         <Route path="/exchange" element={<ExchangePage />} />
         <Route path="/wholesale" element={<WholesalePage />} />
+        <Route path="/wholesale-bills" element={<WholesaleBillsPage />} />
         <Route path="/purchase-entry" element={<PurchaseEntryPage />} />
         <Route path="/purchase-returns" element={<PurchaseReturnPage />} />
         <Route path="/purchase-bills" element={<PurchaseBillsPage />} />

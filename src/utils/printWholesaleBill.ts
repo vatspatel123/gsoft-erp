@@ -2,6 +2,7 @@ import type { GstType } from '../hooks/useWholesale'
 import { getSettings } from './settings'
 import { sendWhatsApp } from './whatsapp'
 import { printHTML } from './printHTML'
+import { fmtDateTime } from './date'
 
 function numToWords(n: number): string {
   const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
@@ -267,4 +268,30 @@ export function sendWholesaleWhatsApp(saleData: any) {
     `_Thank you for your business!_`
 
   sendWhatsApp(withCountry, msg, { encoded: true, features: 'width=600,height=700' })
+}
+
+/** The columns to load so a saved wholesale bill can be printed again. */
+export const WHOLESALE_BILL_SELECT =
+  '*, wholesale_customers(*), wholesale_sale_items(qty, unit_price, mrp, discount_pct, gst_rate, line_total, products(*))'
+
+/**
+ * A saved wholesale bill in the shape printWholesaleBill, sendWholesaleWhatsApp
+ * and the e-way bill take — the same shape the bill had when it was made.
+ */
+export function saleDataFromRow(row: any) {
+  const cart = (row.wholesale_sale_items || []).map((i: any) => {
+    const taxable = Number(i.qty) * Number(i.unit_price) * (1 - (Number(i.discount_pct) || 0) / 100)
+    return {
+      product: i.products || { name: 'Product' }, qty: Number(i.qty), unit_price: Number(i.unit_price),
+      mrp: Number(i.mrp) || 0, discount_pct: Number(i.discount_pct) || 0, gst_rate: Number(i.gst_rate) || 0,
+      taxable_amount: taxable, gst_amount: taxable * (Number(i.gst_rate) || 0) / 100, line_total: Number(i.line_total) || 0,
+    }
+  })
+  return {
+    invoiceNo: row.invoice_no, date: fmtDateTime(new Date(row.created_at)), party: row.wholesale_customers || null, cart,
+    subtotal: Number(row.subtotal) || 0, discountPct: Number(row.discount_pct) || 0, billDiscAmt: Number(row.discount_amount) || 0,
+    freight: Number(row.freight) || 0, gstType: row.gst_type || 'gst', gstAmount: Number(row.gst_amount) || 0,
+    roundOff: Number(row.round_off) || 0, netAmount: Number(row.net_amount) || 0,
+    paymentMode: row.payment_mode, notes: row.notes || '',
+  }
 }

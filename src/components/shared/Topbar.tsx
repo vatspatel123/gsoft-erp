@@ -18,6 +18,7 @@ const pageNames: Record<string, string> = {
   '/reports':         'Reports',
   '/exchange':        'Exchange / Return',
   '/wholesale':       'Wholesale',
+  '/wholesale-bills': 'Wholesale Bills',
   '/purchase-entry':  'Purchase Entry',
   '/purchase-bills':  'Purchase Bills',
   '/purchase-returns':'Purchase Returns',
