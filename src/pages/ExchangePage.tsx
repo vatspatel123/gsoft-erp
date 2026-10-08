@@ -452,24 +452,16 @@ export function ExchangePage() {
           })
           .select().single()
 
-        if (excErr) {
-          // Table might not exist — log warning but continue with stock adjustments
-          console.warn('Exchange record insert failed (table may not exist):', excErr.message)
-          if (excErr.message?.includes('relation') && excErr.message?.includes('does not exist')) {
-            toast.error('Exchange tables not set up yet. Please run EXCHANGE_SCHEMA.sql in your Supabase SQL Editor first.')
-            setProcessing(false)
-            return
-          }
-          throw excErr
-        }
+        if (excErr) throw excErr
         exchangeId = exchange?.id || null
       } catch (dbErr: any) {
-        if (dbErr?.message?.includes('relation') || dbErr?.message?.includes('does not exist')) {
-          toast.error('Exchange tables not set up. Run EXCHANGE_SCHEMA.sql in Supabase SQL Editor.')
-          setProcessing(false)
-          return
-        }
-        console.warn('Exchange DB error, continuing with stock adjustments:', dbErr)
+        // Nothing is touched unless the exchange itself is saved. Carrying on here
+        // used to move stock and issue credit notes for exchanges that were never
+        // recorded — they then "disappeared" from the history.
+        console.error('Exchange not saved:', dbErr)
+        toast.error(`Exchange not saved — nothing was changed. ${dbErr?.message || 'Check the internet and try again.'}`, { duration: 7000 })
+        setProcessing(false)
+        return
       }
 
       // Insert return items (if exchange record was created)
