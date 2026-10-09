@@ -749,10 +749,21 @@ export function PurchaseEntryPage() {
                   </table>
                 </div>
 
-                <button onClick={hook.addItem}
-                  style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '6px', background: G.hover, border: `1px dashed ${G.border}`, borderRadius: '8px', padding: '8px 16px', fontSize: '13px', color: G.primary, cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500 }}>
-                  <Plus size={15} /> Add Item
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
+                  <button onClick={hook.addItem}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', background: G.hover, border: `1px dashed ${G.border}`, borderRadius: '8px', padding: '8px 16px', fontSize: '13px', color: G.primary, cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500 }}>
+                    <Plus size={15} /> Add Item
+                  </button>
+                  {hook.hasDraft && (
+                    <>
+                      <span style={{ fontSize: '12px', color: G.muted }}>✓ Kept on this PC until saved — safe to leave this screen</span>
+                      <button onClick={() => { if (window.confirm('Clear this purchase entry? Everything typed here will be removed.')) hook.resetForm() }}
+                        style={{ marginLeft: 'auto', background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '8px', padding: '7px 14px', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
+                        Clear form
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 

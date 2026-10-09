@@ -222,20 +222,31 @@ export function ProductSpreadsheet({ onClose, onSaved }: Props) {
         created_at: new Date().toISOString()
       }))
 
+      // A batch the server refuses (a barcode already in use, say) must be reported,
+      // not counted as saved: those rows stay on screen to be fixed and saved again.
+      let failed: typeof products = []
+      let firstError = ''
       if (navigator.onLine) {
         try {
           for (let i = 0; i < products.length; i += 20) {
             const batch = products.slice(i, i + 20)
             const { error } = await supabase.from('products').insert(batch)
-            if (error) console.warn('DB insert batch warning:', error.message)
+            if (error) { failed = [...failed, ...batch]; firstError ||= error.message }
           }
         } catch (dbErr) {
           console.warn('DB product batch save error, saving locally:', dbErr)
         }
       }
 
-      // Always save to local cache
-      saveProductsToCache(products)
+      const saved = products.filter(p => !failed.includes(p))
+      saveProductsToCache(saved)
+      if (failed.length) {
+        toast.error(`${saved.length} saved, ${failed.length} NOT saved: ${firstError}`, { duration: 8000 })
+        const failedIds = new Set(failed.map(p => p.id))
+        setRows(rowsToSave.filter((_, i) => failedIds.has(products[i].id)))   // only the rows still to save
+        onSaved?.()
+        return
+      }
 
       toast.success(`✅ ${products.length} products saved!`)
       setRows(Array.from({ length: 5 }, (_, i) => emptyRow(i)))

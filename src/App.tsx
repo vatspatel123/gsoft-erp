@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useNotifications } from './hooks/useNotifications'
 import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale } from './utils/offlineCache'
-import { pullShopSettings } from './utils/settings'
+import { pullShopSettings, getSettings, saveSettings } from './utils/settings'
+import { autoAssignPrinters, canSelectPrinters } from './utils/printHTML'
 import { enterToNextField } from './utils/enterNavigation'
 import { supabase } from './lib/supabase'
 import toast from 'react-hot-toast'
@@ -43,6 +44,19 @@ function AppContent() {
   const [session, setSession] = useState<Session | null>(null)
   const [authInitialized, setAuthInitialized] = useState(false)
   const [storeStatus, setStoreStatus] = useState<string>('active')
+
+  // A printer choice that went missing (the app was closed by a crash before it
+  // reached the disk, or Windows renamed the printer) is found again by model
+  // name at start-up, so the shop doesn't have to set printers up again.
+  // A printer chosen by hand that still exists is never changed.
+  useEffect(() => {
+    if (!canSelectPrinters()) return
+    const s = getSettings()
+    autoAssignPrinters().then(({ patch }) => {
+      const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter(k => patch[k] && patch[k] !== s[k])
+      if (changed.length) saveSettings(Object.fromEntries(changed.map(k => [k, patch[k]])))
+    }).catch(() => {})
+  }, [])
 
   // Auth state listener
   useEffect(() => {
@@ -158,10 +172,13 @@ function AppContent() {
             .single()
           if (!error && data) {
             if (sale.cart && sale.cart.length > 0) {
-              await supabase.from('sale_items').insert(
+              // barcode is required on sale_items: without it every item was refused,
+              // and the bill synced with no items.
+              const { error: itemsErr } = await supabase.from('sale_items').insert(
                 sale.cart.map((i: any) => ({
                   sale_id: data.id,
                   product_id: i.product.id,
+                  barcode: i.product.barcode || i.product.sku || '',
                   qty: i.qty,
                   unit_price: i.unit_price,
                   discount_pct: i.discount_pct || 0,
@@ -169,6 +186,15 @@ function AppContent() {
                   line_total: i.line_total
                 }))
               )
+              if (itemsErr) {
+                // Take the bill back out and keep it queued: try again next time.
+                await supabase.from('sales').delete().eq('id', data.id)
+                console.warn('Sync: items refused, kept for retry:', itemsErr.message)
+                continue
+              }
+              // The sale happened offline, so the shelf on the server never went down.
+              await Promise.all(sale.cart.map((i: any) =>
+                supabase.rpc('decrement_stock', { p_id: i.product.id, qty: i.qty })))
             }
             clearPendingSale(sale.pendingId)
             synced++

@@ -126,12 +126,12 @@ export function StaffPage() {
             .from('users')
             .update({ name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active })
             .eq('id', editing.id);
-          if (error) console.warn('DB update user warning:', error.message);
+          if (error) { toast.error('Staff not saved: ' + error.message); return; }
         } else {
           const { error } = await supabase
             .from('users')
             .insert({ id: payload.id, name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active });
-          if (error) console.warn('DB insert user warning:', error.message);
+          if (error) { toast.error('Staff not added: ' + error.message); return; }
         }
       } catch (dbErr) {
         console.warn('DB user save notice, saving locally:', dbErr);
@@ -155,7 +155,8 @@ export function StaffPage() {
           .from('users')
           .delete()
           .eq('id', id);
-        if (error) console.warn('DB delete user warning:', error.message);
+        // Usually: bills still name this salesman. Say so instead of "deleted".
+        if (error) { toast.error(error.code === '23503' ? 'This staff member has bills, so they can\'t be deleted — switch them to inactive instead' : 'Not deleted: ' + error.message); return; }
       } catch (e: any) {
         console.warn('Network error deleting user:', e);
       }
@@ -175,7 +176,7 @@ export function StaffPage() {
           .from('users')
           .update({ is_active: updatedUser.is_active })
           .eq('id', user.id);
-        if (error) console.warn('DB update status warning:', error.message);
+        if (error) { toast.error('Status not changed: ' + error.message); return; }
       } catch (e: any) {
         console.warn('Network error updating status:', e);
       }

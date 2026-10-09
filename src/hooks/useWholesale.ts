@@ -153,8 +153,9 @@ export function useWholesale() {
         return null
       }
 
-      // 2. Insert sale items
-      await supabase.from('wholesale_sale_items').insert(
+      // 2. Insert sale items. If they don't go in, take the bill back out: a bill
+      // with no items, no stock moved and "saved" on screen is worse than an error.
+      const { error: itemsErr } = await supabase.from('wholesale_sale_items').insert(
         cart.map(i => ({
           wholesale_sale_id: sale.id,
           product_id: i.product.id,
@@ -166,6 +167,11 @@ export function useWholesale() {
           line_total: i.line_total,
         }))
       )
+      if (itemsErr) {
+        await supabase.from('wholesale_sales').delete().eq('id', sale.id)
+        toast.error('Bill not saved: ' + itemsErr.message)
+        return null
+      }
 
       // 3. Deduct stock
       for (const item of cart) {

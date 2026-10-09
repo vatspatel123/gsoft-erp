@@ -94,66 +94,6 @@ export default function POSScreen() {
     setShowAddModal(true);
   };
 
-  const handleSeedDemoLots = async () => {
-    const oldId = crypto.randomUUID()
-    const newId = crypto.randomUUID()
-
-    const oldProduct = {
-      id: oldId,
-      name: 'Silk Designer Saree (Red, Standard)',
-      sku: 'SAREE-OLD-001',
-      barcode: '990000000001',
-      batch_no: 'LOT-2025-JAN',
-      design_no: 'DSN-8888',
-      size: 'Standard',
-      colour: 'Red',
-      unit_price: 1499,
-      cost_price: 900,
-      gst_rate: 5,
-      stock_qty: 4,
-      low_stock_alert: 2,
-      is_active: true,
-      created_at: '2025-01-15T10:00:00Z'
-    }
-
-    const newProduct = {
-      id: newId,
-      name: 'Silk Designer Saree (Red, Standard)',
-      sku: 'SAREE-NEW-002',
-      barcode: '7435870943141',
-      batch_no: 'LOT-2026-AUG',
-      design_no: 'DSN-8888',
-      size: 'Standard',
-      colour: 'Red',
-      unit_price: 1499,
-      cost_price: 950,
-      gst_rate: 5,
-      stock_qty: 12,
-      low_stock_alert: 2,
-      is_active: true,
-      created_at: '2026-08-01T10:00:00Z'
-    }
-
-    // 1. Always save products to local cache first
-    saveProductsToCache([oldProduct, newProduct])
-
-    // 2. Try inserting into Supabase DB if online
-    if (navigator.onLine) {
-      try {
-        await supabase.from('products').delete().in('barcode', ['990000000001', '7435870943141'])
-        const { data: inserted, error: insErr } = await supabase.from('products').insert([oldProduct, newProduct]).select()
-        if (insErr) {
-          console.warn('Supabase DB seed warning:', insErr.message)
-        } else if (inserted && inserted.length > 0) {
-          console.log('Test products saved to Supabase DB:', inserted)
-        }
-      } catch (e: any) {
-        console.warn('Network / DB seed notice (using cached data):', e)
-      }
-    }
-
-    toast.success('✨ Test products ready! Scan barcode 7435870943141', { duration: 6000 })
-  }
 
   return (
     <Layout>
@@ -258,30 +198,6 @@ export default function POSScreen() {
                 />
               </div>
 
-              {/* Load Test Lots button */}
-              <button 
-                onClick={handleSeedDemoLots}
-                style={{
-                  flexShrink: 0,
-                  background: '#fdf8ff',
-                  color: '#9333ea',
-                  border: '1px solid #d8b4fe',
-                  borderRadius: '10px',
-                  padding: '0 14px',
-                  height: '46px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: 'DM Sans, sans-serif',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  whiteSpace: 'nowrap'
-                }}
-                title="Loads two test products (Old lot: 990000000001, New lot: 990000000002) for testing"
-              >
-                🧪 Load Test Lots
-              </button>
 
               {/* Add Product button — fixed width */}
               <button 

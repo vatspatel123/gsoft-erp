@@ -94,49 +94,69 @@ export function useProducts() {
     fetchCategories()
   }, [fetchCategories])
 
+  // A refusal is reported, never shown as done. Deleting a product that is on a
+  // bill is refused by the database (23503): it has history, so deactivate it.
+  const failed = (error: any, what: string) => {
+    if (!error) return false
+    toast.error(error.code === '23503'
+      ? 'Some of these products are on bills, so they can\'t be deleted — deactivate them instead'
+      : `${what}: ${error.message}`, { duration: 6000 })
+    return true
+  }
+
   const toggleStatus = async (id: string, current: boolean) => {
-    await supabase
+    const { error } = await supabase
       .from('products')
       .update({ is_active: !current })
       .eq('id', id)
+    if (failed(error, 'Not changed')) return
     fetchProducts()
     toast.success(!current ? 'Product activated' : 'Product deactivated')
   }
 
   const deleteProduct = async (id: string) => {
-    await supabase.from('products').delete().eq('id', id)
+    const { error } = await supabase.from('products').delete().eq('id', id)
+    if (failed(error, 'Not deleted')) return
     fetchProducts()
     toast.success('Product deleted')
   }
 
   const bulkDelete = async (ids: string[]) => {
-    await supabase.from('products').delete().in('id', ids)
+    const { error } = await supabase.from('products').delete().in('id', ids)
+    if (failed(error, 'Not deleted')) return
     fetchProducts()
     toast.success(`${ids.length} products deleted`)
   }
 
   const bulkDeactivate = async (ids: string[]) => {
-    await supabase.from('products').update({ is_active: false }).in('id', ids)
+    const { error } = await supabase.from('products').update({ is_active: false }).in('id', ids)
+    if (failed(error, 'Not deactivated')) return
     fetchProducts()
     toast.success(`${ids.length} products deactivated`)
   }
 
   const bulkCategory = async (ids: string[], categoryId: string) => {
-    await supabase.from('products').update({ category_id: categoryId }).in('id', ids)
+    const { error } = await supabase.from('products').update({ category_id: categoryId }).in('id', ids)
+    if (failed(error, 'Category not changed')) return
     fetchProducts()
     toast.success(`Category updated for ${ids.length} products`)
   }
 
   const duplicateProduct = async (product: any) => {
     const { id, created_at, updated_at, categories: _c, ...rest } = product
-    await supabase.from('products').insert({
+    const { error } = await supabase.from('products').insert({
       ...rest,
       name: rest.name + ' (Copy)',
       sku: 'SKU-' + Date.now().toString().slice(-6),
+      // Barcodes are unique: copying it made every duplicate fail. The copy gets
+      // its own barcode when edited.
+      barcode: null,
+      serial_barcode: null,
       stock_qty: 0
     })
+    if (failed(error, 'Not duplicated')) return
     fetchProducts()
-    toast.success('Product duplicated')
+    toast.success('Product duplicated — give the copy its own barcode')
   }
 
   const saveProduct = async (data: any, editId?: string) => {

@@ -77,11 +77,19 @@ const EMPTY_ITEM = (barcode = makeBarcode()): PurchaseItem => ({
   line_total: 0,
 })
 
+// Unsaved Purchase Entry work, kept on this PC so leaving the screen (to make a
+// sale, or the app closing) doesn't throw away what was typed. Cleared on save.
+const DRAFT_KEY = 'purchase_entry_draft'
+function loadDraft(): any {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null') } catch { return null }
+}
+
 export function usePurchaseEntry() {
+  const draft = useRef(loadDraft()).current
   const [tab, setTab] = useState<'new' | 'history'>('new')
 
   // Supplier
-  const [supplier, setSupplier] = useState<Supplier | null>(null)
+  const [supplier, setSupplier] = useState<Supplier | null>(draft?.supplier ?? null)
   const [supplierQuery, setSupplierQuery] = useState('')
   const [supplierResults, setSupplierResults] = useState<Supplier[]>([])
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false)
@@ -92,29 +100,31 @@ export function usePurchaseEntry() {
   })
 
   // Bill fields
-  const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
-  const [supplierInvoiceDate, setSupplierInvoiceDate] = useState(
-    new Date().toISOString().slice(0, 10)
+  const [supplierInvoiceNo, setSupplierInvoiceNo] = useState<string>(draft?.supplierInvoiceNo ?? '')
+  const [supplierInvoiceDate, setSupplierInvoiceDate] = useState<string>(
+    draft?.supplierInvoiceDate ?? new Date().toISOString().slice(0, 10)
   )
-  const [paymentMode, setPaymentMode] = useState<'cash' | 'credit' | 'cheque' | 'bank'>('credit')
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending'>('pending')
-  const [gstType, setGstType] = useState<'gst' | 'igst'>('gst')
-  const [discountAmt, setDiscountAmt] = useState<number>(0)
-  const [discountPct, setDiscountPct] = useState<number>(0)
-  const [discountMode, setDiscountMode] = useState<'amount' | 'percent'>('amount')
-  const [freightAmt, setFreightAmt] = useState<number>(0)
-  const [notes, setNotes] = useState('')
+  const [paymentMode, setPaymentMode] = useState<'cash' | 'credit' | 'cheque' | 'bank'>(draft?.paymentMode ?? 'credit')
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending'>(draft?.paymentStatus ?? 'pending')
+  const [gstType, setGstType] = useState<'gst' | 'igst'>(draft?.gstType ?? 'gst')
+  const [discountAmt, setDiscountAmt] = useState<number>(draft?.discountAmt ?? 0)
+  const [discountPct, setDiscountPct] = useState<number>(draft?.discountPct ?? 0)
+  const [discountMode, setDiscountMode] = useState<'amount' | 'percent'>(draft?.discountMode ?? 'amount')
+  const [freightAmt, setFreightAmt] = useState<number>(draft?.freightAmt ?? 0)
+  const [notes, setNotes] = useState<string>(draft?.notes ?? '')
 
   // Items
-  const [items, setItems] = useState<PurchaseItem[]>([EMPTY_ITEM()])
+  const [items, setItems] = useState<PurchaseItem[]>(draft?.items?.length ? draft.items : [EMPTY_ITEM()])
   // Highest sequence barcode already in stock — see nextCode.
   const lastCode = useRef(0)
   const loadLastCode = async () => {
     const { data } = await supabase.from('products').select('barcode').not('barcode', 'is', null)
     lastCode.current = Math.max(0, ...(data || []).filter(r => isSeqCode(r.barcode)).map(r => Number(r.barcode)))
     // Rows made before the number was known get theirs now, in order.
+    // A kept draft's new rows also move on if their number was used meanwhile (another bill, another PC).
+    // ponytail: a new row's typed number at or below the last one in stock is renumbered too.
     setItems(prev => prev.reduce<PurchaseItem[]>((out, r) =>
-      [...out, isSeqCode(r.barcode) || r.product ? r : { ...r, barcode: nextCode(lastCode.current, out) }], []))
+      [...out, r.product || (isSeqCode(r.barcode) && Number(r.barcode) > lastCode.current) ? r : { ...r, barcode: nextCode(lastCode.current, [...prev, ...out]) }], []))
   }
   useEffect(() => { void loadLastCode() }, [])
   // Default false: the "Also list on website" control was removed from Purchase Entry,
@@ -134,10 +144,14 @@ export function usePurchaseEntry() {
   // Counter
   const [counter, setCounter] = useState(1)
 
-  useEffect(() => {
-    const stored = localStorage.getItem('purchase_counter')
-    if (stored) setCounter(parseInt(stored, 10))
-  }, [])
+  // The next number comes from the bills already saved (on any PC), not from a
+  // counter on this PC — two PCs with their own counters reused each other's numbers.
+  const poPrefix = () => 'PO-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-'
+  const nextCounter = async (): Promise<number> => {
+    const { data } = await supabase.from('purchase_bills').select('purchase_no').like('purchase_no', poPrefix() + '%')
+    return Math.max(0, ...(data || []).map(r => parseInt(String(r.purchase_no).slice(-4), 10) || 0)) + 1
+  }
+  useEffect(() => { nextCounter().then(setCounter).catch(() => {}) }, [])
 
   // Search suppliers
   useEffect(() => {
@@ -321,6 +335,19 @@ export function usePurchaseEntry() {
     setItems(prev => prev.map(i => (i.id === id ? { ...i, barcode: nextCode(lastCode.current, prev) } : i)))
   }
 
+  // Keep the work on this PC as it is typed (see DRAFT_KEY).
+  const hasDraft = items.some(i => i.product || i.productName.trim()) || !!supplier || !!supplierInvoiceNo.trim()
+  useEffect(() => {
+    try {
+      if (!hasDraft) localStorage.removeItem(DRAFT_KEY)
+      else localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        supplier, supplierInvoiceNo, supplierInvoiceDate, paymentMode, paymentStatus, gstType,
+        discountAmt, discountPct, discountMode, freightAmt, notes, items,
+      }))
+    } catch { /* storage full or blocked: the form still works, it just isn't kept */ }
+  }, [hasDraft, supplier, supplierInvoiceNo, supplierInvoiceDate, paymentMode, paymentStatus, gstType,
+      discountAmt, discountPct, discountMode, freightAmt, notes, items])
+
   // ── Reset form ────────────────────────────────────────────────────────────
   const resetForm = () => {
     setSupplier(null)
@@ -334,6 +361,7 @@ export function usePurchaseEntry() {
     setFreightAmt(0)
     setNotes('')
     setItems([EMPTY_ITEM('')])
+    try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing kept */ }
     void loadLastCode()     // the bill just saved used up some numbers
   }
 
@@ -441,9 +469,8 @@ export function usePurchaseEntry() {
         }
       }
 
-      const purchaseNo = 'PO-' +
-        new Date().toISOString().slice(0, 10).replace(/-/g, '') +
-        '-' + String(counter).padStart(4, '0')
+      let seq = await nextCounter()
+      let purchaseNo = poPrefix() + String(seq).padStart(4, '0')
 
       // One trip: the bill, its new products, restocks and lines are saved together
       // in the database (save_purchase), or not at all. This used to be one request
@@ -463,7 +490,9 @@ export function usePurchaseEntry() {
           wholesale_price: typeof item.wholesale_price === 'number' ? item.wholesale_price : null,
         }
       })
-      const { data: saved, error: saveError } = await supabase.rpc('save_purchase', {
+      // save_purchase is all-or-nothing, so if another PC took this number a moment
+      // ago nothing was saved and the next number can simply be tried.
+      const trySave = () => supabase.rpc('save_purchase', {
         p_bill: {
           purchase_no: purchaseNo,
           supplier_id: finalSupplierId,
@@ -483,6 +512,11 @@ export function usePurchaseEntry() {
         p_items: lines,
         p_list_online: listOnWebsite,
       })
+      let { data: saved, error: saveError } = await trySave()
+      for (let tries = 0; saveError && /purchase_bills_purchase_no_key/.test(saveError.message) && tries < 5; tries++) {
+        purchaseNo = poPrefix() + String(++seq).padStart(4, '0')
+        ;({ data: saved, error: saveError } = await trySave())
+      }
       if (saveError) throw saveError
       const bill = saved.bill
       const processedItems = validItems.map((item, i) => ({ ...item, barcode: lines[i].barcode, product: saved.products[i] }))
@@ -513,9 +547,7 @@ export function usePurchaseEntry() {
         }
       }
 
-      const newCounter = counter + 1
-      setCounter(newCounter)
-      localStorage.setItem('purchase_counter', String(newCounter))
+      setCounter(seq + 1)
 
       toast.success('Purchase saved! Direct stock updated.')
       setPurchaseComplete({ purchaseNo, bill, items: processedItems, supplier, netAmount })
@@ -548,7 +580,7 @@ export function usePurchaseEntry() {
     notes, setNotes,
     items, addItem, updateItem, removeItem, generateBarcode, duplicateItem, duplicateGroupAsSize,
     subtotal, effectiveDiscount, totalGST, cgst, sgst, igst,
-    roundOff, netAmount, totalUnits, emptyQtyCount, fillEmptyQty, missingQty, missingCost,
+    roundOff, netAmount, totalUnits, hasDraft, resetForm, emptyQtyCount, fillEmptyQty, missingQty, missingCost,
     loading, savePurchase,
     showSuccessModal, setShowSuccessModal,
     purchaseComplete,

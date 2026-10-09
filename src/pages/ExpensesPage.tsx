@@ -78,12 +78,21 @@ const CHART_COLORS: Record<string, string> = {
 }
 
 // ─── Expense counter ──────────────────────────────────────────────────────────
-const getExpenseNo = () => {
-  const stored = localStorage.getItem('expense_counter')
-  const n = stored ? parseInt(stored, 10) + 1 : 1
-  localStorage.setItem('expense_counter', String(n))
-  return 'EXP-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(n).padStart(4, '0')
+// The next number comes from the expenses already saved (on any PC). A counter kept
+// on each PC handed out numbers another PC had used, and the save was refused.
+const expPrefix = () => 'EXP-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-'
+const getExpenseNo = async (bump = 0): Promise<string> => {
+  try {
+    const { data, error } = await supabase.from('expenses').select('expense_no').like('expense_no', expPrefix() + '%')
+    if (error) throw error
+    const max = Math.max(0, ...(data || []).map(r => parseInt(String(r.expense_no).slice(-4), 10) || 0))
+    return expPrefix() + String(max + 1 + bump).padStart(4, '0')
+  } catch {
+    // Offline: a number no other PC will produce.
+    return expPrefix() + 'L' + Date.now().toString().slice(-6)
+  }
 }
+const isDupNo = (e: any) => /expenses_expense_no_key/.test(String(e?.message || ''))
 
 export function getCachedExpenses(): any[] {
   try {
@@ -121,7 +130,7 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 
     setSaving(true)
     try {
-      const expenseNo = getExpenseNo()
+      let expenseNo = await getExpenseNo()
       const now = new Date(expenseDate)
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
@@ -142,8 +151,9 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 
       let savedOnline = false
       if (navigator.onLine) {
+        let refused: any = null
         try {
-          const { error } = await supabase.from('expenses').insert({
+          const insert = () => supabase.from('expenses').insert({
             id: expenseRecord.id,
             expense_no: expenseRecord.expense_no,
             category: expenseRecord.category,
@@ -156,11 +166,21 @@ function AddExpenseModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
             expense_date: expenseRecord.expense_date,
             month: expenseRecord.month
           })
-          if (error) console.warn('DB expense save warning:', error.message)
+          let { error } = await insert()
+          // Another PC took this number a moment ago: take the next one.
+          for (let i = 1; error && isDupNo(error) && i <= 5; i++) {
+            expenseNo = await getExpenseNo(i)
+            expenseRecord.expense_no = expenseNo
+            ;({ error } = await insert())
+          }
+          if (error) refused = error
           else savedOnline = true
         } catch (dbErr) {
           console.warn('DB expense save notice, saving locally:', dbErr)
         }
+        // The server answered "no": say so. Keeping it on this PC as "saved" meant
+        // it never reached the accounts and nobody was told.
+        if (refused) { toast.error('Expense not saved: ' + refused.message); return }
       }
 
       // _pending: not on the server yet, so the list keeps showing it from this PC.
@@ -306,7 +326,7 @@ function SalaryTracker({ onExpenseSaved }: { onExpenseSaved: () => void }) {
     if (salary <= 0) { toast.error('No salary amount set for ' + s.name); return }
     setPayingId(s.id)
     try {
-      const expenseNo = getExpenseNo()
+      const expenseNo = await getExpenseNo()
       const today = now.toISOString().slice(0, 10)
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 

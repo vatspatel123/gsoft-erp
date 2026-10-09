@@ -71,9 +71,32 @@ const dotsFor = (mm) => Math.max(8, Math.round(mm * DOTS_PER_MM / 8) * 8)
  * column lands on the printer's dot grid.
  */
 function renderBits(html, opts) {
-  const job = chain.then(() => doRender(html, opts), () => doRender(html, opts))
+  const job = chain.then(() => checkedRender(html, opts), () => checkedRender(html, opts))
   chain = job.catch(() => {})
   return job
+}
+
+/** Share of the dots that are black. A bill or label is mostly white paper. */
+const coverage = (b) => {
+  let ink = 0
+  for (const byte of b.data) for (let v = byte; v; v &= v - 1) ink++
+  return ink / Math.max(1, b.width * b.height)
+}
+
+/**
+ * A frame that came back black (the offscreen window failed to draw) would print
+ * as a solid black strip. Draw it again; if it is still black, refuse to print.
+ * ponytail: 60% black is the line — no real bill or label is anywhere near it.
+ */
+async function checkedRender(html, opts) {
+  let bits = await doRender(html, opts)
+  if (coverage(bits) > 0.6) {
+    // Drop the window: a fresh one gets a fresh drawing surface.
+    if (win && !win.isDestroyed()) win.destroy()
+    bits = await doRender(html, { ...opts, settleMs: Math.max(opts.settleMs || 250, 800) })
+    if (coverage(bits) > 0.6) throw new Error('The page came out black — nothing was printed. Please try again.')
+  }
+  return bits
 }
 
 async function doRender(html, { widthMm, heightMm = 0, settleMs = 250, threshold = 170, mark = '' }) {

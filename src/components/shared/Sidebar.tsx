@@ -196,8 +196,10 @@ export function Sidebar() {
         </NavLink>
         <button
           onClick={async () => {
-            if (confirm('Are you sure you want to log out? Offline data may be cleared.')) {
-              localStorage.clear()
+            if (confirm('Are you sure you want to log out?')) {
+              // Sign out only. Clearing storage here wiped this PC's printers and
+              // label setup (so every log-in started with "set up the printer
+              // again"), and any bills billed offline that hadn't synced yet.
               const { supabase } = await import('../../lib/supabase')
               await supabase.auth.signOut()
               window.location.href = '/'

@@ -558,7 +558,7 @@ export function usePOS(salesmanId: string | null = null) {
 
     setIsSaving(true)
     try {
-      const invoiceNo = await generateInvoiceNo()
+      let invoiceNo = await generateInvoiceNo()
       const saleRecord: Record<string, any> = {
           invoice_no: invoiceNo,
           customer_id: customer?.id ?? null,
@@ -585,15 +585,21 @@ export function usePOS(salesmanId: string | null = null) {
         saleRecord.credit_due_date = creditDueDate
       }
 
-      const { data: sale, error } = await supabase
-        .from('sales')
-        .insert(saleRecord)
-        .select()
-        .single()
+      const insertSale = () => supabase.from('sales').insert(saleRecord).select().single()
+      let { data: sale, error } = await insertSale()
+      // The other till took this number a moment ago: use the next one rather than
+      // dropping the bill into the offline queue under a temporary number.
+      for (let i = 0; error && /sales_invoice_no_key/.test(error.message) && i < 5; i++) {
+        const n = /^INV-(\d+)$/.exec(invoiceNo)
+        if (!n) break
+        invoiceNo = `INV-${String(Number(n[1]) + 1).padStart(4, '0')}`
+        saleRecord.invoice_no = invoiceNo
+        ;({ data: sale, error } = await insertSale())
+      }
 
       if (error || !sale) throw new Error(error?.message || 'Sale failed')
 
-      await supabase
+      const { error: itemsErr } = await supabase
         .from('sale_items')
         .insert(cart.map(i => ({
           sale_id: sale.id,
@@ -605,6 +611,12 @@ export function usePOS(salesmanId: string | null = null) {
           gst_rate: i.product.gst_rate,
           line_total: i.line_total
         })))
+      if (itemsErr) {
+        // A bill with no items must not stand: take it out; the catch below keeps
+        // the whole bill in the offline queue, which syncs it with its items.
+        await supabase.from('sales').delete().eq('id', sale.id)
+        throw new Error(itemsErr.message)
+      }
 
       // Every item's stock at once — each is a different product. Waiting for them
       // one by one added a round trip per item to every sale.

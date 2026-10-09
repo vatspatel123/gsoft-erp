@@ -25,6 +25,24 @@ protocol.registerSchemesAsPrivileged([
 // dd/mm/yyyy instead of the US mm/dd/yyyy. (Text dates use src/utils/date.ts.)
 app.commandLine.appendSwitch('lang', 'en-GB')
 
+// Bills and labels are drawn in a hidden offscreen window. With the graphics card
+// doing that drawing, some shop PCs hand back an all-black frame (printed as a
+// black strip) or crash the GPU process (the app "restarts"). Software drawing
+// is what Electron documents for reliable offscreen capture; an ERP screen of
+// forms and tables doesn't need the GPU.
+app.disableHardwareAcceleration()
+
+// What went wrong, kept on the PC, so a crash can be diagnosed afterwards:
+// %APPDATA%/Retail ERP/erp-crash.log
+const crashLog = (what, detail) => {
+  try {
+    const line = `${new Date().toISOString()} v${app.getVersion()} ${what} ${JSON.stringify(detail || {})}\n`
+    require('fs').appendFileSync(path.join(app.getPath('userData'), 'erp-crash.log'), line)
+  } catch { /* nowhere to write: nothing more to do */ }
+}
+process.on('uncaughtException', (e) => crashLog('main-exception', { message: e && e.message, stack: e && e.stack }))
+app.on('child-process-gone', (_e, d) => crashLog('child-process-gone', d))
+
 let mainWindow
 
 function createWindow() {
@@ -54,6 +72,14 @@ function createWindow() {
   } else {
     mainWindow.loadURL('app://app/')
   }
+
+  // The screen's process died (out of memory, a GPU fault): bring it straight
+  // back instead of leaving a blank or closed app. Saved data is in the database;
+  // unsaved Purchase Entry work is kept on the PC.
+  mainWindow.webContents.on('render-process-gone', (_e, d) => {
+    crashLog('render-process-gone', d)
+    if (d && d.reason !== 'clean-exit' && mainWindow && !mainWindow.isDestroyed()) mainWindow.reload()
+  })
 
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     console.error('Load failed:', errorCode, errorDescription)

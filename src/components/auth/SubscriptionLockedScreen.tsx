@@ -40,7 +40,7 @@ export function SubscriptionLockedScreen() {
 
         <button 
           onClick={async () => {
-            localStorage.clear()
+            // Sign out only — keep this PC's printers and unsynced bills (see Sidebar).
             await supabase.auth.signOut()
             window.location.href = '/'
           }}
