@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
@@ -12,17 +12,27 @@ export function useProducts() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('name')
+  // Typing fires one search per key; the server answers out of order (a broad
+  // "2" took 4 s, "26335" 3 s), so only the newest request may fill the list.
+  const lastReq = useRef(0)
+  const [term, setTerm] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setTerm(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
   const fetchProducts = useCallback(async () => {
+    const req = ++lastReq.current
     setLoading(true)
     try {
       let query = supabase
         .from('products')
         .select(`*, categories(name)`)
 
-      if (search) {
+      if (term) {
+        const q = term.replace(/[",()]/g, ' ')
         query = query.or(
-          `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%`
+          ['name', 'sku', 'barcode', 'design_no', 'pcode', 'batch_no'].map(f => `${f}.ilike."%${q}%"`).join(',')
         )
       }
       if (categoryFilter) {
@@ -47,25 +57,25 @@ export function useProducts() {
       }
 
       const { data, error } = await query
+      if (req !== lastReq.current) return
       if (error) throw error
-      if (data && data.length > 0) {
-        setProducts(data)
+      // An empty answer is the answer ("no match"), not a reason to show the old cache.
+      setProducts(data || [])
+      if (data?.length) {
         // Only a query with no filters represents the full catalogue.
         saveProductsToCache(data, {
-          replace: !search && !categoryFilter && statusFilter === 'all',
+          replace: !term && !categoryFilter && statusFilter === 'all',
         })
-      } else {
-        const cached = getCachedProducts()
-        setProducts(cached || data || [])
       }
     } catch (err) {
+      if (req !== lastReq.current) return
       console.warn('DB fetch failed, falling back to local product cache:', err)
       const cached = getCachedProducts()
       if (cached) setProducts(cached)
     } finally {
-      setLoading(false)
+      if (req === lastReq.current) setLoading(false)
     }
-  }, [search, categoryFilter, statusFilter, sortBy])
+  }, [term, categoryFilter, statusFilter, sortBy])
 
   const fetchCategories = useCallback(async () => {
     const { data } = await supabase

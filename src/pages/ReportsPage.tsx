@@ -3,6 +3,7 @@ import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import { exportToCSV } from '../utils/exportCSV'
 import { useCashPosition } from '../hooks/useCashPosition'
+import { tenderOf } from '../hooks/useInvoices'
 import {
   BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, Cell
@@ -187,12 +188,12 @@ export default function ReportsPage() {
   const avgBill = sales.length
     ? totalRevenue / sales.length : 0
 
-  const payBreakdown = ['cash','card','upi','credit']
+  // By the bill's actual split: ₹1,100 cash + ₹2,450 pending counts in both.
+  const payBreakdown = (['cash','card','upi','credit'] as const)
     .map(mode => ({
       mode,
-      sales: sales.filter(s => s.payment_mode === mode),
-      revenue: sales.filter(s => s.payment_mode === mode)
-        .reduce((s, x) => s + (x.net_amount || 0), 0)
+      sales: sales.filter(s => tenderOf(s, mode) > 0),
+      revenue: sales.reduce((t, x) => t + tenderOf(x, mode), 0)
     }))
 
   const topProducts = (() => {

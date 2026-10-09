@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Printer, Search, Loader2, X, Truck, MessageCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Printer, Search, Loader2, X, Truck, MessageCircle, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Layout } from '../components/shared/Layout'
 import { useLiveRefresh } from '../hooks/useLiveRefresh'
@@ -10,6 +10,7 @@ import { fmtDate } from '../utils/date'
 import { sendWhatsApp } from '../utils/whatsapp'
 import { getSettings } from '../utils/settings'
 import { EwayBillModal } from '../components/wholesale/EwayBillModal'
+import { EditWholesaleModal } from '../components/bills/EditWholesaleModal'
 import {
   printWholesaleBill, sendWholesaleWhatsApp, saleDataFromRow, WHOLESALE_BILL_SELECT,
 } from '../utils/printWholesaleBill'
@@ -17,8 +18,8 @@ import {
 const pending = (b: any) => (b.payment_status === 'paid' ? 0 : Number(b.net_amount) || 0)
 const partyName = (p: any) => p?.business_name || p?.name || '—'
 
-/** Print, WhatsApp and e-way bill for one saved wholesale bill. */
-function BillActions({ bill, onEway }: { bill: any; onEway: (b: any) => void }) {
+/** Print, WhatsApp, e-way bill and edit for one saved wholesale bill. */
+function BillActions({ bill, onEway, onEdit }: { bill: any; onEway: (b: any) => void; onEdit: (id: string) => void }) {
   const data = () => saleDataFromRow(bill)
   return (
     <div style={S.row}>
@@ -26,12 +27,13 @@ function BillActions({ bill, onEway }: { bill: any; onEway: (b: any) => void }) 
       <button style={S.btnOutline} title={bill.wholesale_customers?.phone ? 'Send on WhatsApp' : 'No phone number for this party'}
         disabled={!bill.wholesale_customers?.phone} onClick={() => sendWholesaleWhatsApp(data())}><MessageCircle size={14} /></button>
       <button style={S.btnOutline} title="E-way bill (JSON + PDF)" onClick={() => onEway(bill)}><Truck size={14} /></button>
+      <button style={S.btnOutline} title="Edit bill — add, copy or change items" onClick={() => onEdit(bill.id)}><Pencil size={14} /></button>
     </div>
   )
 }
 
 /** A wholesale party at a glance: details, totals and every bill with its items. */
-function PartyModal({ party, bills, onClose, onEway }: { party: any; bills: any[]; onClose: () => void; onEway: (b: any) => void }) {
+function PartyModal({ party, bills, onClose, onEway, onEdit }: { party: any; bills: any[]; onClose: () => void; onEway: (b: any) => void; onEdit: (id: string) => void }) {
   const [open, setOpen] = useState<string | null>(null)
   const mine = bills.filter(b => b.wholesale_customer_id === party.id)
   const total = mine.reduce((s, b) => s + (Number(b.net_amount) || 0), 0)
@@ -91,7 +93,7 @@ function PartyModal({ party, bills, onClose, onEway }: { party: any; bills: any[
                     <td style={{ ...S.td, textAlign: 'right' }}>{(b.wholesale_sale_items || []).reduce((n: number, i: any) => n + Number(i.qty || 0), 0)}</td>
                     <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(Number(b.net_amount))}</td>
                     <td style={{ ...S.td, color: pending(b) > 0 ? '#b45309' : '#15803d' }}>{pending(b) > 0 ? `pending · ${b.payment_mode}` : `paid · ${b.payment_mode}`}</td>
-                    <td style={S.td}><BillActions bill={b} onEway={onEway} /></td>
+                    <td style={S.td}><BillActions bill={b} onEway={onEway} onEdit={onEdit} /></td>
                   </tr>
                   {open === b.id && (
                     <tr><td style={S.td} /><td colSpan={6} style={{ ...S.td, background: '#f8fafc' }}>
@@ -123,6 +125,7 @@ export function WholesaleBillsPage() {
   const [search, setSearch] = useState('')
   const [party, setParty] = useState<any>(null)
   const [eway, setEway] = useState<any>(null)
+  const [editId, setEditId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -187,7 +190,7 @@ export function WholesaleBillsPage() {
                     <td style={{ ...S.td, textAlign: 'right' }}>{(b.wholesale_sale_items || []).reduce((n: number, i: any) => n + Number(i.qty || 0), 0)}</td>
                     <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(Number(b.net_amount))}</td>
                     <td style={{ ...S.td, color: pending(b) > 0 ? '#b45309' : '#15803d' }}>{pending(b) > 0 ? `pending · ${b.payment_mode}` : `paid · ${b.payment_mode}`}</td>
-                    <td style={S.td}><BillActions bill={b} onEway={setEway} /></td>
+                    <td style={S.td}><BillActions bill={b} onEway={setEway} onEdit={setEditId} /></td>
                   </tr>))}
                 {!shownBills.length && <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center', color: '#94a3b8' }}>No wholesale bills found</td></tr>}
               </tbody>
@@ -221,7 +224,8 @@ export function WholesaleBillsPage() {
         </div>
       </div>
 
-      {party && <PartyModal party={party} bills={bills} onClose={() => setParty(null)} onEway={b => setEway(b)} />}
+      {party && <PartyModal party={party} bills={bills} onClose={() => setParty(null)} onEway={b => setEway(b)} onEdit={setEditId} />}
+      {editId && <EditWholesaleModal billId={editId} onClose={() => setEditId(null)} onSaved={() => load()} />}
       {eway && <EwayBillModal saleData={saleDataFromRow(eway)} onClose={() => setEway(null)} />}
     </Layout>
   )

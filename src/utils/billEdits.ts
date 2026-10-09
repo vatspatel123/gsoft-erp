@@ -132,6 +132,52 @@ export async function editPurchase(
   return { ok: true, net: Number(data?.net_amount), roundOff: Number(data?.round_off) }
 }
 
+export interface WholesaleLine {
+  product_id: string
+  name: string
+  barcode?: string
+  size?: string
+  qty: number
+  unit_price: number
+  mrp: number
+  discount_pct: number
+  gst_rate: number
+  orig_qty: number
+  stock_qty: number
+}
+
+// ── the same arithmetic the Wholesale screen uses: GST added on top ──────────
+export const wholesaleLineTaxable = (l: Pick<WholesaleLine, 'qty' | 'unit_price' | 'discount_pct'>) =>
+  l.qty * l.unit_price * (1 - (l.discount_pct || 0) / 100)
+
+export function wholesaleTotals(lines: WholesaleLine[], discountPct: number, freight: number) {
+  const subtotal = lines.reduce((s, l) => s + wholesaleLineTaxable(l), 0)
+  const billDisc = subtotal * (discountPct || 0) / 100
+  const gst = lines.reduce((s, l) => s + wholesaleLineTaxable(l) * (l.gst_rate || 0) / 100, 0) * (1 - (discountPct || 0) / 100)
+  const raw = subtotal - billDisc + gst + Math.max(0, freight || 0)
+  const net = Math.round(raw)
+  return { subtotal, billDisc, gst, net, roundOff: Math.round((net - raw) * 100) / 100 }
+}
+
+export async function editWholesale(
+  billId: string,
+  changes: Record<string, unknown>,
+  lines: WholesaleLine[],
+  reason: string,
+): Promise<{ ok: true; net: number } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc('edit_wholesale', {
+    p_id: billId,
+    p_changes: changes,
+    p_items: lines.map(l => ({
+      product_id: l.product_id, qty: l.qty, unit_price: l.unit_price, mrp: l.mrp,
+      discount_pct: l.discount_pct, gst_rate: l.gst_rate,
+    })),
+    p_reason: reason,
+  })
+  if (error) return { ok: false, error: clean(error) }
+  return { ok: true, net: Number(data?.net_amount) }
+}
+
 export async function billHistory(type: 'sale' | 'purchase', billId: string): Promise<BillEdit[]> {
   const { data } = await supabase
     .from('bill_edits')

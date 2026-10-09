@@ -137,6 +137,7 @@ function ShopInfoTab() {
       shopName: s.shopName, shopTagline: s.shopTagline, ownerName: s.ownerName,
       shopAddress: s.shopAddress, shopPhone: s.shopPhone, shopEmail: s.shopEmail,
       gstin: s.gstin, state: s.state, city: s.city, pincode: s.pincode,
+      bankName: s.bankName, bankAccount: s.bankAccount, bankIfsc: s.bankIfsc, wholesaleTerms: s.wholesaleTerms,
     }
   })
 
@@ -199,7 +200,20 @@ function ShopInfoTab() {
         <Field label="Pincode">
           <input style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} type="number" value={form.pincode} onChange={e => set('pincode', e.target.value)} placeholder="380001" maxLength={6} />
         </Field>
+        {/* Printed on the wholesale tax invoice. */}
+        <Field label="Bank Name">
+          <input style={inputStyle} value={form.bankName} onChange={e => set('bankName', e.target.value)} placeholder="e.g. STATE BANK OF INDIA" />
+        </Field>
+        <Field label="Bank A/c No.">
+          <input style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} value={form.bankAccount} onChange={e => set('bankAccount', e.target.value)} />
+        </Field>
+        <Field label="RTGS / IFSC Code">
+          <input style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} value={form.bankIfsc} onChange={e => set('bankIfsc', e.target.value.toUpperCase())} placeholder="SBIN0009165" />
+        </Field>
       </div>
+      <Field label="Wholesale invoice terms (one per line)">
+        <textarea style={{ ...inputStyle, minHeight: '84px', resize: 'vertical' }} value={form.wholesaleTerms} onChange={e => set('wholesaleTerms', e.target.value)} />
+      </Field>
       <SaveBtn onClick={save} />
     </Card>
   )

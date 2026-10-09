@@ -222,11 +222,6 @@ export function useInvoices() {
   // cash adds ₹200 to Cash and ₹1,300 to UPI — counting the whole bill under its
   // single payment_mode put all ₹1,500 in one place. Bills saved before the split
   // was recorded have no tender amounts; those still count by payment_mode.
-  const tenderOf = (i: Invoice, mode: 'cash' | 'card' | 'upi' | 'credit'): number => {
-    const t = { cash: i.cash_amount, card: i.card_amount, upi: i.upi_amount, credit: i.credit_amount }
-    const recorded = Object.values(t).some(v => Number(v) > 0)
-    return recorded ? Number(t[mode]) || 0 : (i.payment_mode === mode ? Number(i.net_amount) || 0 : 0)
-  }
   const paymentBreakdown = Object.fromEntries((['cash', 'card', 'upi', 'credit'] as const).map(mode => {
     const bills = invoices.filter(i => !i.is_return && tenderOf(i, mode) > 0)
     return [mode, { count: bills.length, total: bills.reduce((s, i) => s + tenderOf(i, mode), 0) }]
@@ -284,4 +279,11 @@ export function useInvoices() {
     processRefund,
     fetchInvoices
   }
+}
+
+// Money in by how it was actually paid (see paymentBreakdown). Also used by Reports.
+export function tenderOf(i: any, mode: 'cash' | 'card' | 'upi' | 'credit'): number {
+  const t = { cash: i.cash_amount, card: i.card_amount, upi: i.upi_amount, credit: i.credit_amount }
+  const recorded = Object.values(t).some(v => Number(v) > 0)
+  return recorded ? Number(t[mode]) || 0 : (i.payment_mode === mode ? Number(i.net_amount) || 0 : 0)
 }

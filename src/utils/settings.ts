@@ -18,6 +18,11 @@ export interface AppSettings {
   billHeader: string
   billFooter: string
   billTerms: string          // one condition per line, printed under the total
+  // Wholesale tax invoice (Logic layout)
+  bankName: string
+  bankAccount: string
+  bankIfsc: string
+  wholesaleTerms: string     // one condition per line
   showPaymentBreakdown: boolean
   shopLogo: string           // data: URL, printed above the shop name ('' = none)
   billPrinter: string        // Windows device name for receipts ('' = ask each time)
@@ -81,6 +86,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   billHeader: 'Tax Invoice',
   billFooter: '!! Thank you for shopping !!',
   billTerms: 'EXCHANGE WITHIN 3 DAYS.\nNO REFUND.',
+  bankName: '',
+  bankAccount: '',
+  bankIfsc: '',
+  wholesaleTerms: 'Our risk and responsibility ceases as soon as the goods leave our premises.\nInterest @18% p.a. will be charged if payment is not made within due date.\nGoods once sold will not be taken back.\n"Subject to \'SURAT\' Jurisdiction only. E.&.O.E"',
   showPaymentBreakdown: true,
   shopLogo: '',
   billPrinter: '',

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Plus, Trash2, Search, Loader2 } from 'lucide-react'
+import { X, Plus, Trash2, Search, Loader2, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../../lib/supabase'
 import { editPurchase, purchaseTotals, money, type PurchaseLine } from '../../utils/billEdits'
@@ -140,9 +140,19 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
     setResults([]); setQuery('')
   }
 
+  const nextBarcode = (ls: PurchaseLine[]) =>
+    Math.max(lastCode, ...ls.filter(l => isSeqCode(l.barcode)).map(l => Number(l.barcode))) + 1
+
+  // Copy a line below itself, as Purchase Entry does: a new product with the next
+  // barcode and everything else carried over except colour (the thing that changes).
+  const copyLine = (i: number) => setLines(ls => [...ls.slice(0, i + 1), {
+    ...ls[i], product_id: '', key: Math.random().toString(36).slice(2), colour: '',
+    barcode: String(nextBarcode(ls)), orig_qty: 0, stock_qty: 0,
+  }, ...ls.slice(i + 1)])
+
   // A new line: a new product, with the next barcode in the shop's sequence.
   const addNewLine = () => setLines(ls => {
-    const next = Math.max(lastCode, ...ls.filter(l => isSeqCode(l.barcode)).map(l => Number(l.barcode))) + 1
+    const next = nextBarcode(ls)
     const prev = ls[ls.length - 1]
     return [...ls, {
       product_id: '', key: Math.random().toString(36).slice(2), name: prev?.name || '', design_no: prev?.design_no || '',
@@ -227,7 +237,7 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
                     {['Product', 'Design', 'PCode', 'Size', 'Colour', 'MRP ₹', 'Wholesale', 'Online', 'Qty', 'Barcode', 'Cost ₹', 'GST %'].map(h =>
                       <th key={h} style={S.th}>{h}</th>)}
                     <th style={{ ...S.th, textAlign: 'right' }}>Amount</th>
-                    <th style={{ ...S.th, width: 34 }} />
+                    <th style={{ ...S.th, width: 60 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -266,7 +276,8 @@ export function EditPurchaseModal({ billId, onClose, onSaved }: Props) {
                           </select>
                         </td>
                         <td style={{ ...S.td, textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{money(l.qty * l.unit_cost)}</td>
-                        <td style={S.td}>
+                        <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
+                          <button style={{ ...S.iconBtn, color: '#7c3aed' }} title="Copy this item below" onClick={() => copyLine(i)}><Copy size={15} /></button>
                           <button style={S.iconBtn} title="Remove item" onClick={() => removeLine(i)}><Trash2 size={15} /></button>
                         </td>
                       </tr>

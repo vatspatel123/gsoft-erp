@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Lock, Unlock, Plus, Trash2, Search, Loader2 } from 'lucide-react'
+import { X, Lock, Unlock, Plus, Trash2, Search, Loader2, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../../lib/supabase'
 import { editSale, saleTotals, saleLineTotal, money, type SaleLine } from '../../utils/billEdits'
@@ -183,7 +183,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                     <th style={{ ...S.th, width: 110 }}>Rate ₹</th>
                     <th style={{ ...S.th, width: 80 }}>Disc %</th>
                     <th style={{ ...S.th, width: 110, textAlign: 'right' }}>Amount</th>
-                    <th style={{ ...S.th, width: 40 }} />
+                    <th style={{ ...S.th, width: 64 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -201,7 +201,11 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                       <td style={S.td}><input style={S.num} type="number" min={0} max={100} step="0.5" value={l.discount_pct}
                         onChange={e => setLine(i, { discount_pct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })} /></td>
                       <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(saleLineTotal(l))}</td>
-                      <td style={S.td}>
+                      <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
+                        <button style={{ ...S.iconBtn, color: '#7c3aed' }} title="Copy this item below"
+                          onClick={() => setLines(ls => [...ls.slice(0, i + 1), { ...ls[i], orig_qty: 0 }, ...ls.slice(i + 1)])}>
+                          <Copy size={15} />
+                        </button>
                         <button style={S.iconBtn} title="Remove item" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>
                           <Trash2 size={15} />
                         </button>

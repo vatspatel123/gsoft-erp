@@ -250,10 +250,8 @@ export function useInventory() {
     .filter(p => {
       if (search) {
         const q = search.toLowerCase()
-        return (
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q)
-        )
+        return ['name', 'sku', 'barcode', 'design_no', 'pcode', 'batch_no']
+          .some(f => p[f] != null && String(p[f]).toLowerCase().includes(q))
       }
       return true
     })
