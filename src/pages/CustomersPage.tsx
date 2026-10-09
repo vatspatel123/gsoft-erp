@@ -80,8 +80,7 @@ function CustomersPageComponent() {
       return
     }
 
-    await saveCustomer(formData, editingCustomer?.id)
-    setShowAddModal(false)
+    if (await saveCustomer(formData, editingCustomer?.id)) setShowAddModal(false)
   }
 
   const handleDeleteCustomer = async (id: string) => {

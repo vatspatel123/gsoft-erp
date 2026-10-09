@@ -91,13 +91,26 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
   const setLine = (i: number, patch: Partial<SaleLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)))
 
+  const [noMatch, setNoMatch] = useState('')   // a typed number that belongs to no customer
   const findCustomer = async () => {
     const clean = phone.replace(/\D/g, '').slice(-10)
     if (clean.length !== 10) { toast.error('Enter a 10-digit phone number'); return }
     const { data } = await supabase.from('customers').select('id, name, phone').eq('phone', clean).maybeSingle()
-    if (data) { setCustomer(data); toast.success(`Customer: ${data.name}`) }
-    else toast.error('No customer with that number — add them in Customers first')
+    if (data) { setCustomer(data); setNoMatch(''); toast.success(`Customer: ${data.name}`) }
+    else { setNoMatch(clean); if (!customer) toast.error('No customer with that number — add them in Customers first') }
   }
+
+  // The number on the bill was typed wrong: fix it on the customer itself.
+  const correctNumber = async () => {
+    if (!customer || !noMatch) return
+    const { error } = await supabase.from('customers').update({ phone: noMatch }).eq('id', customer.id)
+    if (error) { toast.error('Number not changed: ' + error.message); return }
+    setCustomer({ ...customer, phone: noMatch }); setPhone(noMatch); setNoMatch('')
+    toast.success(`${customer.name}'s number is now ${noMatch}`)
+  }
+  // A number typed in the box but not applied with Find would otherwise be dropped silently.
+  const phoneUnapplied = phone.replace(/\D/g, '').slice(-10) !== (customer?.phone || '').replace(/\D/g, '').slice(-10)
+    && phone.replace(/\D/g, '').length > 0
 
   const searchProducts = async () => {
     const q = query.trim().replace(/[,()%]/g, '')
@@ -134,6 +147,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     if (discount < minDiscount) { toast.error(`Discount can't go below ${money(minDiscount)} — loyalty points were used`); return }
     if (reason.trim().length < 3) { toast.error('Please write why this bill is being edited'); return }
     if (salesmanChanged && !authPw) { toast.error('Changing the salesman needs the admin password'); return }
+    if (phoneUnapplied) { toast.error('The customer phone was changed but not applied — press Find next to it'); return }
 
     // Save what the shop kept; change handed back is not income.
     const changes: Record<string, unknown> = {
@@ -242,7 +256,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                 <div style={S.section}>Customer</div>
                 <div style={S.row}>
                   <input style={{ ...S.input, flex: 1 }} placeholder="Phone number" value={phone}
-                    data-enter="own" onChange={e => setPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && findCustomer()} />
+                    data-enter="own" onChange={e => { setPhone(e.target.value); setNoMatch('') }} onKeyDown={e => e.key === 'Enter' && findCustomer()} />
                   <button style={S.btnOutline} onClick={findCustomer}>Find</button>
                 </div>
                 <div style={S.muted}>
@@ -250,6 +264,12 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                     <button style={S.link} onClick={() => { setCustomer(null); setPhone('') }}>make walk-in</button></> : 'Walk-in customer'}
                   {customerChanged && <span style={S.changed}> (changed)</span>}
                 </div>
+                {noMatch && customer && (
+                  <div style={S.authBox}>
+                    <div style={{ fontSize: 12.5, marginBottom: 6 }}>No customer has {noMatch}.</div>
+                    <button style={S.btnTiny} onClick={correctNumber}>Correct {customer.name}'s number to {noMatch}</button>
+                  </div>
+                )}
               </div>
 
               <div>

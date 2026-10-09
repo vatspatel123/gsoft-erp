@@ -177,8 +177,12 @@ export function useCustomers() {
     )
   }).length
 
-  const saveCustomer = async (data: Partial<Customer>, editId?: string) => {
+  const saveCustomer = async (form: Partial<Customer>, editId?: string) => {
     try {
+      // A blank optional field is "none" (null), not "": the database rejects ""
+      // as a date, which silently stopped every edit of a customer with no birthday.
+      const data: Partial<Customer> = Object.fromEntries(Object.entries(form)
+        .map(([k, v]) => [k, typeof v === 'string' ? (v.trim() || (k === 'name' || k === 'phone' ? '' : null)) : v])) as any
       const customerRecord = {
         ...data,
         id: editId || data.id || crypto.randomUUID(),
@@ -191,30 +195,29 @@ export function useCustomers() {
       }
 
       if (navigator.onLine) {
+        let error: any = null
         try {
-          if (editId) {
-            const { error } = await supabase
-              .from('customers')
-              .update(data)
-              .eq('id', editId)
-            if (error) console.warn('DB customer update warning:', error.message)
-          } else {
-            const { error } = await supabase
-              .from('customers')
-              .insert(customerRecord)
-            if (error) console.warn('DB customer insert warning:', error.message)
-          }
+          ;({ error } = editId
+            ? await supabase.from('customers').update(data).eq('id', editId)
+            : await supabase.from('customers').insert(customerRecord))
         } catch (dbErr) {
           console.warn('DB customer save notice, using local cache:', dbErr)
+        }
+        // The server answered "no": say so instead of "updated!" with nothing saved.
+        if (error) {
+          toast.error('Customer not saved: ' + error.message)
+          return false
         }
       }
 
       saveCustomerToCache(customerRecord)
       toast.success(editId ? 'Customer updated!' : 'Customer added!')
       await fetchCustomers()
+      return true
     } catch (e) {
       console.error('Save customer error:', e)
       toast.error('Failed to save customer')
+      return false
     }
   }
 
@@ -228,9 +231,12 @@ export function useCustomers() {
       if (error) throw error
       toast.success('Customer deleted')
       await fetchCustomers()
-    } catch (e) {
+    } catch (e: any) {
       console.error('Delete customer error:', e)
-      toast.error('Failed to delete customer')
+      // 23503: bills, exchanges or points still point at this customer.
+      toast.error(e?.code === '23503'
+        ? 'This customer has bills, so they can\'t be deleted — use ✏️ Edit to correct their details'
+        : 'Failed to delete customer', { duration: 6000 })
     }
   }
 
