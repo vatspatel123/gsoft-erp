@@ -664,8 +664,9 @@ export function PurchaseEntryPage() {
                           <td style={{ padding: '4px 3px' }}>
                             <input type="number" value={item.qty === '' ? '' : item.qty}
                               onChange={e => hook.updateItem(item.id, 'qty', e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                              placeholder="0" min="0"
-                              style={{ ...cellInput, width: '48px', fontSize: '14px', fontWeight: 700, color: G.primary }} />
+                              placeholder="qty" min="0"
+                              style={{ ...cellInput, width: '48px', fontSize: '14px', fontWeight: 700, color: G.primary,
+                                ...(hook.missingQty(item) ? { borderColor: '#ef4444', background: '#fef2f2' } : {}) }} />
                           </td>
 
                           {/* Barcode — auto-filled on every new row, and editable */}
@@ -684,8 +685,8 @@ export function PurchaseEntryPage() {
                           <td style={{ padding: '4px 3px' }}>
                             <input type="number" value={item.unit_cost === '' ? '' : item.unit_cost}
                               onChange={e => hook.updateItem(item.id, 'unit_cost', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                              placeholder="0" min="0"
-                              style={{ ...cellInput, width: '64px' }} />
+                              placeholder="cost" min="0"
+                              style={{ ...cellInput, width: '64px', ...(hook.missingCost(item) ? { borderColor: '#ef4444', background: '#fef2f2' } : {}) }} />
                           </td>
 
                           {/* GST% */}
@@ -775,6 +776,15 @@ export function PurchaseEntryPage() {
                     <span style={{ fontFamily: r.mono ? 'DM Mono' : 'inherit', fontWeight: r.mono ? 600 : 400, color: '#1a0a2e' }}>{r.value}</span>
                   </div>
                 ))}
+
+                {hook.emptyQtyCount > 0 && (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', fontSize: '12.5px' }}>
+                    {hook.emptyQtyCount} item{hook.emptyQtyCount > 1 ? 's have' : ' has'} no qty (red) and {hook.emptyQtyCount > 1 ? 'are' : 'is'} not counted.
+                    <button onClick={hook.fillEmptyQty} style={{ display: 'block', marginTop: '6px', padding: '5px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                      Set qty 1 on all of them
+                    </button>
+                  </div>
+                )}
 
                 {/* Discount */}
                 <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '12px', marginBottom: '8px' }}>

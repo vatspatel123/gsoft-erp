@@ -68,7 +68,7 @@ const EMPTY_ITEM = (barcode = makeBarcode()): PurchaseItem => ({
   size: '',
   colour: '',
   mrp: '',
-  qty: '',
+  qty: 1,      // one piece per colour/size is the norm; an empty qty silently counted as 0
   barcode,
   unit_cost: '',
   gst_rate: 5,
@@ -217,6 +217,17 @@ export function usePurchaseEntry() {
   const totalUnits = items.reduce((sum, item) => {
     return sum + (typeof item.qty === 'number' ? item.qty : 0)
   }, 0)
+
+  // A row with a product on it but no qty (or no cost) — shown in red, and saving waits for it.
+  const isStarted = (i: PurchaseItem) => !!(i.product || i.productName.trim())
+  const missingQty = (i: PurchaseItem) => isStarted(i) && !(typeof i.qty === 'number' && i.qty > 0)
+  const missingCost = (i: PurchaseItem) => isStarted(i) && !(typeof i.unit_cost === 'number' && i.unit_cost > 0)
+  const emptyQtyCount = items.filter(missingQty).length
+  const fillEmptyQty = () => setItems(prev => prev.map(i => {
+    if (!missingQty(i)) return i
+    const cost = typeof i.unit_cost === 'number' ? i.unit_cost : 0
+    return { ...i, qty: 1, line_total: cost }
+  }))
 
   // ── Item operations ───────────────────────────────────────────────────────
   const addItem = () => setItems(prev => [...prev, EMPTY_ITEM(nextCode(lastCode.current, prev))])
@@ -373,6 +384,14 @@ export function usePurchaseEntry() {
 
   // ── Save purchase ─────────────────────────────────────────────────────────
   const savePurchase = async () => {
+    // Never drop a filled-in row quietly: it was the product the client typed.
+    const noQty = items.filter(missingQty).length
+    const noCost = items.filter(missingCost).length
+    if (noQty || noCost) {
+      toast.error([noQty && `${noQty} item${noQty > 1 ? 's have' : ' has'} no qty`, noCost && `${noCost} item${noCost > 1 ? 's have' : ' has'} no cost`]
+        .filter(Boolean).join(' and ') + ' — marked in red. Nothing saved yet.', { duration: 7000 })
+      return
+    }
     const validItems = items.filter(i => {
       const qty = typeof i.qty === 'number' ? i.qty : 0
       const cost = typeof i.unit_cost === 'number' ? i.unit_cost : 0
@@ -529,7 +548,7 @@ export function usePurchaseEntry() {
     notes, setNotes,
     items, addItem, updateItem, removeItem, generateBarcode, duplicateItem, duplicateGroupAsSize,
     subtotal, effectiveDiscount, totalGST, cgst, sgst, igst,
-    roundOff, netAmount, totalUnits,
+    roundOff, netAmount, totalUnits, emptyQtyCount, fillEmptyQty, missingQty, missingCost,
     loading, savePurchase,
     showSuccessModal, setShowSuccessModal,
     purchaseComplete,

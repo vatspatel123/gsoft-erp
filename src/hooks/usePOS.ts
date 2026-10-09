@@ -173,13 +173,9 @@ export function usePOS(salesmanId: string | null = null) {
       return
     }
 
-    if (!skipOldLotCheck) {
-      const olderProduct = await findOlderLot(product)
-      if (olderProduct) {
-        setOldLotAlert({ scanned: product, older: olderProduct })
-        return
-      }
-    }
+    // ponytail: the "older lot available" (FIFO) prompt was switched off at the
+    // client's request — the scanned piece is what gets sold.
+    void skipOldLotCheck; void findOlderLot; void setOldLotAlert
 
     setCart(prev => {
       const ex = prev.find(i => i.product.id === product.id)
