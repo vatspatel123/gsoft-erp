@@ -2,13 +2,13 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import { Layout } from '../components/shared/Layout'
 import { usePurchaseEntry } from '../hooks/usePurchaseEntry'
 import { PrintLabelsModal } from '../components/inventory/PrintLabelsModal'
+import { PurchaseBillsList } from './PurchaseBillsPage'
 import { supabase } from '../lib/supabase'
 import {
-  Search, X, Plus, Trash2, ChevronDown, Copy,
-  ShoppingBag, Printer, Tag, RefreshCw
+  Search, X, Plus, Trash2, Copy,
+  ShoppingBag, Printer, Tag
 } from 'lucide-react'
 import { printPurchaseA4 } from '../utils/printA4Purchase'
-import { fmtDate } from '../utils/date'
 
 // ─── Green theme tokens ───────────────────────────────────────────────────────
 const G = {
@@ -204,6 +204,21 @@ function SupplierSection({
 }
 
 // ─── Success modal ────────────────────────────────────────────────────────────
+// Purchase lines in the shape the label printer takes (after a purchase, or new lines after an edit).
+const toLabelProducts = (items: any[]) => items.map((item: any) => ({
+  id: item.product?.id || item.id,
+  name: item.product?.name || item.productName,
+  design_no: item.design_no || item.product?.design_no || '',
+  colour: item.colour || item.product?.colour || '',
+  size: item.size || item.product?.size || '',
+  pcode: item.pcode || item.product?.pcode || '',
+  mrp: item.mrp || item.product?.mrp || '',
+  unit_price: item.product?.unit_price || item.mrp || '',
+  barcode: item.barcode || item.product?.barcode || item.product?.sku || '',
+  batch_no: '',
+  defaultCopies: typeof item.qty === 'number' ? item.qty : 1,
+}))
+
 function SuccessModal({
   purchaseComplete, onClose, onNewPurchase,
 }: {
@@ -237,19 +252,7 @@ function SuccessModal({
   }
 
   // Build products array for label printing
-  const labelProducts = (purchaseComplete?.items || []).map((item: any) => ({
-    id: item.product?.id || item.id,
-    name: item.product?.name || item.productName,
-    design_no: item.design_no || item.product?.design_no || '',
-    colour: item.colour || item.product?.colour || '',
-    size: item.size || item.product?.size || '',
-    pcode: item.pcode || item.product?.pcode || '',
-    mrp: item.mrp || item.product?.mrp || '',
-    unit_price: item.product?.unit_price || item.mrp || '',
-    barcode: item.barcode || item.product?.barcode || item.product?.sku || '',
-    batch_no: '',
-    defaultCopies: typeof item.qty === 'number' ? item.qty : 1,
-  }))
+  const labelProducts = toLabelProducts(purchaseComplete?.items || [])
 
   return (
     <>
@@ -331,165 +334,17 @@ function SuccessModal({
   )
 }
 
-// ─── Purchase History ─────────────────────────────────────────────────────────
-function PurchaseHistory({ history, loading, filter, setFilter, onRefresh }: any) {
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [expandedItems, setExpandedItems] = useState<any[]>([])
-  const [itemsLoading, setItemsLoading] = useState(false)
-
-  const loadItems = async (billId: string) => {
-    if (expandedId === billId) { setExpandedId(null); return }
-    setExpandedId(billId)
-    setItemsLoading(true)
-    try {
-      const { data } = await supabase
-        .from('purchase_items')
-        .select('*')
-        .eq('purchase_id', billId)
-      setExpandedItems(data || [])
-    } finally { setItemsLoading(false) }
-  }
-
-  const thisMonthTotal = history
-    .filter((b: any) => {
-      const d = new Date(b.created_at)
-      const now = new Date()
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-    })
-    .reduce((s: number, b: any) => s + (b.net_amount || 0), 0)
-
-  const pendingTotal = history
-    .filter((b: any) => b.payment_status === 'pending')
-    .reduce((s: number, b: any) => s + (b.net_amount || 0), 0)
-
-  return (
-    <div>
-      {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-        {[
-          { label: 'Total Purchases (Month)', value: `₹${thisMonthTotal.toLocaleString('en-IN')}`, color: G.primary },
-          { label: 'Total Pending Payment', value: `₹${pendingTotal.toLocaleString('en-IN')}`, color: '#f97316' },
-        ].map(c => (
-          <div key={c.label} style={{ background: 'white', border: `1px solid ${G.border}`, borderRadius: '14px', padding: '16px' }}>
-            <div style={{ fontSize: '11px', color: G.muted, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{c.label}</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: c.color, fontFamily: 'DM Mono' }}>{c.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', alignItems: 'center' }}>
-        {(['all', 'paid', 'pending'] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            style={{ padding: '6px 14px', borderRadius: '8px', border: filter === f ? 'none' : '1px solid #e2e8f0', background: filter === f ? G.primary : 'white', color: filter === f ? 'white' : G.muted, fontSize: '12px', fontFamily: 'DM Sans', cursor: 'pointer', textTransform: 'capitalize', fontWeight: filter === f ? 600 : 400 }}>
-            {f === 'all' ? 'All' : f === 'paid' ? 'Paid' : 'Pending'}
-          </button>
-        ))}
-        <button onClick={onRefresh}
-          style={{ marginLeft: 'auto', background: 'none', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', color: G.muted, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontFamily: 'DM Sans' }}>
-          <RefreshCw size={13} /> Refresh
-        </button>
-      </div>
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading purchases...</div>
-      ) : history.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No purchase records found</div>
-      ) : (
-        <div style={{ background: 'white', border: `1px solid ${G.border}`, borderRadius: '14px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                {['Purchase No', 'Date', 'Supplier', 'Invoice No', 'Items', 'Amount', 'Status', ''].map(h => (
-                  <th key={h} style={{ padding: '12px', textAlign: 'left', fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((b: any) => (
-                <>
-                  <tr key={b.id} style={{ borderBottom: '1px solid #f8fafc', cursor: 'pointer' }}
-                    onClick={() => loadItems(b.id)}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'white')}
-                  >
-                    <td style={{ padding: '12px', fontFamily: 'DM Mono', fontSize: '12px', color: G.primary, fontWeight: 600 }}>{b.purchase_no}</td>
-                    <td style={{ padding: '12px', color: G.muted, fontSize: '12px' }}>
-                      {fmtDate(new Date(b.created_at))}
-                    </td>
-                    <td style={{ padding: '12px', color: '#1a0a2e', fontWeight: 500 }}>
-                      {b.suppliers?.business_name || b.suppliers?.name || '—'}
-                    </td>
-                    <td style={{ padding: '12px', color: G.muted }}>{b.supplier_invoice_no || '—'}</td>
-                    <td style={{ padding: '12px', color: G.muted }}>{b.purchase_items?.length || 0}</td>
-                    <td style={{ padding: '12px', fontWeight: 700, fontFamily: 'DM Mono', color: '#1a0a2e' }}>
-                      ₹{(b.net_amount || 0).toLocaleString('en-IN')}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{
-                        padding: '3px 9px', borderRadius: '99px', fontSize: '11px', fontWeight: 600,
-                        background: b.payment_status === 'paid' ? '#f0fdf4' : b.payment_status === 'pending' ? '#fff7ed' : '#eff6ff',
-                        color: b.payment_status === 'paid' ? G.primary : b.payment_status === 'pending' ? '#ea580c' : '#2563eb',
-                      }}>
-                        {b.payment_status === 'paid' ? 'Paid' : b.payment_status === 'pending' ? 'Pending' : 'Partial'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <ChevronDown size={14} color={G.muted}
-                        style={{ transform: expandedId === b.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                    </td>
-                  </tr>
-                  {expandedId === b.id && (
-                    <tr key={`${b.id}-exp`}>
-                      <td colSpan={8} style={{ padding: '0 12px 12px', background: '#f8fffe' }}>
-                        {itemsLoading ? (
-                          <div style={{ padding: '16px', color: '#94a3b8', fontSize: '13px' }}>Loading items...</div>
-                        ) : (
-                          <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', marginTop: '4px' }}>
-                            <thead>
-                              <tr>
-                                {['Product', 'Design', 'Size', 'Colour', 'Barcode', 'Qty', 'Cost', 'MRP', 'GST%', 'Amount'].map(h => (
-                                  <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: '#94a3b8', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {expandedItems.map((item: any, i: number) => (
-                                <tr key={i}>
-                                  <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
-                                  <td style={{ padding: '6px 8px', color: G.muted }}>{item.design_no || '—'}</td>
-                                  <td style={{ padding: '6px 8px', color: G.muted }}>{item.size || '—'}</td>
-                                  <td style={{ padding: '6px 8px', color: G.muted }}>{item.colour || '—'}</td>
-                                  <td style={{ padding: '6px 8px', color: G.muted, fontFamily: 'DM Mono' }}>{item.barcode || '—'}</td>
-                                  <td style={{ padding: '6px 8px', fontWeight: 600 }}>{item.qty}</td>
-                                  <td style={{ padding: '6px 8px', fontFamily: 'DM Mono' }}>₹{item.unit_cost}</td>
-                                  <td style={{ padding: '6px 8px', fontFamily: 'DM Mono' }}>{item.mrp ? `₹${item.mrp}` : '—'}</td>
-                                  <td style={{ padding: '6px 8px' }}>{item.gst_rate}%</td>
-                                  <td style={{ padding: '6px 8px', fontFamily: 'DM Mono', fontWeight: 600 }}>₹{(item.line_total || 0).toLocaleString('en-IN')}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export function PurchaseEntryPage() {
-  const hook = usePurchaseEntry()
+export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' | 'bills' } = {}) {
+  const hook = usePurchaseEntry(initialTab)
+  const [editLabels, setEditLabels] = useState<any[] | null>(null)   // new lines added in an edit
+  const saveEdit = async () => {
+    const added = await hook.saveEdit()
+    if (added?.length) setEditLabels(toLabelProducts(added))
+  }
   const tableRef = useRef<HTMLDivElement>(null)
 
-  const purchaseNo = 'PO-' +
+  const purchaseNo = hook.editing ? hook.editing.no : 'PO-' +
     new Date().toISOString().slice(0, 10).replace(/-/g, '') +
     '-' + String(hook.counter).padStart(4, '0')
 
@@ -503,16 +358,16 @@ export function PurchaseEntryPage() {
             <ShoppingBag size={18} color="white" />
           </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1a0a2e' }}>Purchase Entry</h1>
-            <div style={{ fontSize: '12px', color: G.muted }}>Record inward stock from suppliers</div>
+            <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1a0a2e' }}>Purchase Entry &amp; Bills</h1>
+            <div style={{ fontSize: '12px', color: G.muted }}>Record inward stock from suppliers, and print or edit any purchase bill</div>
           </div>
         </div>
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '4px', background: 'white', border: `1px solid ${G.border}`, borderRadius: '12px', padding: '4px', width: 'fit-content', marginBottom: '20px' }}>
           {[
-            { key: 'new', label: 'New Purchase Entry' },
-            { key: 'history', label: 'Purchase History' },
+            { key: 'new', label: hook.editing ? `✏️ Editing ${hook.editing.no}` : 'New Purchase Entry' },
+            { key: 'bills', label: 'Purchase Bills' },
           ].map(t => (
             <button key={t.key} onClick={() => hook.setTab(t.key as any)}
               style={{ padding: '7px 16px', borderRadius: '8px', border: 'none', background: hook.tab === t.key ? G.primary : 'transparent', color: hook.tab === t.key ? 'white' : G.muted, fontSize: '13px', fontFamily: 'DM Sans', cursor: 'pointer', fontWeight: hook.tab === t.key ? 600 : 400, transition: 'all 0.15s' }}>
@@ -529,6 +384,25 @@ export function PurchaseEntryPage() {
 
             {/* LEFT PANEL */}
             <div style={{ flex: '999 1 900px', minWidth: 0 }}>
+              {hook.editing && (
+                <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '14px', padding: '14px 16px', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#6b21a8', fontSize: '14px' }}>✏️ Editing purchase bill {hook.editing.no}</div>
+                      <div style={{ fontSize: '12px', color: '#7c3aed', marginTop: '2px' }}>
+                        Change, copy, add or remove lines as in a new entry. Stock moves by the difference; stock already sold can't be taken off.
+                        Copied or added lines become new products. Your new purchase (if any) is kept and comes back after.
+                      </div>
+                    </div>
+                    <button onClick={hook.cancelEdit} style={{ padding: '8px 14px', background: 'white', color: '#7c3aed', border: '1px solid #d8b4fe', borderRadius: '8px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
+                      Cancel edit
+                    </button>
+                  </div>
+                  <input value={hook.editReason} onChange={e => hook.setEditReason(e.target.value)}
+                    placeholder="Reason for the edit * (e.g. supplier sent 2 more pieces; wrong cost entered)"
+                    style={{ ...inputStyle, marginTop: '10px', borderColor: hook.editReason.trim().length < 3 ? '#d8b4fe' : G.border }} />
+                </div>
+              )}
               {/* Supplier */}
               <SupplierSection
                 supplier={hook.supplier}
@@ -564,7 +438,8 @@ export function PurchaseEntryPage() {
                   <div>
                     <label style={labelStyle}>Payment Mode</label>
                     <select value={hook.paymentMode} onChange={e => hook.setPaymentMode(e.target.value as any)}
-                      style={inputStyle}>
+                      disabled={!!hook.editing} title={hook.editing ? 'Not changed by an edit' : undefined}
+                      style={{ ...inputStyle, ...(hook.editing ? { background: '#f8fafc', color: G.muted } : {}) }}>
                       <option value="credit">Credit</option>
                       <option value="cash">Cash</option>
                       <option value="cheque">Cheque</option>
@@ -754,7 +629,7 @@ export function PurchaseEntryPage() {
                     style={{ display: 'flex', alignItems: 'center', gap: '6px', background: G.hover, border: `1px dashed ${G.border}`, borderRadius: '8px', padding: '8px 16px', fontSize: '13px', color: G.primary, cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500 }}>
                     <Plus size={15} /> Add Item
                   </button>
-                  {hook.hasDraft && (
+                  {hook.hasDraft && !hook.editing && (
                     <>
                       <span style={{ fontSize: '12px', color: G.muted }}>✓ Kept on this PC until saved — safe to leave this screen</span>
                       <button onClick={() => { if (window.confirm('Clear this purchase entry? Everything typed here will be removed.')) hook.resetForm() }}
@@ -844,6 +719,7 @@ export function PurchaseEntryPage() {
                   ].map(o => (
                     <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', cursor: 'pointer', fontSize: '12px' }}>
                       <input type="radio" name="gstType" value={o.value} checked={hook.gstType === o.value}
+                        disabled={!!hook.editing}
                         onChange={() => hook.setGstType(o.value as any)} style={{ accentColor: G.primary }} />
                       {o.label}
                     </label>
@@ -879,8 +755,15 @@ export function PurchaseEntryPage() {
                   </div>
                 </div>
 
+                {hook.editing && (
+                  <div style={{ fontSize: '12px', color: G.muted, marginBottom: '10px' }}>
+                    Was ₹{hook.editing.netBefore.toLocaleString('en-IN')} · paid ₹{hook.editing.paid.toLocaleString('en-IN')}.
+                    The supplier's due is worked out again from the new total.
+                  </div>
+                )}
+
                 {/* Payment Status */}
-                <div style={{ marginBottom: '12px' }}>
+                {!hook.editing && <div style={{ marginBottom: '12px' }}>
                   <div style={{ fontSize: '12px', color: G.muted, marginBottom: '6px' }}>Payment Status</div>
                   {[
                     { value: 'paid', label: 'Paid now' },
@@ -892,7 +775,7 @@ export function PurchaseEntryPage() {
                       {o.label}
                     </label>
                   ))}
-                </div>
+                </div>}
 
                 {/* Website listing toggle removed at client request — purchased items
                     no longer auto-publish to the online catalogue. Products can still be
@@ -901,28 +784,29 @@ export function PurchaseEntryPage() {
                 {/* Save button */}
                 <button
                   data-enter-submit
-                  onClick={hook.savePurchase}
+                  onClick={hook.editing ? saveEdit : hook.savePurchase}
                   disabled={hook.loading}
                   style={{ width: '100%', padding: '13px', background: hook.loading ? '#86efac' : G.primary, color: 'white', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: hook.loading ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans', transition: 'background 0.15s' }}
                 >
-                  {hook.loading ? 'Saving...' : 'Save Purchase Entry'}
+                  {hook.loading ? 'Saving...' : hook.editing ? `Save changes to ${hook.editing.no}` : 'Save Purchase Entry'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── TAB 2: PURCHASE HISTORY ─────────────────────────────────── */}
-        {hook.tab === 'history' && (
-          <PurchaseHistory
-            history={hook.history}
-            loading={hook.historyLoading}
-            filter={hook.historyFilter}
-            setFilter={hook.setHistoryFilter}
-            onRefresh={hook.fetchHistory}
-          />
+        {/* ── TAB 2: PURCHASE BILLS (print, edit here, history, delete) ────── */}
+        {hook.tab === 'bills' && (
+          <PurchaseBillsList onEdit={id => {
+            if (hook.editing && hook.editing.id !== id && !window.confirm(`Leave the edit of ${hook.editing.no}? Its changes are not saved.`)) return
+            void hook.startEdit(id)
+          }} />
         )}
       </div>
+
+      {editLabels && (
+        <PrintLabelsModal products={editLabels} isOpen onClose={() => setEditLabels(null)} />
+      )}
 
       {/* Success modal */}
       {hook.showSuccessModal && hook.purchaseComplete && (

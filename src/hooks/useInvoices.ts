@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { writeLocal, seedLocal } from '../utils/localStore'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getPendingSales } from '../utils/offlineCache'
@@ -63,6 +64,9 @@ export function useInvoices() {
   const [paymentFilter, setPaymentFilter] = useState('all')
   const [salesmanFilter, setSalesmanFilter] = useState('all')
   const [dateRange, setDateRange] = useState('month')
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()
+  const [customFrom, setCustomFrom] = useState(todayStr)
+  const [customTo, setCustomTo] = useState(todayStr)
   const [salesmen, setSalesmen] = useState<Salesman[]>([])
 
   // Day boundaries in the shop's own time (this PC's clock), not UTC. The list
@@ -73,13 +77,23 @@ export function useInvoices() {
     const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
     const tomorrow = new Date(startOfDay(now).getTime() + 86400000).toISOString()
     if (dateRange === 'all') return { from: null, to: null }
+    if (dateRange === 'custom') {
+      // First day 00:00 to the end of the last day, as the shop's own days (local time).
+      const [fy, fm, fd] = (customFrom || todayStr).split('-').map(Number)
+      const [ty, tm, td] = (customTo || customFrom || todayStr).split('-').map(Number)
+      return { from: new Date(fy, fm - 1, fd).toISOString(), to: new Date(ty, tm - 1, td + 1).toISOString() }
+    }
     if (dateRange === 'week') return { from: new Date(startOfDay(now).getTime() - 6 * 86400000).toISOString(), to: tomorrow }
     if (dateRange === 'month') return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: tomorrow }
     return { from: startOfDay(now).toISOString(), to: tomorrow }
   }
 
+  const fresh = useRef(false)   // the server has answered; the PC's copy is older
+  const shown = useRef(false)   // bills are on screen: refresh quietly, no spinner
+  const latest = useRef(0)    // only the newest load may fill the screen
   const fetchInvoices = async () => {
-    setLoading(true)
+    const mine = ++latest.current
+    if (!shown.current) setLoading(true)
     const { from, to } = getDateFilter()
     let fetchedInvoices: Invoice[] = []
 
@@ -170,7 +184,11 @@ export function useInvoices() {
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
 
+    if (mine !== latest.current) return   // a newer date choice is already loading
     setInvoices(allMerged)
+    fresh.current = true; shown.current = true
+    // Only the view the screen opens on (this month, all payments, all salesmen) is kept.
+    if (dateRange === 'month' && paymentFilter === 'all' && salesmanFilter === 'all') void writeLocal('invoices:month', allMerged)
     setLoading(false)
   }
 
@@ -187,9 +205,13 @@ export function useInvoices() {
     }
   }
 
+  // Open with this PC's copy of this month's bills; the fetch below replaces it.
+  useEffect(() => {
+    seedLocal<Invoice[]>('invoices:month', d => { setInvoices(d); setLoading(false); shown.current = true }, () => fresh.current)
+  }, [])
   useEffect(() => {
     fetchInvoices()
-  }, [dateRange, paymentFilter, salesmanFilter])
+  }, [dateRange, paymentFilter, salesmanFilter, customFrom, customTo])
   useLiveRefresh(['sales'], fetchInvoices)
 
   useEffect(() => {
@@ -271,6 +293,7 @@ export function useInvoices() {
     setSalesmanFilter,
     dateRange,
     setDateRange,
+    customFrom, setCustomFrom, customTo, setCustomTo, todayStr,
     salesmen,
     totalRevenue,
     totalGST,

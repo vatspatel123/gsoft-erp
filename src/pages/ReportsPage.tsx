@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { exportToCSV } from '../utils/exportCSV'
 import { useCashPosition } from '../hooks/useCashPosition'
 import { tenderOf } from '../hooks/useInvoices'
+import { CustomDates } from '../components/shared/CustomDates'
+import { ProductSalesModal } from '../components/reports/ProductSalesModal'
 import {
   BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, Cell
@@ -12,7 +14,7 @@ import { fmtDayMonth } from '../utils/date'
 
 const IST_OFFSET = 5.5 * 60 * 60 * 1000
 
-const getRange = (range: string) => {
+const getRange = (range: string, customFrom = '', customTo = '') => {
   const now = new Date()
   const toIST = (d: Date) =>
     new Date(d.getTime() + IST_OFFSET)
@@ -67,6 +69,11 @@ const getRange = (range: string) => {
         to: lme.toISOString()
       }
     }
+    case 'custom': {
+      // The two dates as the shop sees them (India time), start of the first day to end of the last.
+      const a = customFrom || customTo, b = customTo || customFrom
+      return { from: new Date(`${a}T00:00:00+05:30`).toISOString(), to: new Date(`${b}T23:59:59+05:30`).toISOString() }
+    }
     default:
       return { from: startOf(now), to: endOf(now) }
   }
@@ -78,6 +85,7 @@ const RANGES = [
   { key: 'week', label: 'This Week' },
   { key: 'month', label: 'This Month' },
   { key: 'last_month', label: 'Last Month' },
+  { key: 'custom', label: 'Custom' },
 ]
 
 const TABS = [
@@ -124,6 +132,10 @@ const getBestProduct = (sales: any[]) => {
 export default function ReportsPage() {
   const [tab, setTab] = useState('overview')
   const [range, setRange] = useState('month')
+  const todayStr = new Date(Date.now() + IST_OFFSET).toISOString().slice(0, 10)
+  const [customFrom, setCustomFrom] = useState(todayStr)
+  const [customTo, setCustomTo] = useState(todayStr)
+  const [openProduct, setOpenProduct] = useState<string | null>(null)   // product whose sales are shown
   const [sales, setSales] = useState<any[]>([])
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
@@ -137,9 +149,14 @@ export default function ReportsPage() {
   const [floatBank, setFloatBank] = useState<number | ''>('')
 
   useEffect(() => {
+    // A custom range needs both dates, From not after To, before anything is asked.
+    if (range === 'custom' && (!customFrom || !customTo || customFrom > customTo)) return
+    // Changing the dates quickly starts several loads; only the latest one may fill
+    // the screen, or an older, wider range could land last and show the wrong totals.
+    let current = true
     const fetch = async () => {
       setLoading(true)
-      const { from, to } = getRange(range)
+      const { from, to } = getRange(range, customFrom, customTo)
       // extract date parts for expense_date range
       const ist = (d: string) => {
         const dt = new Date(d)
@@ -155,7 +172,7 @@ export default function ReportsPage() {
           users(name,role),
           sale_items(qty,line_total,
             unit_price,gst_rate,
-            products(name,cost_price,unit_price))
+            products(name,cost_price,unit_price,design_no,size,colour,barcode))
         `).gte('created_at', from)
           .lte('created_at', to)
           .eq('is_return', false)
@@ -171,13 +188,15 @@ export default function ReportsPage() {
           .gte('expense_date', dateFrom)
           .lte('expense_date', dateTo)
       ])
+      if (!current) return
       setSales(s.data || [])
       setItems(i.data || [])
       setExpenses(e.data || [])
       setLoading(false)
     }
     fetch()
-  }, [range])
+    return () => { current = false }
+  }, [range, customFrom, customTo])
 
   const totalRevenue = sales.reduce(
     (s, x) => s + (x.net_amount || 0), 0)
@@ -206,9 +225,8 @@ export default function ReportsPage() {
     })
     return Object.values(map)
       .sort((a: any, b: any) => b.revenue - a.revenue)
-      .slice(0, 10)
   })()
-  // Totals for every product sold in the period, not only the top 10 shown.
+  // Every product sold in the period is listed (the "Products sold" card counts the same ones).
   const productTotals = (() => {
     const names = new Set(items.map(i => i.products?.name || 'Unknown'))
     const units = items.reduce((s, i) => s + (i.qty || 0), 0)
@@ -293,14 +311,19 @@ export default function ReportsPage() {
   })()
 
   const chartData = (() => {
-    const days = range === 'today' ||
+    const customDays = Math.min(62, Math.round(
+      (new Date(customTo).getTime() - new Date(customFrom).getTime()) / 86400000) + 1)
+    const days = range === 'custom' ? Math.max(1, customDays || 1) :
+      range === 'today' ||
       range === 'yesterday' ? 1 :
       range === 'week' ? 7 :
       range === 'month' ? 30 : 30
+    // A custom range ends on its last day, not on today.
+    const endMs = range === 'custom' ? new Date(`${customTo}T12:00:00+05:30`).getTime() : Date.now()
     const arr = []
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(
-        Date.now() - i * 86400000)
+        endMs - i * 86400000)
       const ist = new Date(
         d.getTime() + IST_OFFSET)
       const label = fmtDayMonth(ist)
@@ -390,6 +413,10 @@ export default function ReportsPage() {
                 {r.label}
               </button>
             ))}
+            {range === 'custom' && (
+              <CustomDates from={customFrom} to={customTo} max={todayStr}
+                onFrom={setCustomFrom} onTo={setCustomTo} />
+            )}
           </div>
         </div>
 
@@ -581,7 +608,10 @@ export default function ReportsPage() {
                       fontWeight: '500',
                       color: '#1a0a2e'
                     }}>
-                      Top Products
+                      Products Sold
+                      <span style={{ fontSize: '11px', fontWeight: 400, color: '#94a3b8', marginLeft: '8px' }}>
+                        click a product to see its sales
+                      </span>
                     </div>
                     <button
                       onClick={() =>
@@ -653,9 +683,13 @@ export default function ReportsPage() {
                     <tbody>
                       {topProducts.map(
                         (p: any, i: number) => (
-                        <tr key={i} style={{
+                        <tr key={i}
+                          onClick={() => setOpenProduct(p.name)}
+                          title="Click to see every sale of this product"
+                          style={{
                           borderBottom:
-                            '1px solid #fdf8ff'
+                            '1px solid #fdf8ff',
+                          cursor: 'pointer'
                         }}>
                           <td style={{
                             padding: '10px 8px',
@@ -1789,6 +1823,7 @@ export default function ReportsPage() {
           </>
         )}
       </div>
+      {openProduct && <ProductSalesModal name={openProduct} sales={sales} onClose={() => setOpenProduct(null)} />}
     </Layout>
   )
 }

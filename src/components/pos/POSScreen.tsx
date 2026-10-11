@@ -9,7 +9,7 @@ import { BillModal } from './BillModal';
 import { AddProductModal } from './AddProductModal';
 import { OldLotAlertModal } from './OldLotAlertModal';
 import { CustomerHistoryModal } from '../customers/CustomerHistoryModal';
-import { saveProductsToCache, getCachedSalesmen, saveSalesmenToCache } from '../../utils/offlineCache';
+import { getCachedSalesmen, saveSalesmenToCache } from '../../utils/offlineCache';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import '../../styles/pos.css';

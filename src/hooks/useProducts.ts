@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 import { useLiveRefresh } from './useLiveRefresh'
+import { writeLocal, seedLocal } from '../utils/localStore'
 
 export function useProducts() {
   const [products, setProducts] = useState<any[]>([])
@@ -15,6 +16,8 @@ export function useProducts() {
   // Typing fires one search per key; the server answers out of order (a broad
   // "2" took 4 s, "26335" 3 s), so only the newest request may fill the list.
   const lastReq = useRef(0)
+  const fresh = useRef(false)      // the server has answered at least once
+  const shown = useRef(false)      // something is on screen, so don't blank it with a spinner
   const [term, setTerm] = useState('')
   useEffect(() => {
     const t = setTimeout(() => setTerm(search.trim()), 300)
@@ -23,7 +26,7 @@ export function useProducts() {
 
   const fetchProducts = useCallback(async () => {
     const req = ++lastReq.current
-    setLoading(true)
+    if (!shown.current) setLoading(true)
     try {
       let query = supabase
         .from('products')
@@ -61,6 +64,8 @@ export function useProducts() {
       if (error) throw error
       // An empty answer is the answer ("no match"), not a reason to show the old cache.
       setProducts(data || [])
+      fresh.current = true; shown.current = true
+      if (!term && !categoryFilter && statusFilter === 'all') void writeLocal(`products:${sortBy}`, data || [])
       if (data?.length) {
         // Only a query with no filters represents the full catalogue.
         saveProductsToCache(data, {
@@ -85,6 +90,10 @@ export function useProducts() {
     setCategories(data || [])
   }, [])
 
+  // Open with this PC's copy of the list, then the fetch below replaces it.
+  useEffect(() => {
+    seedLocal<any[]>('products:name', d => { setProducts(d); setLoading(false); shown.current = true }, () => fresh.current)
+  }, [])
   useEffect(() => {
     fetchProducts()
   }, [fetchProducts])

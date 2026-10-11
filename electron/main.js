@@ -243,6 +243,14 @@ ipcMain.handle('printers:clearQueue', async (_e, names) => {
   catch (e) { return { removed: 0, reason: (e && e.message) || 'Could not clear the queue' } }
 })
 
+// Local backups — see electron/backup.js. Lazy-required like printing.
+ipcMain.handle('backup:write', async (_e, payload) => {
+  try { return await require('./backup').write(payload) }
+  catch (e) { return { ok: false, reason: (e && e.message) || 'Backup failed' } }
+})
+ipcMain.handle('backup:list', () => { try { return require('./backup').list() } catch { return { dir: '', files: [] } } })
+ipcMain.handle('backup:open', async () => { try { return await require('./backup').open() } catch (e) { return String(e && e.message) } })
+
 ipcMain.handle('print:html', async (_e, { html, deviceName, widthMm, heightMm, settleMs, copies }) => {
   try { return await printing().printHTML(html, { deviceName, widthMm, heightMm, settleMs, copies }) }
   catch (e) { return { ok: false, reason: (e && e.message) || 'Print failed' } }

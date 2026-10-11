@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { writeLocal, seedLocal } from '../utils/localStore'
+import { useLiveRefresh } from './useLiveRefresh'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 
@@ -31,8 +33,11 @@ export function useSuppliers() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
+  const fresh = useRef(false)   // the server has answered; the PC's copy is older
+  const shown = useRef(false)   // something is on screen: refresh quietly
+
   const loadSuppliers = useCallback(async () => {
-    setLoading(true)
+    if (!shown.current) setLoading(true)
     try {
       if (navigator.onLine) {
         const { data, error } = await supabase
@@ -42,6 +47,8 @@ export function useSuppliers() {
 
         if (!error && data) {
           setSuppliers(data)
+          fresh.current = true; shown.current = true
+          void writeLocal('suppliers:list', data)
           try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)) } catch {}
           setLoading(false)
           return
@@ -80,15 +87,24 @@ export function useSuppliers() {
         next[bill.supplier_id] = cur
       }
       setStats(next)
+      void writeLocal('suppliers:stats', next)
     } catch (e) {
       console.warn('Supplier stats notice:', e)
     }
   }, [])
 
+  // Open with this PC's copy of the supplier list and figures; the loads below replace them.
+  useEffect(() => {
+    seedLocal<Supplier[]>('suppliers:list', d => { setSuppliers(d); setLoading(false); shown.current = true }, () => fresh.current)
+    seedLocal<Record<string, SupplierStats>>('suppliers:stats', setStats, () => fresh.current)
+  }, [])
   useEffect(() => {
     loadSuppliers()
     loadStats()
   }, [loadSuppliers, loadStats])
+
+  useLiveRefresh(['suppliers'], loadSuppliers)
+  useLiveRefresh(['purchase_bills'], loadStats)
 
   // Same payload shape usePurchaseEntry inserts, so both paths stay compatible.
   const createSupplier = async (payload: Partial<Supplier>): Promise<Supplier | null> => {

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Printer, Search, Loader2, X, Truck, MessageCircle, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
+import { Printer, Search, Loader2, X, Truck, MessageCircle, ChevronDown, ChevronRight, Pencil, Plus } from 'lucide-react'
+import { PartyFormModal } from '../components/wholesale/PartyFormModal'
 import toast from 'react-hot-toast'
 import { Layout } from '../components/shared/Layout'
 import { useLiveRefresh } from '../hooks/useLiveRefresh'
@@ -33,7 +34,7 @@ function BillActions({ bill, onEway, onEdit }: { bill: any; onEway: (b: any) => 
 }
 
 /** A wholesale party at a glance: details, totals and every bill with its items. */
-function PartyModal({ party, bills, onClose, onEway, onEdit }: { party: any; bills: any[]; onClose: () => void; onEway: (b: any) => void; onEdit: (id: string) => void }) {
+function PartyModal({ party, bills, onClose, onEway, onEdit, onEditParty }: { party: any; bills: any[]; onClose: () => void; onEway: (b: any) => void; onEdit: (id: string) => void; onEditParty: () => void }) {
   const [open, setOpen] = useState<string | null>(null)
   const mine = bills.filter(b => b.wholesale_customer_id === party.id)
   const total = mine.reduce((s, b) => s + (Number(b.net_amount) || 0), 0)
@@ -57,7 +58,10 @@ function PartyModal({ party, bills, onClose, onEway, onEdit }: { party: any; bil
                 [party.address, party.city, party.state, party.pincode].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
             </div>
           </div>
-          <button style={S.x} onClick={onClose} aria-label="Close"><X size={18} /></button>
+          <div style={S.row}>
+            <button style={S.btnOutline} onClick={onEditParty}><Pencil size={14} /> Edit details</button>
+            <button style={S.x} onClick={onClose} aria-label="Close"><X size={18} /></button>
+          </div>
         </div>
         <div style={S.body}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
@@ -117,8 +121,9 @@ function PartyModal({ party, bills, onClose, onEway, onEdit }: { party: any; bil
 }
 
 /** Every wholesale bill and party, like Purchase Bills is for purchases. */
-export function WholesaleBillsPage() {
-  const [tab, setTab] = useState<'bills' | 'parties'>('bills')
+export function WholesaleBillsPage({ initialTab = 'bills' }: { initialTab?: 'bills' | 'parties' } = {}) {
+  const [tab, setTab] = useState<'bills' | 'parties'>(initialTab)
+  const [partyForm, setPartyForm] = useState<{ party?: any } | null>(null)   // add (no party) or edit
   const [bills, setBills] = useState<any[]>([])
   const [parties, setParties] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -151,16 +156,21 @@ export function WholesaleBillsPage() {
       <div style={{ padding: '20px 24px', fontFamily: 'DM Sans, sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#1a0a2e' }}>Wholesale Bills</div>
-            <div style={S.muted}>Every wholesale bill and party — print, WhatsApp and e-way bill any time.</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#1a0a2e' }}>Wholesale Bills &amp; Parties</div>
+            <div style={S.muted}>{tab === 'parties'
+              ? 'Every wholesale party — add, edit, see their bills and send a pending statement.'
+              : 'Every wholesale bill — print, WhatsApp, edit and e-way bill any time.'}</div>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 4, background: '#dbeafe', padding: 4, borderRadius: 12 }}>
               {(['bills', 'parties'] as const).map(t => (
-                <button key={t} onClick={() => setTab(t)} style={{ border: 0, padding: '7px 14px', borderRadius: 9, fontWeight: 600, cursor: 'pointer',
+                <button key={t} onClick={() => { setTab(t); setSearch('') }} style={{ border: 0, padding: '7px 14px', borderRadius: 9, fontWeight: 600, cursor: 'pointer',
                   background: tab === t ? 'white' : 'transparent', color: tab === t ? '#1d4ed8' : '#475569' }}>
                   {t === 'bills' ? `Bills (${bills.length})` : `Parties (${parties.length})`}</button>))}
             </div>
+            {tab === 'parties' && (
+              <button style={S.btnPrimary} onClick={() => setPartyForm({})}><Plus size={15} style={{ verticalAlign: '-3px' }} /> New party</button>
+            )}
             <div style={{ ...S.row, minWidth: 260 }}>
               <Search size={15} color="#64748b" />
               <input style={{ ...S.input, flex: 1 }} placeholder={tab === 'bills' ? 'Invoice no, party or phone' : 'Party, phone, GSTIN or city'}
@@ -201,6 +211,7 @@ export function WholesaleBillsPage() {
                 <th style={S.th}>Party</th><th style={S.th}>Phone</th><th style={S.th}>GSTIN</th><th style={S.th}>City</th>
                 <th style={{ ...S.th, textAlign: 'right' }}>Bills</th><th style={{ ...S.th, textAlign: 'right' }}>Business</th>
                 <th style={{ ...S.th, textAlign: 'right' }}>Pending</th>
+                <th style={{ ...S.th, width: 44 }} />
               </tr></thead>
               <tbody>
                 {shownParties.map(p => {
@@ -208,23 +219,31 @@ export function WholesaleBillsPage() {
                   const due = mine.reduce((s, b) => s + pending(b), 0)
                   return (
                     <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => setParty(p)}>
-                      <td style={S.td}><b style={{ color: '#1d4ed8' }}>{partyName(p)}</b></td>
+                      <td style={S.td}><b style={{ color: '#1d4ed8' }}>{partyName(p)}</b>
+                        {p.is_active === false && <span style={{ ...S.muted, marginLeft: 6 }}>(inactive)</span>}</td>
                       <td style={S.td}>{p.phone || '—'}</td>
                       <td style={S.td}>{p.gstin || '—'}</td>
                       <td style={S.td}>{p.city || '—'}</td>
                       <td style={{ ...S.td, textAlign: 'right' }}>{mine.length}</td>
                       <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(mine.reduce((s, b) => s + (Number(b.net_amount) || 0), 0))}</td>
                       <td style={{ ...S.td, textAlign: 'right', color: due > 0 ? '#b45309' : '#15803d' }}>{due > 0 ? money(due) : '—'}</td>
+                      <td style={S.td}>
+                        <button style={{ ...S.iconBtn, color: '#1d4ed8' }} title="Edit party details"
+                          onClick={e => { e.stopPropagation(); setPartyForm({ party: p }) }}><Pencil size={15} /></button>
+                      </td>
                     </tr>)
                 })}
-                {!shownParties.length && <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center', color: '#94a3b8' }}>No parties found</td></tr>}
+                {!shownParties.length && <tr><td colSpan={8} style={{ ...S.td, textAlign: 'center', color: '#94a3b8' }}>No parties found</td></tr>}
               </tbody>
             </table>
           )}
         </div>
       </div>
 
-      {party && <PartyModal party={party} bills={bills} onClose={() => setParty(null)} onEway={b => setEway(b)} onEdit={setEditId} />}
+      {party && <PartyModal party={party} bills={bills} onClose={() => setParty(null)} onEway={b => setEway(b)} onEdit={setEditId}
+        onEditParty={() => setPartyForm({ party })} />}
+      {partyForm && <PartyFormModal party={partyForm.party} onClose={() => setPartyForm(null)}
+        onSaved={saved => { if (party?.id === saved.id) setParty(saved); load() }} />}
       {editId && <EditWholesaleModal billId={editId} onClose={() => setEditId(null)} onSaved={() => load()} />}
       {eway && <EwayBillModal saleData={saleDataFromRow(eway)} onClose={() => setEway(null)} />}
     </Layout>

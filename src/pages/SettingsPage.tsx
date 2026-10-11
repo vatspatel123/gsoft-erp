@@ -4,6 +4,9 @@ import { Layout } from '../components/shared/Layout'
 import { getSettings, saveSettings, DEFAULT_SETTINGS, pushShopSettings, pullShopSettings, type AppSettings } from '../utils/settings'
 import { supabase } from '../lib/supabase'
 import { printBill, buildBillHTML, buildBillMessage } from '../utils/printBill'
+import { clearLocal } from '../utils/localStore'
+import { runBackup } from '../utils/backup'
+import { fmtDateTime } from '../utils/date'
 import { printHTML, listPrinters, canSelectPrinters, autoAssignPrinters, clearPrintQueues, pendingJobs } from '../utils/printHTML'
 import { printBarcodeLabels } from '../utils/printLabels'
 import { printPurchaseA4 } from '../utils/printA4Purchase'
@@ -989,6 +992,51 @@ function NotificationsTab() {
 
 // ─── TAB 5: Data & Backup ────────────────────────────────────────────────────
 
+/** Backups saved on this PC: when the last one was made, a button to make one now, and the folder. */
+function PcBackupCard() {
+  const api = window.electronAPI?.backup
+  const [info, setInfo] = useState<{ dir: string; files: { name: string; size: number; at: number }[] } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const refresh = () => { api?.list().then(setInfo).catch(() => {}) }
+  useEffect(refresh, [])
+  if (!api) return null
+
+  const last = info?.files[0]
+  const ageH = last ? (Date.now() - last.at) / 3_600_000 : null
+  const run = async () => {
+    setBusy(true)
+    const r = await runBackup('manual')
+    setBusy(false)
+    if (r.ok) toast.success(r.problems.length ? `Backup saved, but: ${r.problems.join('; ')}` : 'Backup saved on this PC', { duration: r.problems.length ? 9000 : 3000 })
+    else toast.error(`Backup not made: ${r.reason}`, { duration: 7000 })
+    refresh()
+  }
+  return (
+    <Card>
+      <SectionTitle sub="A copy of all your data, saved on this PC about twice a day. The last 30 are kept.">Backup on this PC</SectionTitle>
+      <div style={{ fontSize: '13px', color: '#1a0a2e', marginBottom: '6px' }}>
+        {last
+          ? <>Last backup: <b>{fmtDateTime(new Date(last.at))}</b> · {(last.size / 1024 / 1024).toFixed(1)} MB
+              {ageH! > 30 && <span style={{ color: '#dc2626' }}> · over a day old, press Back up now</span>}</>
+          : <span style={{ color: '#b45309' }}>No backup yet — the first one is made a minute after signing in, or press Back up now.</span>}
+      </div>
+      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px', wordBreak: 'break-all' }}>
+        Saved in: {info?.dir || '…'}{info && info.files.length > 1 ? ` · ${info.files.length}+ files` : ''}
+      </div>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button onClick={run} disabled={busy}
+          style={{ padding: '9px 18px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: "'DM Sans', sans-serif" }}>
+          {busy ? 'Backing up…' : 'Back up now'}
+        </button>
+        <button onClick={() => { void api.open() }}
+          style={{ padding: '9px 18px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+          Open backup folder
+        </button>
+      </div>
+    </Card>
+  )
+}
+
 function DataBackupTab() {
   const [dbStatus, setDbStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
   const [dangerText, setDangerText] = useState('')
@@ -1060,6 +1108,7 @@ function DataBackupTab() {
     for (const k of keys) {
       if (localStorage.getItem(k) !== null) { localStorage.removeItem(k); removed++ }
     }
+    void clearLocal()   // the screens' copies too, or a reset would still show old data
     toast.success(`Cleared ${removed} cached item${removed === 1 ? '' : 's'}`)
     setCacheText('')
     setTimeout(() => window.location.reload(), 1000)
@@ -1083,6 +1132,7 @@ function DataBackupTab() {
 
   return (
     <>
+      <PcBackupCard />
       <Card>
         <SectionTitle sub="Download your data as CSV files">Export Data</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -1113,6 +1163,13 @@ function DataBackupTab() {
         </div>
         <button onClick={testConnection} style={{ padding: '9px 18px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
           Test Connection
+        </button>
+        {/* Screens open from this PC's copy and then refresh; this rebuilds that copy
+            from the server if anything ever looks out of date. Nothing on the server changes. */}
+        <button onClick={async () => { await clearLocal(); toast.success('Refreshing data from the server…'); setTimeout(() => window.location.reload(), 600) }}
+          title="Fetch everything fresh from the server. Your saved data is not touched."
+          style={{ marginLeft: '8px', padding: '9px 18px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+          🔄 Refresh data on this PC
         </button>
       </Card>
 

@@ -5,7 +5,7 @@
 DO $$
 DECLARE t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['products', 'sales', 'purchase_bills', 'wholesale_sales', 'expenses'] LOOP
+  FOREACH t IN ARRAY ARRAY['products', 'sales', 'purchase_bills', 'wholesale_sales', 'expenses', 'customers', 'suppliers'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = t) THEN
       EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
     END IF;

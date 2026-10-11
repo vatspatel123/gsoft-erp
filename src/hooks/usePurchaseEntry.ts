@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { saveProductsToCache } from '../utils/offlineCache'
-import { useLiveRefresh } from './useLiveRefresh'
+import { editPurchase, type PurchaseLine } from '../utils/billEdits'
 
 export interface Supplier {
   id: string
@@ -84,9 +84,13 @@ function loadDraft(): any {
   try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null') } catch { return null }
 }
 
-export function usePurchaseEntry() {
+export function usePurchaseEntry(initialTab: 'new' | 'bills' = 'new') {
   const draft = useRef(loadDraft()).current
-  const [tab, setTab] = useState<'new' | 'history'>('new')
+  const [tab, setTab] = useState<'new' | 'bills'>(initialTab)
+  // Editing a saved bill in this same screen (null = a new purchase). While editing,
+  // the new purchase being typed stays saved on this PC and comes back afterwards.
+  const [editing, setEditing] = useState<null | { id: string; no: string; netBefore: number; paid: number }>(null)
+  const [editReason, setEditReason] = useState('')
 
   // Supplier
   const [supplier, setSupplier] = useState<Supplier | null>(draft?.supplier ?? null)
@@ -136,10 +140,6 @@ export function usePurchaseEntry() {
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [purchaseComplete, setPurchaseComplete] = useState<PurchaseComplete | null>(null)
 
-  // History
-  const [history, setHistory] = useState<any[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'paid' | 'pending'>('all')
 
   // Counter
   const [counter, setCounter] = useState(1)
@@ -171,32 +171,6 @@ export function usePurchaseEntry() {
     }, 300)
     return () => clearTimeout(t)
   }, [supplierQuery])
-
-  // Fetch history when tab changes
-  useEffect(() => {
-    if (tab === 'history') fetchHistory()
-  }, [tab, historyFilter])
-  useLiveRefresh(['purchase_bills'], () => { if (tab === 'history') fetchHistory() })
-
-  const fetchHistory = async () => {
-    setHistoryLoading(true)
-    try {
-      let q = supabase
-        .from('purchase_bills')
-        .select(`*, suppliers(name,phone,gstin), purchase_items(id)`)
-        .order('created_at', { ascending: false })
-        .limit(100)
-
-      if (historyFilter !== 'all') {
-        q = q.eq('payment_status', historyFilter)
-      }
-
-      const { data } = await q
-      setHistory(data || [])
-    } finally {
-      setHistoryLoading(false)
-    }
-  }
 
   // ── Calculations ──────────────────────────────────────────────────────────
   const subtotal = items.reduce((sum, item) => {
@@ -257,6 +231,8 @@ export function usePurchaseEntry() {
       const newGroup = Math.random().toString(36).slice(2)
       const clones: PurchaseItem[] = members.reduce<PurchaseItem[]>((out, m) => [...out, {
         ...m,
+        // In a bill being edited a line's product is a real one: its copy is a new product.
+        product: editing ? null : m.product,
         id: Math.random().toString(36).slice(2),
         groupId: newGroup,
         size: newSize,
@@ -280,6 +256,7 @@ export function usePurchaseEntry() {
       const groupId = src.groupId || Math.random().toString(36).slice(2)
       const copy: PurchaseItem = {
         ...src,
+        product: editing ? null : src.product,   // see duplicateGroupAsSize
         id: Math.random().toString(36).slice(2),
         groupId,
         colour: '',
@@ -338,6 +315,7 @@ export function usePurchaseEntry() {
   // Keep the work on this PC as it is typed (see DRAFT_KEY).
   const hasDraft = items.some(i => i.product || i.productName.trim()) || !!supplier || !!supplierInvoiceNo.trim()
   useEffect(() => {
+    if (editing) return   // the bill being edited is not the new purchase: leave that draft alone
     try {
       if (!hasDraft) localStorage.removeItem(DRAFT_KEY)
       else localStorage.setItem(DRAFT_KEY, JSON.stringify({
@@ -345,8 +323,110 @@ export function usePurchaseEntry() {
         discountAmt, discountPct, discountMode, freightAmt, notes, items,
       }))
     } catch { /* storage full or blocked: the form still works, it just isn't kept */ }
-  }, [hasDraft, supplier, supplierInvoiceNo, supplierInvoiceDate, paymentMode, paymentStatus, gstType,
+  }, [editing, hasDraft, supplier, supplierInvoiceNo, supplierInvoiceDate, paymentMode, paymentStatus, gstType,
       discountAmt, discountPct, discountMode, freightAmt, notes, items])
+
+  // ── Edit a saved bill in this screen ──────────────────────────────────────
+  // Put a saved form (or the empty one) back on screen.
+  const applyForm = (d: any) => {
+    setSupplier(d?.supplier ?? null)
+    setSupplierQuery('')
+    setSupplierInvoiceNo(d?.supplierInvoiceNo ?? '')
+    setSupplierInvoiceDate(d?.supplierInvoiceDate ?? new Date().toISOString().slice(0, 10))
+    setPaymentMode(d?.paymentMode ?? 'credit')
+    setPaymentStatus(d?.paymentStatus ?? 'pending')
+    setGstType(d?.gstType ?? 'gst')
+    setDiscountMode(d?.discountMode ?? 'amount')
+    setDiscountAmt(d?.discountAmt ?? 0)
+    setDiscountPct(d?.discountPct ?? 0)
+    setFreightAmt(d?.freightAmt ?? 0)
+    setNotes(d?.notes ?? '')
+    setItems(d?.items?.length ? d.items : [EMPTY_ITEM('')])
+  }
+
+  const startEdit = async (billId: string) => {
+    const { data: bill, error } = await supabase.from('purchase_bills')
+      .select('*, purchase_items(product_id, product_name, design_no, pcode, colour, size, barcode, qty, unit_cost, mrp, gst_rate, products(id, name, barcode, sku, design_no, pcode, colour, size, mrp, wholesale_price, online_price, stock_qty, gst_rate, cost_price, unit_price))')
+      .eq('id', billId).single()
+    if (error || !bill) { toast.error('Could not open this purchase bill'); return }
+    let sup: any = null
+    if (bill.supplier_id) {
+      const { data } = await supabase.from('suppliers').select('*').eq('id', bill.supplier_id).maybeSingle()
+      sup = data
+    }
+    const num = (v: any) => (v === null || v === undefined || v === '' ? '' : Number(v))
+    const rows: PurchaseItem[] = (bill.purchase_items || []).filter((i: any) => i.product_id).map((i: any) => {
+      const p = i.products || {}
+      const qty = Number(i.qty) || 0, cost = Number(i.unit_cost) || 0
+      return {
+        id: Math.random().toString(36).slice(2),
+        product: p.id ? p : { id: i.product_id },
+        productName: p.name || i.product_name || '',
+        design_no: p.design_no ?? i.design_no ?? '', pcode: p.pcode ?? i.pcode ?? '',
+        size: p.size ?? i.size ?? '', colour: p.colour ?? i.colour ?? '',
+        mrp: num(i.mrp ?? p.mrp), qty, barcode: p.barcode || i.barcode || '',
+        unit_cost: cost, gst_rate: Number(i.gst_rate ?? p.gst_rate) || 0,
+        wholesale_price: num(p.wholesale_price), online_price: num(p.online_price),
+        line_total: qty * cost,
+      }
+    })
+    setEditing({ id: bill.id, no: bill.purchase_no, netBefore: Number(bill.net_amount) || 0, paid: Number(bill.amount_paid) || 0 })
+    setEditReason('')
+    applyForm({
+      supplier: sup, supplierInvoiceNo: bill.supplier_invoice_no || '', supplierInvoiceDate: bill.supplier_invoice_date || '',
+      paymentMode: bill.payment_mode || 'credit', paymentStatus: bill.payment_status === 'paid' ? 'paid' : 'pending',
+      gstType: bill.gst_type || 'gst', discountMode: 'amount', discountAmt: Number(bill.discount_amount) || 0,
+      freightAmt: Number(bill.freight) || 0, notes: bill.notes || '', items: rows,
+    })
+    setTab('new')
+    toast(`Editing ${bill.purchase_no}`, { icon: '✏️' })
+  }
+
+  // Leave the bill; the new purchase that was being typed comes back.
+  const cancelEdit = () => {
+    setEditing(null)
+    setEditReason('')
+    applyForm(loadDraft())
+    void loadLastCode()   // numbers the edit used are taken now
+  }
+
+  /** Save the edit through edit_purchase (stock moves by the difference). Returns the new lines, for labels. */
+  const saveEdit = async (): Promise<PurchaseItem[] | null> => {
+    if (!editing) return null
+    const rows = items.filter(isStarted)
+    if (!rows.length) { toast.error('A purchase bill needs at least one item'); return null }
+    const noQty = rows.filter(missingQty).length, noCost = rows.filter(missingCost).length
+    if (noQty || noCost) { toast.error(`${noQty ? `${noQty} with no qty` : ''}${noQty && noCost ? ', ' : ''}${noCost ? `${noCost} with no cost` : ''} — marked in red`); return null }
+    if (rows.some(r => !Number.isInteger(r.qty))) { toast.error('Quantities must be whole numbers'); return null }
+    if (rows.some(r => !String(r.barcode || '').trim())) { toast.error('Every item needs a barcode'); return null }
+    const codes = rows.map(r => String(r.barcode).trim())
+    const dup = codes.find((c, i) => codes.indexOf(c) !== i)
+    if (dup) { toast.error(`Barcode ${dup} is on two lines`); return null }
+    if (supplier && !supplier.id) { toast.error('Save the new supplier first'); return null }
+    if (editReason.trim().length < 3) { toast.error('Please write why this bill is being edited'); return null }
+
+    const lines: PurchaseLine[] = rows.map(r => ({
+      product_id: r.product?.id || '', name: r.productName.trim() || r.product?.name || '', barcode: String(r.barcode).trim(),
+      size: r.size, design_no: r.design_no, colour: r.colour, pcode: r.pcode,
+      mrp: typeof r.mrp === 'number' ? r.mrp : undefined,
+      wholesale_price: typeof r.wholesale_price === 'number' ? r.wholesale_price : undefined,
+      online_price: typeof r.online_price === 'number' ? r.online_price : undefined,
+      qty: r.qty as number, unit_cost: r.unit_cost as number, gst_rate: r.gst_rate, orig_qty: 0, stock_qty: 0,
+    }))
+    const changes = {
+      supplier_id: supplier?.id || '', supplier_invoice_no: supplierInvoiceNo.trim(), supplier_invoice_date: supplierInvoiceDate || '',
+      discount_amount: Math.round(effectiveDiscount * 100) / 100, freight: Math.round((freightAmt || 0) * 100) / 100, notes: notes.trim(),
+    }
+    setLoading(true)
+    const res = await editPurchase(editing.id, changes, lines, editReason.trim())
+    setLoading(false)
+    if (!res.ok) { toast.error(res.error, { duration: 7000 }); return null }
+    toast.success(`${editing.no} updated · net ₹${res.net.toLocaleString('en-IN')}`)
+    const added = rows.filter(r => !r.product)
+    cancelEdit()
+    setTab('bills')
+    return added
+  }
 
   // ── Reset form ────────────────────────────────────────────────────────────
   const resetForm = () => {
@@ -584,7 +664,7 @@ export function usePurchaseEntry() {
     loading, savePurchase,
     showSuccessModal, setShowSuccessModal,
     purchaseComplete,
-    history, historyLoading, historyFilter, setHistoryFilter, fetchHistory,
+    editing, editReason, setEditReason, startEdit, cancelEdit, saveEdit,
     counter,
     listOnWebsite, setListOnWebsite,
   }

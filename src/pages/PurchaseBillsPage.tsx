@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Printer, Pencil, Search, Loader2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import { printPurchaseA4 } from '../utils/printA4Purchase'
 import { money } from '../utils/billEdits'
@@ -11,12 +10,13 @@ import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 import { S } from '../components/bills/billEditStyles'
 import { fmtDate } from '../utils/date'
 import { useLiveRefresh } from '../hooks/useLiveRefresh'
+import { writeLocal, seedLocal } from '../utils/localStore'
 
 /**
  * Every purchase bill in one place — there wasn't a list before, only each
  * supplier's history. Print on A4, edit, and see what was changed.
  */
-export function PurchaseBillsPage() {
+export function PurchaseBillsList({ onEdit }: { onEdit?: (billId: string) => void } = {}) {
   const [bills, setBills] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<Record<string, { name: string; gstin?: string }>>({})
   const [loading, setLoading] = useState(true)
@@ -25,8 +25,10 @@ export function PurchaseBillsPage() {
   const [history, setHistory] = useState<{ id: string; no: string } | null>(null)
   const [deleting, setDeleting] = useState<{ id: string; no: string } | null>(null)
 
+  const fresh = useRef(false)   // the server has answered; the PC's copy is older
+  const onScreen = useRef(false)   // bills are on screen: refresh quietly
   const load = useCallback(async () => {
-    setLoading(true)
+    if (!onScreen.current) setLoading(true)
     const [b, s] = await Promise.all([
       supabase.from('purchase_bills')
         .select('id, purchase_no, supplier_id, supplier_invoice_no, supplier_invoice_date, net_amount, amount_paid, payment_status, edit_count, created_at')
@@ -35,10 +37,17 @@ export function PurchaseBillsPage() {
     ])
     if (b.error) toast.error('Could not load purchase bills')
     setBills(b.data || [])
-    setSuppliers(Object.fromEntries((s.data || []).map((x: any) => [x.id, { name: x.name, gstin: x.gstin }])))
+    const sup = Object.fromEntries((s.data || []).map((x: any) => [x.id, { name: x.name, gstin: x.gstin }]))
+    setSuppliers(sup)
+    if (!b.error) { fresh.current = true; onScreen.current = true; void writeLocal('purchasebills:list', { bills: b.data || [], sup }) }
     setLoading(false)
   }, [])
 
+  // Open with this PC's copy of the bills; the load below replaces it.
+  useEffect(() => {
+    seedLocal<{ bills: any[]; sup: any }>('purchasebills:list',
+      d => { setBills(d.bills); setSuppliers(d.sup); setLoading(false); onScreen.current = true }, () => fresh.current)
+  }, [])
   useEffect(() => { load() }, [load])
   useLiveRefresh(['purchase_bills'], load)
 
@@ -75,11 +84,11 @@ export function PurchaseBillsPage() {
   }
 
   return (
-    <Layout>
-      <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", color: '#1a0a2e' }}>
+    <>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", color: '#1a0a2e' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 24 }}>Purchase Bills</h1>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Purchase Bills</div>
             <div style={S.muted}>Print, edit and check the history of every purchase.</div>
           </div>
           <div style={{ ...S.row, minWidth: 280 }}>
@@ -126,7 +135,7 @@ export function PurchaseBillsPage() {
                       <td style={S.td}>
                         <div style={S.row}>
                           <button style={S.btnOutline} onClick={() => print(b)} title="Print on A4"><Printer size={14} /></button>
-                          <button style={S.btnOutline} onClick={() => setEditing(b.id)}><Pencil size={14} /> Edit</button>
+                          <button style={S.btnOutline} onClick={() => (onEdit ? onEdit(b.id) : setEditing(b.id))}><Pencil size={14} /> Edit</button>
                           <button style={{ ...S.btnOutline, color: '#dc2626', borderColor: '#fecaca' }} title="Delete this purchase bill"
                             onClick={() => setDeleting({ id: b.id, no: b.purchase_no })}><Trash2 size={14} /></button>
                         </div>
@@ -146,6 +155,6 @@ export function PurchaseBillsPage() {
       {editing && <EditPurchaseModal billId={editing} onClose={() => setEditing(null)} onSaved={() => load()} />}
       {deleting && <DeleteBillModal type="purchase" billId={deleting.id} billNo={deleting.no} onClose={() => setDeleting(null)} onDeleted={() => load()} />}
       {history && <BillHistoryModal type="purchase" billId={history.id} billNo={history.no} onClose={() => setHistory(null)} />}
-    </Layout>
+    </>
   )
 }

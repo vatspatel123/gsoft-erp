@@ -161,12 +161,18 @@ const sharedOnly = (s: AppSettings): Partial<AppSettings> => {
  * Called once after sign-in. A fresh install therefore picks up the shop's bill
  * layout, logo and conditions instead of showing factory defaults.
  */
+// The settings carry the shop logo (~125 KB). Sign-in events repeat every time
+// the login renews, and each one re-downloaded it: the slowest request the app
+// made. Settings rarely change, so once every 10 minutes is plenty.
+let lastPull = 0
 export async function pullShopSettings(): Promise<boolean> {
+  if (Date.now() - lastPull < 10 * 60 * 1000) return false
+  lastPull = Date.now()
   try {
     const { supabase } = await import('../lib/supabase')
     const { data, error } = await supabase
       .from('stores').select('settings').order('created_at', { ascending: true }).limit(1)
-    if (error) return false
+    if (error) { lastPull = 0; return false }   // try again next time
 
     const local = getSettings()
     const remote = data?.[0]?.settings
@@ -194,7 +200,7 @@ export async function pullShopSettings(): Promise<boolean> {
 
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged))
     return true
-  } catch { return false }
+  } catch { lastPull = 0; return false }
 }
 
 /** Publish this shop's settings so other computers pick them up. */

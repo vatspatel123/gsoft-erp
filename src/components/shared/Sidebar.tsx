@@ -31,7 +31,7 @@ const SECTIONS: NavSection[] = [
       { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, shortcut: '⌃2' },
       { to: '/', label: 'POS Billing', icon: ShoppingCart, exact: true, badge: 'Live', badgeColor: '#ef4444', shortcut: '⌃1' },
       { to: '/wholesale', label: 'Wholesale', icon: Store, badge: 'B2B', badgeColor: '#1d4ed8' },
-      { to: '/wholesale-bills', label: 'Wholesale Bills', icon: FileText },
+      { to: '/wholesale-bills', label: 'Wholesale Bills & Parties', icon: FileText },
     ]
   },
   {
@@ -55,8 +55,7 @@ const SECTIONS: NavSection[] = [
     title: 'Procurement',
     items: [
       { to: '/suppliers', label: 'Suppliers', icon: Truck },
-      { to: '/purchase-entry', label: 'Purchase Entry', icon: ShoppingBag },
-      { to: '/purchase-bills', label: 'Purchase Bills', icon: FileText },
+      { to: '/purchase-entry', label: 'Purchase Entry & Bills', icon: ShoppingBag },
       { to: '/purchase-returns', label: 'Purchase Returns', icon: RotateCcw, badge: 'New', badgeColor: '#dc2626' },
     ]
   },

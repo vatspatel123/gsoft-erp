@@ -1,3 +1,4 @@
+import { CustomDates } from '../components/shared/CustomDates'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout } from '../components/shared/Layout'
@@ -40,6 +41,7 @@ export function InvoicesPage() {
     setSalesmanFilter,
     dateRange,
     setDateRange,
+    customFrom, setCustomFrom, customTo, setCustomTo, todayStr,
     salesmen,
     totalRevenue,
     totalGST,
@@ -254,6 +256,15 @@ export function InvoicesPage() {
               >
                 All
               </button>
+              <button
+                className={`date-btn ${dateRange === 'custom' ? 'active' : ''}`}
+                onClick={() => setDateRange('custom')}
+              >
+                Custom
+              </button>
+              {dateRange === 'custom' && (
+                <CustomDates from={customFrom} to={customTo} max={todayStr} onFrom={setCustomFrom} onTo={setCustomTo} />
+              )}
             </div>
           </div>
         </div>

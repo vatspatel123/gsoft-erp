@@ -6,6 +6,7 @@ import { useNotifications } from './hooks/useNotifications'
 import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale } from './utils/offlineCache'
 import { pullShopSettings, getSettings, saveSettings } from './utils/settings'
 import { autoAssignPrinters, canSelectPrinters } from './utils/printHTML'
+import { backupIfDue } from './utils/backup'
 import { enterToNextField } from './utils/enterNavigation'
 import { supabase } from './lib/supabase'
 import toast from 'react-hot-toast'
@@ -27,7 +28,6 @@ import { WholesalePage } from './pages/WholesalePage'
 import { WholesaleBillsPage } from './pages/WholesaleBillsPage'
 import { PurchaseEntryPage } from './pages/PurchaseEntryPage'
 import { PurchaseReturnPage } from './pages/PurchaseReturnPage'
-import { PurchaseBillsPage } from './pages/PurchaseBillsPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { OnlineListingsPage } from './pages/OnlineListingsPage'
 import { OnlineOrdersPage } from './pages/OnlineOrdersPage'
@@ -57,6 +57,15 @@ function AppContent() {
       if (changed.length) saveSettings(Object.fromEntries(changed.map(k => [k, patch[k]])))
     }).catch(() => {})
   }, [])
+
+  // Backup to this PC: once shortly after sign-in (if the newest is over ~11 h old), then
+  // checked every 30 minutes, which makes about two a day on a PC that stays on all day.
+  useEffect(() => {
+    if (!session) return
+    const first = setTimeout(() => { void backupIfDue() }, 60_000)   // after the screens have loaded
+    const every = setInterval(() => { void backupIfDue() }, 30 * 60_000)
+    return () => { clearTimeout(first); clearInterval(every) }
+  }, [!!session])
 
   // Auth state listener
   useEffect(() => {
@@ -116,6 +125,12 @@ function AppContent() {
   useEffect(() => {
     const preCache = async () => {
       if (!navigator.onLine) return
+      // The lists were saved under 15 minutes ago (a restart): the screens refresh
+      // themselves, so don't download the whole catalogue again at start-up.
+      try {
+        const at = JSON.parse(localStorage.getItem('gsoft_products_cache') || 'null')?.savedAt
+        if (at && Date.now() - at < 15 * 60 * 1000) return
+      } catch { /* no saved list: download it */ }
       try {
         const [p, s, c] = await Promise.all([
           supabase.from('products').select('*').eq('is_active', true),
@@ -287,10 +302,11 @@ function AppContent() {
         <Route path="/formats" element={<FormatDesignerPage />} />
         <Route path="/exchange" element={<ExchangePage />} />
         <Route path="/wholesale" element={<WholesalePage />} />
-        <Route path="/wholesale-bills" element={<WholesaleBillsPage />} />
-        <Route path="/purchase-entry" element={<PurchaseEntryPage />} />
+        <Route path="/wholesale-bills" element={<WholesaleBillsPage key="bills" />} />
+        <Route path="/wholesale-parties" element={<WholesaleBillsPage key="parties" initialTab="parties" />} />
+        <Route path="/purchase-entry" element={<PurchaseEntryPage key="entry" />} />
         <Route path="/purchase-returns" element={<PurchaseReturnPage />} />
-        <Route path="/purchase-bills" element={<PurchaseBillsPage />} />
+        <Route path="/purchase-bills" element={<PurchaseEntryPage key="bills" initialTab="bills" />} />
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/online-listings" element={<OnlineListingsPage />} />
         <Route path="/online-orders" element={<OnlineOrdersPage />} />

@@ -186,6 +186,13 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
                       {[row.product.size, row.product.colour].filter(Boolean).join(' · ') || row.product.sku}
                     </div>
                   </div>
+                  {/* How many were bought (after a purchase) or are in stock, to decide the label count by. */}
+                  {(row.product.defaultCopies ?? row.product.stock_qty) != null && (
+                    <div title={row.product.defaultCopies != null ? 'Quantity on this purchase' : 'In stock'}
+                      style={{ flexShrink: 0, fontSize: '10.5px', fontWeight: 600, color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '3px 7px', whiteSpace: 'nowrap' }}>
+                      {row.product.defaultCopies != null ? 'Qty' : 'Stock'} {row.product.defaultCopies ?? row.product.stock_qty}
+                    </div>
+                  )}
                   <input
                     type="text"
                     value={row.barcode}

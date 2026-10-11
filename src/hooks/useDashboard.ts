@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { writeLocal, seedLocal } from '../utils/localStore';
 import { supabase } from '../lib/supabase';
 import { getCachedProducts, getPendingSales } from '../utils/offlineCache';
 import { fmtDayMonth } from '../utils/date'
@@ -195,8 +196,10 @@ export function useDashboard() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
 
+  const fresh = useRef(false)   // the server has answered; the PC's copy is older
+  const shown = useRef(false)   // figures are on screen: refresh quietly
   const fetchDashboardData = async () => {
-    setLoading(true)
+    if (!shown.current) setLoading(true)
     try {
       const { from, to } = getISTDateRange(
         dateRange, customFrom, customTo
@@ -352,7 +355,7 @@ export function useDashboard() {
       })
       const salesmanData = Object.values(salesmanMap).sort((a: any, b: any) => b.revenue - a.revenue).slice(0, 5)
 
-      setData({
+      const next = ({
         todayRevenue: revenue,
         allTimeRevenue,
         yesterdayRevenue,
@@ -369,6 +372,10 @@ export function useDashboard() {
         birthdayCustomers: [],
         salesmanData
       })
+      setData(next as any)
+      fresh.current = true; shown.current = true
+      // Only the "today" view is kept: that's the one the screen opens on.
+      if (dateRange === 'today') void writeLocal('dashboard:today', next)
     } catch (err: any) {
       console.error('Dashboard fetch error:', err)
       setError(err.message)
@@ -377,9 +384,10 @@ export function useDashboard() {
     }
   }
 
-  // Fetch on mount
+  // Open with this PC's copy of today's figures, then the fetch below replaces it.
+  // (The separate "fetch on mount" that stood here ran the same fetch a second time.)
   useEffect(() => {
-    fetchDashboardData()
+    seedLocal<any>('dashboard:today', d => { setData(d); setLoading(false); shown.current = true }, () => fresh.current)
   }, [])
 
   // Fetch when date range changes

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 import { useLiveRefresh } from './useLiveRefresh'
+import { writeLocal, seedLocal } from '../utils/localStore'
 
 // stock_damage_log.type only accepts these four. The UI collects a free-text
 // reason, so map it; anything unrecognised is recorded as generic damage.
@@ -21,8 +22,10 @@ export function useInventory() {
   const [filter, setFilter] = useState('all')
   const [adjustments, setAdjustments] = useState<any[]>([])
 
+  const fresh = useRef(false)    // the server has answered, so the PC's copy is older
+  const shown = useRef(false)    // something is on screen: refresh quietly, no spinner
   const fetchProducts = async () => {
-    setLoading(true)
+    if (!shown.current) setLoading(true)
     try {
       if (navigator.onLine) {
         const { data, error } = await supabase
@@ -32,6 +35,8 @@ export function useInventory() {
           .order('name')
         if (!error && data && data.length > 0) {
           setProducts(data)
+          fresh.current = true; shown.current = true
+          void writeLocal('inventory:products', data)
           saveProductsToCache(data, { replace: true })
           setLoading(false)
           return
@@ -63,6 +68,10 @@ export function useInventory() {
     }
   }
 
+  // Open with this PC's copy of the stock list; the fetch below replaces it.
+  useEffect(() => {
+    seedLocal<any[]>('inventory:products', d => { setProducts(d); setLoading(false); shown.current = true }, () => fresh.current)
+  }, [])
   useEffect(() => {
     fetchProducts()
     fetchAdjustments()

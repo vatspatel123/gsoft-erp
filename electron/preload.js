@@ -24,6 +24,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Local backups, saved on this PC. Absent in the browser build.
+  backup: {
+    write: (payload) => ipcRenderer.invoke('backup:write', payload),
+    list: () => ipcRenderer.invoke('backup:list'),
+    open: () => ipcRenderer.invoke('backup:open'),
+  },
+
   // Printing. Absent in the browser build, which falls back to the print dialog.
   printing: {
     list: () => ipcRenderer.invoke('printers:list'),

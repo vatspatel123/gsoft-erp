@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { writeLocal, seedLocal } from '../utils/localStore'
+import { useLiveRefresh } from './useLiveRefresh'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { saveCustomerToCache, getCachedCustomers } from '../utils/offlineCache'
@@ -43,8 +45,10 @@ export function useCustomers() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<string>('all')
 
+  const fresh = useRef(false)   // the server has answered; the PC's copy is older
+  const shown = useRef(false)   // customers are on screen: refresh quietly
   const fetchCustomers = async () => {
-    setLoading(true)
+    if (!shown.current) setLoading(true)
     try {
       if (navigator.onLine) {
         const { data, error } = await supabase
@@ -94,6 +98,8 @@ export function useCustomers() {
           })
 
           setCustomers(enriched)
+          fresh.current = true; shown.current = true
+          void writeLocal('customers:list', enriched)
           for (const c of enriched) saveCustomerToCache(c)
           setLoading(false)
           return
@@ -118,9 +124,15 @@ export function useCustomers() {
     setLoading(false)
   }
 
+  // Open with this PC's copy of the customers, tiers included; the fetch below replaces it.
+  useEffect(() => {
+    seedLocal<Customer[]>('customers:list', d => { setCustomers(d); setLoading(false); shown.current = true }, () => fresh.current)
+  }, [])
   useEffect(() => {
     fetchCustomers()
   }, [])
+
+  useLiveRefresh(['customers', 'sales'], fetchCustomers)
 
   const filteredCustomers = customers
     .filter(c => {
