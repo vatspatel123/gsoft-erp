@@ -220,7 +220,7 @@ export function useDashboard() {
               created_at, customer_id,
               salesman_id,
               customers(name, phone),
-              users(name),
+              users(id, name, role),
               sale_items(
                 id, qty, line_total,
                 unit_price, product_id,
@@ -346,12 +346,16 @@ export function useDashboard() {
         .slice(0, 5)
 
       // Salesman Performance
+      // Keyed by the salesman's real id (it was the NAME, so clicking a row looked up a bill
+      // by name and the detail popup always came back empty), with their real role.
       const salesmanMap: Record<string, any> = {}
       allSalesList.forEach(s => {
+        const id = s.salesman_id || s.salesmanId || null
         const name = s.users?.name || s.salesmanName || 'Cashier'
-        if (!salesmanMap[name]) salesmanMap[name] = { id: name, name, role: 'Cashier', sales: 0, revenue: 0 }
-        salesmanMap[name].sales++
-        salesmanMap[name].revenue += Number(s.net_amount || 0)
+        const key = id || name
+        if (!salesmanMap[key]) salesmanMap[key] = { id, name, role: s.users?.role || 'Salesman', sales: 0, revenue: 0 }
+        salesmanMap[key].sales++
+        salesmanMap[key].revenue += Number(s.net_amount || 0)
       })
       const salesmanData = Object.values(salesmanMap).sort((a: any, b: any) => b.revenue - a.revenue).slice(0, 5)
 

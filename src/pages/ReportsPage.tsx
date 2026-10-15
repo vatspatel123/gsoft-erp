@@ -5,7 +5,9 @@ import { exportToCSV } from '../utils/exportCSV'
 import { useCashPosition } from '../hooks/useCashPosition'
 import { tenderOf } from '../hooks/useInvoices'
 import { CustomDates } from '../components/shared/CustomDates'
+import { normName } from '../utils/hsn'
 import { ProductSalesModal } from '../components/reports/ProductSalesModal'
+import { SalesmanDetailModal } from '../components/reports/SalesmanDetailModal'
 import {
   BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, Cell
@@ -136,6 +138,12 @@ export default function ReportsPage() {
   const [customFrom, setCustomFrom] = useState(todayStr)
   const [customTo, setCustomTo] = useState(todayStr)
   const [openProduct, setOpenProduct] = useState<string | null>(null)   // product whose sales are shown
+  const [openStaff, setOpenStaff] = useState<{ id: string; name: string; role: string } | null>(null)
+  const [commissionByStaff, setCommissionByStaff] = useState<Record<string, number>>({})
+  useEffect(() => {
+    supabase.from('users').select('id, commission_pct')
+      .then(({ data }) => setCommissionByStaff(Object.fromEntries((data || []).map((u: any) => [u.id, Number(u.commission_pct) || 0]))))
+  }, [])
   const [sales, setSales] = useState<any[]>([])
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
@@ -215,20 +223,25 @@ export default function ReportsPage() {
       revenue: sales.reduce((t, x) => t + tenderOf(x, mode), 0)
     }))
 
+  // One row per real product name: TOP / top and 3 pc / 3pc are the same product, so they
+  // are counted together (the spelling used on most pieces is the one shown).
   const topProducts = (() => {
     const map: Record<string, any> = {}
     items.forEach(i => {
       const n = i.products?.name || 'Unknown'
-      if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 }
-      map[n].qty += i.qty || 0
-      map[n].revenue += i.line_total || 0
+      const key = normName(n) || 'unknown'
+      if (!map[key]) map[key] = { key, name: n, qty: 0, revenue: 0, spellings: {} as Record<string, number> }
+      map[key].qty += i.qty || 0
+      map[key].revenue += i.line_total || 0
+      map[key].spellings[n] = (map[key].spellings[n] || 0) + (i.qty || 0)
     })
     return Object.values(map)
+      .map((p: any) => ({ ...p, name: Object.entries(p.spellings).sort((a: any, b: any) => b[1] - a[1])[0][0] }))
       .sort((a: any, b: any) => b.revenue - a.revenue)
   })()
   // Every product sold in the period is listed (the "Products sold" card counts the same ones).
   const productTotals = (() => {
-    const names = new Set(items.map(i => i.products?.name || 'Unknown'))
+    const names = new Set(items.map(i => normName(i.products?.name || 'Unknown')))
     const units = items.reduce((s, i) => s + (i.qty || 0), 0)
     const amount = items.reduce((s, i) => s + (i.line_total || 0), 0)
     const topUnits = topProducts.reduce((s: number, p: any) => s + p.qty, 0)
@@ -240,13 +253,15 @@ export default function ReportsPage() {
     const map: Record<string, any> = {}
     sales.forEach(s => {
       const n = s.users?.name || 'Unknown'
-      if (!map[n]) map[n] = {
+      const key = s.salesman_id || n
+      if (!map[key]) map[key] = {
+        id: s.salesman_id || null,
         name: n, role: s.users?.role || '',
         bills: 0, revenue: 0, sales: []
       }
-      map[n].bills++
-      map[n].revenue += s.net_amount || 0
-      map[n].sales.push(s)
+      map[key].bills++
+      map[key].revenue += s.net_amount || 0
+      map[key].sales.push(s)
     })
     return Object.values(map)
       .sort((a: any, b: any) => b.revenue - a.revenue)
@@ -684,7 +699,7 @@ export default function ReportsPage() {
                       {topProducts.map(
                         (p: any, i: number) => (
                         <tr key={i}
-                          onClick={() => setOpenProduct(p.name)}
+                          onClick={() => setOpenProduct(p.key)}
                           title="Click to see every sale of this product"
                           style={{
                           borderBottom:
@@ -1319,7 +1334,7 @@ export default function ReportsPage() {
                     }}>
                       {['Rank','Staff',
                         'Bills','Revenue',
-                        'Avg Bill',
+                        'Avg Bill','Commission',
                         'Best Product'].map(
                         h => (
                         <th key={h} style={{
@@ -1337,7 +1352,11 @@ export default function ReportsPage() {
                   <tbody>
                     {salesmanData.map(
                       (s: any, i: number) => (
-                      <tr key={i} style={{
+                      <tr key={i}
+                        onClick={() => s.id && setOpenStaff({ id: s.id, name: s.name, role: s.role })}
+                        title={s.id ? 'Click to see this person\'s bills and commission' : undefined}
+                        style={{
+                        cursor: s.id ? 'pointer' : 'default',
                         borderBottom:
                           '1px solid #fdf8ff',
                         background:
@@ -1396,6 +1415,19 @@ export default function ReportsPage() {
                             s.revenue /
                             (s.bills || 1)
                           ).toLocaleString('en-IN')}
+                        </td>
+                        <td style={{
+                          padding: '12px 8px',
+                          fontFamily: 'DM Mono',
+                          fontWeight: 600,
+                          color: (commissionByStaff[s.id] || 0) > 0 ? '#16a34a' : '#cbd5e1'
+                        }}>
+                          {(commissionByStaff[s.id] || 0) > 0
+                            ? `₹${(Math.round(s.revenue * commissionByStaff[s.id]) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                            : '—'}
+                          {(commissionByStaff[s.id] || 0) > 0 && (
+                            <div style={{ fontSize: '10px', color: '#94a3b8', fontFamily: 'DM Sans' }}>{commissionByStaff[s.id]}%</div>
+                          )}
                         </td>
                         <td style={{
                           padding: '12px 8px',
@@ -1824,6 +1856,11 @@ export default function ReportsPage() {
         )}
       </div>
       {openProduct && <ProductSalesModal name={openProduct} sales={sales} onClose={() => setOpenProduct(null)} />}
+      {openStaff && (
+        <SalesmanDetailModal salesmanName={openStaff.name} salesmanId={openStaff.id} salesmanRole={openStaff.role}
+          dateRange={range === 'week' ? 'week' : range === 'month' ? 'month' : range === 'today' ? 'today' : 'all'}
+          onClose={() => setOpenStaff(null)} />
+      )}
     </Layout>
   )
 }

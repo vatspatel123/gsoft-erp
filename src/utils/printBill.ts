@@ -241,7 +241,8 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   const totalRow = cols.map((c, i) =>
     `<td class="${COL_CLASS[c.k]}">${c.k === 'qty' ? totalQty : c.k === 'amount' ? money(subtotal) : i === totalAt ? 'Total' : ''}</td>`
   ).join('')
-  const roundOff = Math.round((Number(netAmount) - (Number(subtotal) - Number(totalDiscount))) * 100) / 100
+  const shipping = Number(saleData.shipping ?? saleData.shipping_amount) || 0
+  const roundOff = Math.round((Number(netAmount) - (Number(subtotal) - Number(totalDiscount) + shipping)) * 100) / 100
   const gst = Number(saleData.gstAmount || 0)
 
   const payRows: string[] = []
@@ -359,6 +360,8 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   ${d.showDiscount && totalDiscount > 0 ? `
     <div class="adj"><span>Discount</span><span>- ${money(totalDiscount)}</span></div>
   ` : ''}
+
+  ${shipping > 0 ? `<div class="adj"><span>Shipping</span><span>+ ${money(shipping)}</span></div>` : ''}
 
   ${d.showGst && gst > 0 ? `
     <div class="adj"><span>CGST</span><span>${money(gst / 2)}</span></div>

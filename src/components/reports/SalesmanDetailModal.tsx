@@ -25,6 +25,9 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
   const [productRows, setProductRows] = useState<Array<{productName:string; units:number; revenue:number; share:number;}>>([]);
   const [recentBills, setRecentBills] = useState<any[]>([]);
   const [dailyData, setDailyData] = useState<Array<{date:string; revenue:number}>>([]);
+  // Commission rate from the staff record (Staff screen); 0 means this person earns none.
+  const [commissionPct, setCommissionPct] = useState(0);
+  const commission = Math.round(totalRevenue * commissionPct) / 100;
 
   const toIST = (d: Date) => new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
   const startOfDay = (d: Date) => {
@@ -82,7 +85,10 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
         .lte('created_at', to)
         .eq('is_return', false)
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(200);
+
+      const staffRes = await supabase.from('users').select('commission_pct').eq('id', salesmanId).maybeSingle();
+      setCommissionPct(Number(staffRes.data?.commission_pct) || 0);
 
       const salesRes = await salesQuery;
       if (salesRes.error) throw salesRes.error;
@@ -198,9 +204,9 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.35)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-      <div style={{ width: '100%', maxWidth: '600px', background: 'white', borderRadius: '14px', boxShadow: '0 15px 35px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid #f3e8ff' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.35)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '600px', maxHeight: 'calc(100vh - 32px)', background: 'white', borderRadius: '14px', boxShadow: '0 15px 35px rgba(0,0,0,0.2)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid #f3e8ff' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '22px', fontWeight: 700 }}>{salesmanName.charAt(0).toUpperCase()}</div>
             <div>
@@ -211,8 +217,8 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#6b7280' }}><X size={20} /></button>
         </div>
 
-        <div style={{ padding: '14px 18px' }}>
-          <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(3,1fr)', marginBottom: '12px' }}>
+        <div style={{ padding: '14px 18px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: commissionPct > 0 ? 'repeat(4,1fr)' : 'repeat(3,1fr)', marginBottom: '12px' }}>
             <div style={{ background: '#f8f6ff', border: '1px solid #ede9fe', borderRadius: '10px', padding: '10px' }}>
               <div style={{ fontSize: '11px', color: '#6b7280' }}>Total Sales</div>
               <div style={{ fontSize: '16px', fontWeight: 700, marginTop: '4px' }}>{totalBills}</div>
@@ -225,6 +231,12 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
               <div style={{ fontSize: '11px', color: '#6b7280' }}>Avg Bill Value</div>
               <div style={{ fontSize: '16px', fontWeight: 700, marginTop: '4px' }}>₹{avgBill.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
             </div>
+            {commissionPct > 0 && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: '#15803d' }}>Commission ({commissionPct}%)</div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#16a34a', marginTop: '4px' }}>₹{commission.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
@@ -289,7 +301,7 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
           </div>
 
           <div style={{ marginBottom: '12px' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: '14px', color: '#1a0a2e' }}>Recent Bills</h4>
+            <h4 style={{ margin: '0 0 8px', fontSize: '14px', color: '#1a0a2e' }}>Bills made ({recentBills.length})</h4>
             <div style={{ width: '100%', maxHeight: '220px', overflowY: 'auto', border: '1px solid #f3e8ff', borderRadius: '10px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -299,13 +311,14 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
                     <th style={{ padding: '8px', fontSize: '12px', color: '#6b7280' }}>Amount</th>
                     <th style={{ padding: '8px', fontSize: '12px', color: '#6b7280' }}>Payment</th>
                     <th style={{ padding: '8px', fontSize: '12px', color: '#6b7280' }}>Date</th>
+                    {commissionPct > 0 && <th style={{ padding: '8px', fontSize: '12px', color: '#15803d' }}>Commission</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={5} style={{ padding: '10px', textAlign: 'center' }}>Loading...</td></tr>
+                    <tr><td colSpan={commissionPct > 0 ? 6 : 5} style={{ padding: '10px', textAlign: 'center' }}>Loading...</td></tr>
                   ) : recentBills.length === 0 ? (
-                    <tr><td colSpan={5} style={{ padding: '10px', textAlign: 'center', color: '#94a3b8' }}>No bills yet</td></tr>
+                    <tr><td colSpan={commissionPct > 0 ? 6 : 5} style={{ padding: '10px', textAlign: 'center', color: '#94a3b8' }}>No bills yet</td></tr>
                   ) : recentBills.map((b, idx) => (
                     <tr key={idx} style={{ borderTop: '1px solid #f3e8ff' }}>
                       <td style={{ padding: '8px', color: '#6d28d9', fontFamily: 'DM Mono, monospace', fontWeight: 600 }}>{b.invoice || b.invoiceNo}</td>
@@ -313,6 +326,11 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
                       <td style={{ padding: '8px', fontWeight: 700, color: '#9333ea' }}>₹{Number(b.amount || 0).toLocaleString('en-IN')}</td>
                       <td style={{ padding: '8px' }}><span style={{ borderRadius: '8px', padding: '3px 8px', fontSize: '11px', fontWeight: 600, background: '#ede9fe', color: '#4338ca' }}>{b.payment}</span></td>
                       <td style={{ padding: '8px', color: '#64748b' }}>{b.date}</td>
+                      {commissionPct > 0 && (
+                        <td style={{ padding: '8px', color: '#16a34a', fontWeight: 600 }}>
+                          ₹{(Math.round(Number(b.amount || 0) * commissionPct) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -342,7 +360,7 @@ export function SalesmanDetailModal({ salesmanName, salesmanId, salesmanRole = '
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', position: 'sticky', bottom: 0, background: 'white', paddingTop: '10px', marginTop: '4px' }}>
             <button onClick={handleExport} style={{ marginRight: '8px', padding: '8px 12px', borderRadius: '8px', border: '1px solid #c084fc', background: 'white', color: '#6d28d9', cursor: 'pointer' }}>
               Export This Report
             </button>

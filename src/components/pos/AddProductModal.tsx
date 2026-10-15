@@ -1,3 +1,4 @@
+import { categoryFor } from '../../utils/hsn'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { supabase } from '../../lib/supabase'
@@ -29,9 +30,9 @@ export function AddProductModal({ barcode, onClose, onAdded }: Props) {
   }
 
   const addCategory = async (name: string) => {
-    const { data, error } = await supabase.from('categories').insert({ name }).select().single()
-    if (error) { toast.error(error.message); return null }
-    return data
+    const cat = await categoryFor(name)   // reuses a differently-spelled category
+    if (!cat) { toast.error('Could not add the category'); return null }
+    return cat
   }
 
   return (

@@ -74,7 +74,7 @@ export function InvoicesPage() {
     try {
       sessionStorage.setItem('pos_rebill', JSON.stringify({
         pendingId: sale.pendingId, invoiceNo: sale.invoiceNo, customer: sale.customer, salesmanId: sale.salesmanId,
-        note: sale.note, alterationQty: sale.alterationQty,
+        note: sale.note, alterationQty: sale.alterationQty, shipping: sale.shipping,
         items: (sale.cart || []).map((i: any) => ({ productId: i.product?.id, qty: i.qty, product: i.product })),
       }))
     } catch { toast.error('Could not open the bill in POS'); return }
@@ -115,6 +115,7 @@ export function InvoicesPage() {
     creditDueDate: invoice.credit_due_date,
     creditDueDays: invoice.credit_due_days,
     salesmanName: invoice.users?.name,
+    shipping: Number(invoice.shipping_amount) || 0,
     note: invoice.note || undefined,
     alterationQty: invoice.alteration_qty || 0,
     date: invoice.created_at,

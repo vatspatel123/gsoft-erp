@@ -24,6 +24,7 @@ export interface Invoice {
   credit_status?: string
   note?: string | null
   alteration_qty?: number
+  shipping_amount?: number
   credit_due_date?: string
   credit_due_days?: number
   is_return: boolean
@@ -163,7 +164,7 @@ export function useInvoices() {
       payment_mode: p.paymentMode || p.payment_mode || 'cash',
       // How it was paid, so unsent bills are counted by their real split like the others.
       cash_amount: p.tenders?.cash, card_amount: p.tenders?.card, upi_amount: p.tenders?.upi, credit_amount: p.creditRemainder,
-      note: p.note, alteration_qty: p.alterationQty,
+      note: p.note, alteration_qty: p.alterationQty, shipping_amount: p.shipping,
       is_return: false,
       created_at: p.createdAt || p.date || new Date().toISOString(),
       customers: p.customer ? { name: p.customer.name, phone: p.customer.phone } : null,

@@ -345,7 +345,7 @@ export function AccountingPage() {
         const remainingAfter = Math.max(0, payFor.outstanding - capped)
         return (
           <div onClick={() => setPayFor(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '24px 16px', overflowY: 'auto' }}>
             <div onClick={e => e.stopPropagation()}
               style={{ width: '100%', maxWidth: '400px', background: 'white', borderRadius: '16px', padding: '24px', fontFamily: 'DM Sans, sans-serif' }}>
               <h2 style={{ margin: '0 0 4px', fontSize: '17px', fontWeight: 700, color: '#1a0a2e' }}>

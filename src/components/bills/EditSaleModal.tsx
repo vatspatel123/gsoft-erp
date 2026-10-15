@@ -32,6 +32,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
   const [reason, setReason] = useState('')
   const [note, setNote] = useState('')
   const [alteration, setAlteration] = useState(0)
+  const [shipping, setShipping] = useState(0)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
@@ -55,6 +56,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
       setDiscount(Number(data.discount_amount) || 0)
       setNote(data.note || '')
       setAlteration(Number(data.alteration_qty) || 0)
+      setShipping(Number(data.shipping_amount) || 0)
       setTenders({ cash: Number(data.cash_amount) || 0, card: Number(data.card_amount) || 0, upi: Number(data.upi_amount) || 0 })
       setLines((data.sale_items || []).map((i: any) => ({
         product_id: i.product_id,
@@ -76,7 +78,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saleId])
 
-  const totals = useMemo(() => saleTotals(lines, discount, tenders), [lines, discount, tenders])
+  const totals = useMemo(() => saleTotals(lines, discount, tenders, shipping), [lines, discount, tenders, shipping])
   const minDiscount = (Number(sale?.loyalty_points_used) || 0) * 0.25
   const salesmanChanged = (salesmanId || '') !== (sale?.salesman_id || '')
   const customerChanged = (customer?.id || '') !== (sale?.customer_id || '')
@@ -157,7 +159,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     const changes: Record<string, unknown> = {
       discount_amount: Math.round(discount * 100) / 100,
       cash_amount: totals.kept.cash, card_amount: totals.kept.card, upi_amount: totals.kept.upi,
-      note: note.trim(), alteration_qty: alteration,
+      note: note.trim(), alteration_qty: alteration, shipping_amount: shipping,
     }
     if (customerChanged) changes.customer_id = customer?.id || ''
     if (salesmanChanged) changes.salesman_id = salesmanId || ''
@@ -331,6 +333,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
             <div style={S.totals}>
               <span>Subtotal {money(totals.subtotal)}</span>
               <span>Discount − {money(totals.discount)}</span>
+              {totals.shipping > 0 && <span>Shipping + {money(totals.shipping)}</span>}
               <span>GST inside {money(totals.gst)}</span>
               <b style={{ fontSize: 16 }}>Net {money(totals.net)}</b>
               {Number(sale.net_amount) !== totals.net && <span style={S.changed}>was {money(Number(sale.net_amount))}</span>}
@@ -345,6 +348,11 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                 <div style={S.section}>Bill note</div>
                 <textarea style={{ ...S.input, width: '100%', minHeight: 44, resize: 'vertical' }} value={note}
                   onChange={e => setNote(e.target.value)} placeholder="Printed on the bill" />
+              </div>
+              <div>
+                <div style={S.section}>Shipping ₹</div>
+                <input style={{ ...S.input, width: '100%' }} type="number" min={0} step="0.01" value={shipping || ''}
+                  placeholder="0" onChange={e => setShipping(Math.max(0, Number(e.target.value) || 0))} />
               </div>
               <div>
                 <div style={S.section}>✂ Alteration (pieces)</div>

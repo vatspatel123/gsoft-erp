@@ -57,6 +57,8 @@ interface OrderSummaryProps {
   completeSale: () => void;
   alterationQty?: number;
   setAlterationQty?: (n: number) => void;
+  shipping?: number;
+  setShipping?: (v: number) => void;
   customerDues?: { id: string; source: 'sale' | 'exchange'; no: string; date: string; pending: number }[];
   collectDues?: (amount: number, tender: 'cash' | 'upi' | 'card') => Promise<boolean>;
   isSaving: boolean;
@@ -661,6 +663,27 @@ export function OrderSummary(props: OrderSummaryProps) {
                 </div>
               )
             })}
+          </div>
+
+          {/* Delivery / courier charge — Instagram and phone orders. Added to the bill total. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '4px', minWidth: '78px' }}>
+              🚚 Shipping
+            </span>
+            <input
+              type="number" min={0} step="0.01" inputMode="decimal"
+              value={props.shipping ? props.shipping : ''}
+              onChange={e => props.setShipping?.(Math.max(0, Number(e.target.value) || 0))}
+              placeholder="0.00"
+              style={{ flex: 1, minWidth: 0, border: `1.5px solid ${props.shipping ? '#0ea5e9' : '#f3e8ff'}`, borderRadius: '8px',
+                padding: '9px 12px', fontSize: '14px', fontFamily: "'DM Mono', monospace", outline: 'none', color: '#1a0a2e', background: 'white' }}
+            />
+            {!!props.shipping && (
+              <button onClick={() => props.setShipping?.(0)} title="Remove the shipping charge"
+                style={{ background: 'none', border: 'none', color: '#0369a1', cursor: 'pointer', padding: '4px' }}>
+                <X size={16} />
+              </button>
+            )}
           </div>
 
           {/* Allocation status — anything unallocated becomes udhar */}

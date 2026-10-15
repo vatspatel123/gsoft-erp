@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 import { useLiveRefresh } from './useLiveRefresh'
 import { writeLocal, seedLocal } from '../utils/localStore'
+import { categoryFor } from '../utils/hsn'
 
 export function useProducts() {
   const [products, setProducts] = useState<any[]>([])
@@ -219,14 +220,10 @@ export function useProducts() {
   }
 
   const addCategory = async (name: string) => {
-    const { data, error } = await supabase
-      .from('categories')
-      .insert({ name })
-      .select()
-      .single()
-    if (error) { toast.error(error.message); return null }
+    const cat = await categoryFor(name)   // reuses a differently-spelled category
+    if (!cat) { toast.error('Could not add the category'); return null }
     fetchCategories()
-    return data
+    return cat
   }
 
   const exportCSV = () => {

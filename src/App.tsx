@@ -201,6 +201,7 @@ function AppContent() {
               card_amount: sale.tenders?.card || 0,
               upi_amount: sale.tenders?.upi || 0,
               credit_amount: sale.creditRemainder || 0,
+              shipping_amount: Math.max(0, Number(sale.shipping) || 0),
               note: sale.note || null,
               alteration_qty: Math.max(0, Number(sale.alterationQty) || 0),
               credit_status: sale.creditRemainder > 0 ? 'unpaid' : 'paid',

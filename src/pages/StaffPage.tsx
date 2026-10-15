@@ -13,6 +13,8 @@ type StaffUser = {
   email: string;
   role: 'owner' | 'senior_cashier' | 'cashier' | 'salesperson';
   is_active: boolean;
+  /** Commission on what this person sells, as a % of their bills. 0 = none. */
+  commission_pct?: number;
 };
 
 export function StaffPage() {
@@ -24,6 +26,7 @@ export function StaffPage() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'owner' | 'senior_cashier' | 'cashier' | 'salesperson'>('cashier');
   const [isActive, setIsActive] = useState(true);
+  const [commission, setCommission] = useState(0);
 
   // Staff passwords: used to approve sensitive changes such as the salesman on a
   // bill. Stored hashed in the database; this screen can set them, never read them.
@@ -86,6 +89,7 @@ export function StaffPage() {
     setName('');
     setEmail('');
     setRole('cashier');
+    setCommission(0);
     setIsActive(true);
     setEditing(null);
   };
@@ -101,6 +105,7 @@ export function StaffPage() {
     setEmail(user.email);
     setRole(user.role);
     setIsActive(user.is_active);
+    setCommission(Number(user.commission_pct) || 0);
     setShowModal(true);
   };
 
@@ -116,7 +121,8 @@ export function StaffPage() {
       name: name.trim(),
       email: email.trim(),
       role,
-      is_active: isActive
+      is_active: isActive,
+      commission_pct: commission
     };
 
     if (navigator.onLine) {
@@ -124,13 +130,13 @@ export function StaffPage() {
         if (editing) {
           const { error } = await supabase
             .from('users')
-            .update({ name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active })
+            .update({ name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active, commission_pct: payload.commission_pct })
             .eq('id', editing.id);
           if (error) { toast.error('Staff not saved: ' + error.message); return; }
         } else {
           const { error } = await supabase
             .from('users')
-            .insert({ id: payload.id, name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active });
+            .insert({ id: payload.id, name: payload.name, email: payload.email, role: payload.role, is_active: payload.is_active, commission_pct: payload.commission_pct });
           if (error) { toast.error('Staff not added: ' + error.message); return; }
         }
       } catch (dbErr) {
@@ -197,11 +203,12 @@ export function StaffPage() {
         </div>
 
         <div style={{ background: 'white', border: '1px solid #f3e8ff', borderRadius: '12px', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '80px 2fr 2fr 1fr 1fr 150px', padding: '12px', borderBottom: '1px solid #f3e8ff', fontWeight: 700, color: '#6b7280', fontSize: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '80px 2fr 2fr 1fr 1fr 1fr 150px', padding: '12px', borderBottom: '1px solid #f3e8ff', fontWeight: 700, color: '#6b7280', fontSize: '12px' }}>
             <div>Avatar</div>
             <div>Name</div>
             <div>Email</div>
             <div>Role</div>
+            <div>Commission</div>
             <div>Status</div>
             <div>Actions</div>
           </div>
@@ -213,7 +220,7 @@ export function StaffPage() {
           ) : (
             staff.map((user) => {
               return (
-                <div key={user.id} style={{ display: 'grid', gridTemplateColumns: '80px 2fr 2fr 1fr 1fr 150px', padding: '12px', alignItems: 'center', borderBottom: '1px solid #f3e8ff' }}>
+                <div key={user.id} style={{ display: 'grid', gridTemplateColumns: '80px 2fr 2fr 1fr 1fr 1fr 150px', padding: '12px', alignItems: 'center', borderBottom: '1px solid #f3e8ff' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: '#c4b5d4', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{user.name.charAt(0).toUpperCase()}</div>
                   </div>
@@ -225,6 +232,9 @@ export function StaffPage() {
                     </div>
                   </div>
                   <div><RoleBadge role={user.role} /></div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: Number(user.commission_pct) > 0 ? '#16a34a' : '#94a3b8' }}>
+                    {Number(user.commission_pct) > 0 ? `${Number(user.commission_pct)}%` : '—'}
+                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }} onClick={() => toggleActive(user)}>
                     <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: user.is_active ? '#16a34a' : '#9ca3af' }} />
                     <span style={{ fontSize: '12px', color: user.is_active ? '#16a34a' : '#6b7280' }}>{user.is_active ? 'Active' : 'Inactive'}</span>
@@ -243,8 +253,8 @@ export function StaffPage() {
       </div>
 
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '460px', background: 'white', borderRadius: '12px', padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '24px 16px', overflowY: 'auto' }}>
+          <div style={{ width: '460px', maxWidth: '100%', background: 'white', borderRadius: '12px', padding: '20px' }}>
             <h2 style={{ margin: '0 0 14px', fontSize: '20px', fontWeight: 700 }}>{editing ? 'Edit Staff' : 'Add Staff'}</h2>
             <div style={{ display: 'grid', gap: '12px' }}>
               <label style={{ fontSize: '13px', fontWeight: 500 }}>Full Name</label>
@@ -258,6 +268,10 @@ export function StaffPage() {
                 <option value="cashier">Cashier</option>
                 <option value="salesperson">Salesperson</option>
               </select>
+              <label style={{ fontSize: '13px', fontWeight: 500 }}>Commission % of their sales</label>
+              <input type="number" min={0} max={100} step="0.1" value={commission || ''} placeholder="0 = no commission"
+                onChange={e => setCommission(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                style={{ padding: '10px', borderRadius: '8px', border: '1px solid #e5e7eb' }} />
               <label style={{ fontSize: '13px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <input type="checkbox" checked={isActive} onChange={() => setIsActive(p => !p)} /> Active
               </label>
@@ -273,7 +287,7 @@ export function StaffPage() {
 
 
       {pwFor && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '24px 16px', overflowY: 'auto' }}>
           <div style={{ width: '440px', background: 'white', borderRadius: '12px', padding: '20px' }}>
             <h2 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700 }}>
               {withPw.has(pwFor.id) ? 'Change' : 'Set'} password — {pwFor.name}

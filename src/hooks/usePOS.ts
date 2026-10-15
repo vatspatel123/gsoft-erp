@@ -91,6 +91,11 @@ export function usePOS(salesmanId: string | null = null) {
   const [customerNotFound, setCustomerNotFound] = useState(false)
   const [searchedPhone, setSearchedPhone] = useState('')
   const [customerTier, setCustomerTier] = useState<CustomerTier>('New')
+  // Delivery / courier charge for an order taken on Instagram etc. Added to the bill
+  // after discounts. No GST on it: item prices are GST-inclusive and the tax shown is
+  // taken out of the goods only.
+  const [shipping, setShippingRaw] = useState(0)
+  const setShipping = useCallback((v: number) => setShippingRaw(Math.max(0, Math.round((Number(v) || 0) * 100) / 100)), [])
   const [activeCreditNotes, setActiveCreditNotes] = useState<CreditNote[]>([])
   // What this customer still OWES from earlier bills / exchanges (the opposite of store credit).
   const [customerDues, setCustomerDues] = useState<{ id: string; source: 'sale' | 'exchange'; no: string; date: string; pending: number; credit_amount: number; credit_paid: number }[]>([])
@@ -351,7 +356,8 @@ export function usePOS(salesmanId: string | null = null) {
     return Math.max(0, Math.min(raw, base))
   })()
 
-  const payableBeforeCredit = Math.max(0, subtotal - couponDiscount - loyaltyDiscount - manualDiscountAmount)
+  // Store credit may cover the shipping too, so it is part of what credit can be used against.
+  const payableBeforeCredit = Math.max(0, subtotal - couponDiscount - loyaltyDiscount - manualDiscountAmount) + shipping
   // Amounts come back from the database as text: add them as numbers.
   const availableCredit = activeCreditNotes.reduce((s, n) => s + (Number(n.balance_amount) || 0), 0)
   const maxApplicableCredit = Math.min(availableCredit, payableBeforeCredit)
@@ -370,7 +376,7 @@ export function usePOS(salesmanId: string | null = null) {
 
   const totalDiscount = couponDiscount + loyaltyDiscount + manualDiscountAmount + creditNoteDiscount
   // No + gstAmount: the tax is already inside subtotal.
-  const netAmount = Math.max(0, subtotal - totalDiscount)
+  const netAmount = Math.max(0, Math.round((Math.max(0, subtotal - totalDiscount) + shipping) * 100) / 100)
 
   const setTender = useCallback((kind: 'cash' | 'card' | 'upi', amount: number) => {
     setFullBy(null)   // typed by hand: it no longer follows the bill
@@ -614,7 +620,7 @@ export function usePOS(salesmanId: string | null = null) {
         gstAmount, totalDiscount,
         netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
         salesmanId, salesmanName: salesmanNameFor(salesmanId), counterId: COUNTER_ID,
-        note, alterationQty,
+        note, alterationQty, shipping,
         date: new Date().toISOString()
       }
       savePendingSale(offlineSale)
@@ -647,6 +653,7 @@ export function usePOS(salesmanId: string | null = null) {
       if (salesmanId) saleRecord.salesman_id = salesmanId
       if (note) saleRecord.note = note
       if (alterationQty) saleRecord.alteration_qty = alterationQty
+      if (shipping > 0) saleRecord.shipping_amount = shipping
       // Always set explicitly: relying on the column default left fully-paid bills
       // reading as 'unpaid', which Receivables would have counted as money owed.
       saleRecord.credit_status = creditRemainder > 0 ? 'unpaid' : 'paid'
@@ -809,7 +816,7 @@ export function usePOS(salesmanId: string | null = null) {
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanName,
         creditNoteDiscount,
-        note, alterationQty,
+        note, alterationQty, shipping,
         date: new Date().toISOString()
       }
 
@@ -828,7 +835,7 @@ export function usePOS(salesmanId: string | null = null) {
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanId, salesmanName: salesmanNameFor(salesmanId), counterId: COUNTER_ID,
         creditNoteDiscount,
-        note, alterationQty,
+        note, alterationQty, shipping,
         date: new Date().toISOString()
       }
       savePendingSale(offlineSale)
@@ -845,6 +852,7 @@ export function usePOS(salesmanId: string | null = null) {
 
   const clearCart = useCallback(() => {
     setCart([])
+    setShippingRaw(0)
     setCustomer(null)
     setCoupon(null)
     setCouponCode('')
@@ -930,6 +938,7 @@ export function usePOS(salesmanId: string | null = null) {
     creditNoteDiscount, creditAllocations, availableCredit, maxApplicableCredit,
     customerDues, collectDues,
     manualDiscount, setManualDiscount, manualDiscountMode, setManualDiscountMode, manualDiscountAmount,
+    shipping, setShipping,
     coupon, couponCode, setCouponCode, applyCoupon,
     removeCoupon: () => { setCoupon(null); setCouponCode('') },
     paymentMode: derivedPaymentMode,

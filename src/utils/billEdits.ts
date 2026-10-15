@@ -60,20 +60,21 @@ export interface BillEdit {
 export const saleLineTotal = (l: Pick<SaleLine, 'unit_price' | 'qty' | 'discount_pct'>) =>
   Math.round(l.unit_price * l.qty * (1 - (l.discount_pct || 0) / 100) * 100) / 100
 
-export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash: number; card: number; upi: number }) {
+export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash: number; card: number; upi: number }, shipping = 0) {
   const subtotal = lines.reduce((s, l) => s + saleLineTotal(l), 0)
   const gst = lines.reduce((s, l) => {
     const t = saleLineTotal(l), r = (l.gst_rate || 0) / 100
     return s + (r > 0 ? t - t / (1 + r) : 0)
   }, 0)
   const disc = Math.min(Math.max(0, discount || 0), subtotal)
-  const net = Math.round((subtotal - disc) * 100) / 100
+  const ship = Math.max(0, Number(shipping) || 0)   // charged on top, no GST (see edit_sale)
+  const net = Math.round((subtotal - disc + ship) * 100) / 100
   const handed = (tenders.cash || 0) + (tenders.card || 0) + (tenders.upi || 0)
   const kept = appliedTenders(tenders, net)
   const paid = kept.cash + kept.card + kept.upi
   const udhar = Math.max(0, Math.round((net - paid) * 100) / 100)
   const change = Math.max(0, Math.round((handed - net) * 100) / 100)
-  return { subtotal, gst, discount: disc, net, paid, udhar, change, kept }
+  return { subtotal, gst, discount: disc, shipping: ship, net, paid, udhar, change, kept }
 }
 
 // ── the same arithmetic Purchase Entry uses: GST added on top ────────────────

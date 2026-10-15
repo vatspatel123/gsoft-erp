@@ -33,3 +33,20 @@ export const hsnOf = (product: any): string =>
   || byId.get(product?.category_id)
   || byName.get(normName(product?.name))
   || ''
+
+/**
+ * The category to use for a typed name: an existing one spelled differently (TOP / top,
+ * 3 pc / 3pc) if there is one, else a new row. Keeps one category per real name, which is
+ * what Reports, HSN and the product list all count by. Mirrors category_for() in SQL.
+ */
+export async function categoryFor(name: string): Promise<{ id: string; name: string } | null> {
+  const typed = String(name || '').trim()
+  if (!typed) return null
+  const key = normName(typed)
+  const { data } = await supabase.from('categories').select('id, name')
+  const existing = (data || []).find((c: any) => normName(c.name) === key)
+  if (existing) return existing
+  const { data: made, error } = await supabase.from('categories').insert({ name: typed }).select('id, name').single()
+  if (error || !made) return null
+  return made
+}
