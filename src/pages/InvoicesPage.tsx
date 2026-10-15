@@ -1,3 +1,4 @@
+import { creditPendingOf } from '../utils/credit'
 import { CustomDates } from '../components/shared/CustomDates'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -27,6 +28,8 @@ import toast from 'react-hot-toast'
 import { EditSaleModal } from '../components/bills/EditSaleModal'
 import { BillHistoryModal } from '../components/bills/BillHistoryModal'
 import { DeleteBillModal } from '../components/bills/DeleteBillModal'
+import { DeleteUnsentBillModal } from '../components/bills/DeleteUnsentBillModal'
+import { getPendingSales, holdPendingSale } from '../utils/offlineCache'
 import { fmtDate, fmtDateTime } from '../utils/date'
 
 export function InvoicesPage() {
@@ -60,6 +63,23 @@ export function InvoicesPage() {
   const [deletingSale, setDeletingSale] = useState<{ id: string; no: string } | null>(null)
   // Bills saved offline have no database row yet, so there is nothing to edit.
   const editable = (inv: Invoice) => !inv.is_return && /^[0-9a-f-]{36}$/i.test(String(inv.id))
+  // A bill that exists only on this PC (not sent to the server yet) can't be edited or deleted in
+  // the database. Its Edit opens POS with the same items, customer and salesman to make it a proper
+  // bill; its Delete removes it from the waiting list. Refund / exchange make no sense for it yet.
+  const [deletingUnsent, setDeletingUnsent] = useState<{ pendingId: number; no: string } | null>(null)
+  const rebillUnsent = (inv: Invoice) => {
+    const sale = getPendingSales().find((s: any) => s.pendingId === inv.pendingId)
+    if (!sale) { toast.error('This bill is no longer waiting on this PC'); return }
+    holdPendingSale(sale.pendingId, true)   // the automatic sending leaves it alone while it is re-made
+    try {
+      sessionStorage.setItem('pos_rebill', JSON.stringify({
+        pendingId: sale.pendingId, invoiceNo: sale.invoiceNo, customer: sale.customer, salesmanId: sale.salesmanId,
+        note: sale.note, alterationQty: sale.alterationQty,
+        items: (sale.cart || []).map((i: any) => ({ productId: i.product?.id, qty: i.qty, product: i.product })),
+      }))
+    } catch { toast.error('Could not open the bill in POS'); return }
+    navigate('/')
+  }
 
   // Rebuild the sale exactly as the POS had it, so a reprint or a re-send
   // produces the same bill the customer was originally handed.
@@ -95,6 +115,8 @@ export function InvoicesPage() {
     creditDueDate: invoice.credit_due_date,
     creditDueDays: invoice.credit_due_days,
     salesmanName: invoice.users?.name,
+    note: invoice.note || undefined,
+    alterationQty: invoice.alteration_qty || 0,
     date: invoice.created_at,
   })
 
@@ -127,9 +149,9 @@ export function InvoicesPage() {
     const msg =
       `*🔔 PAYMENT REMINDER — OUTSTANDING BILL*%0A%0A` +
       `નમસ્તે *${invoice.customers.name}*,%0A` +
-      `આપનું બિલ નંબર *#${invoice.invoice_no}* (તારીખ: ${dateStr}) નું બાકી રકમ *₹${Number(invoice.net_amount).toFixed(2)}* છે.%0A` +
+      `આપનું બિલ નંબર *#${invoice.invoice_no}* (તારીખ: ${dateStr}) નું બાકી રકમ *₹${creditPendingOf(invoice).toFixed(2)}* છે.%0A` +
       `કૃપા કરીને વહેલી તકે ચુકવણી કરશો. આભાર!%0A%0A` +
-      `_Dear ${invoice.customers.name}, gentle reminder regarding your outstanding bill #${invoice.invoice_no} of ₹${Number(invoice.net_amount).toFixed(2)} dated ${dateStr}._`
+      `_Dear ${invoice.customers.name}, gentle reminder regarding your outstanding bill #${invoice.invoice_no}: ₹${creditPendingOf(invoice).toFixed(2)} pending, dated ${dateStr}._`
 
     sendWhatsApp(fullPhone, msg, { encoded: true })
   }
@@ -527,7 +549,8 @@ export function InvoicesPage() {
                           >
                             <MessageCircle size={16} />
                           </button>
-                          {invoice.payment_mode === 'credit' && !invoice.is_return && (
+                          {creditPendingOf(invoice) > 0 && (
+
                             <button
                               className="action-btn"
                               onClick={() => send15DayOverdueReminder(invoice)}
@@ -536,6 +559,25 @@ export function InvoicesPage() {
                               disabled={!invoice.customers?.phone}
                             >
                               🔔
+                            </button>
+                          )}
+                          {invoice._pending && (
+                            <button
+                              className="action-btn primary"
+                              onClick={() => rebillUnsent(invoice)}
+                              title="Edit: open in POS with the same items, correct them and complete as a proper bill"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                          )}
+                          {invoice._pending && (
+                            <button
+                              className="action-btn"
+                              onClick={() => setDeletingUnsent({ pendingId: invoice.pendingId as number, no: invoice.invoice_no })}
+                              title="Remove this unsent bill (admin password)"
+                              style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}
+                            >
+                              <Trash2 size={16} />
                             </button>
                           )}
                           {editable(invoice) && (
@@ -557,7 +599,7 @@ export function InvoicesPage() {
                               <Trash2 size={16} />
                             </button>
                           )}
-                          {!invoice.is_return && (
+                          {!invoice.is_return && !invoice._pending && (
                             <button
                               className="action-btn refund"
                               onClick={() => setRefundConfirm(invoice)}
@@ -566,7 +608,7 @@ export function InvoicesPage() {
                               <RotateCcw size={16} />
                             </button>
                           )}
-                          {!invoice.is_return && (
+                          {!invoice.is_return && !invoice._pending && (
                             <button
                               className="action-btn primary"
                               onClick={() => navigate(`/exchange?invoice=${invoice.invoice_no}`)}
@@ -640,6 +682,12 @@ export function InvoicesPage() {
               )}
 
               {/* Items */}
+              {(!!selectedInvoice.alteration_qty || !!selectedInvoice.note) && (
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '10px 12px', margin: '8px 0', fontSize: '13px' }}>
+                  {!!selectedInvoice.alteration_qty && <div style={{ fontWeight: 800, color: '#c2410c' }}>✂ Alteration: {selectedInvoice.alteration_qty} pcs</div>}
+                  {!!selectedInvoice.note && <div style={{ color: '#7c2d12', marginTop: selectedInvoice.alteration_qty ? 4 : 0 }}>Note: {selectedInvoice.note}</div>}
+                </div>
+              )}
               {selectedInvoice.sale_items && selectedInvoice.sale_items.length > 0 && (
                 <div className="items-section">
                   <div className="items-title">Items</div>
@@ -655,7 +703,15 @@ export function InvoicesPage() {
                     <tbody>
                       {selectedInvoice.sale_items.map((item, idx) => (
                         <tr key={idx}>
-                          <td>{item.products?.name || 'Product'}</td>
+                          <td>
+                            {item.products?.name || 'Product'}
+                            {[item.products?.design_no && `D: ${item.products.design_no}`, item.products?.size, item.products?.colour, item.products?.barcode]
+                              .filter(Boolean).length > 0 && (
+                              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                {[item.products?.design_no && `D: ${item.products.design_no}`, item.products?.size, item.products?.colour, item.products?.barcode].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                          </td>
                           <td className="item-qty">{item.qty}</td>
                           <td className="item-price">
                             ₹{item.unit_price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
@@ -770,6 +826,10 @@ export function InvoicesPage() {
       {deletingSale && (
         <DeleteBillModal type="sale" billId={deletingSale.id} billNo={deletingSale.no}
           onClose={() => setDeletingSale(null)} onDeleted={() => fetchInvoices()} />
+      )}
+      {deletingUnsent && (
+        <DeleteUnsentBillModal pendingId={deletingUnsent.pendingId} billNo={deletingUnsent.no}
+          onClose={() => setDeletingUnsent(null)} onDeleted={() => fetchInvoices()} />
       )}
       {editingSale && (
         <EditSaleModal saleId={editingSale} onClose={() => setEditingSale(null)} onSaved={() => fetchInvoices()} />

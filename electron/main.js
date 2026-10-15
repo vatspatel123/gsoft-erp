@@ -243,6 +243,9 @@ ipcMain.handle('printers:clearQueue', async (_e, names) => {
   catch (e) { return { removed: 0, reason: (e && e.message) || 'Could not clear the queue' } }
 })
 
+// The permanent bill journal — see electron/journal.js.
+ipcMain.handle('journal:add', (_e, entry) => { try { return require('./journal').add(entry) } catch { return { ok: false } } })
+
 // Local backups — see electron/backup.js. Lazy-required like printing.
 ipcMain.handle('backup:write', async (_e, payload) => {
   try { return await require('./backup').write(payload) }

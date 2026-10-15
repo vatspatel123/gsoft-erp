@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { writeLocal, seedLocal } from '../utils/localStore'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
-import { getPendingSales } from '../utils/offlineCache'
+import { getPendingSales, salesmanNameFor } from '../utils/offlineCache'
 import { useLiveRefresh } from './useLiveRefresh'
 
 export interface Invoice {
@@ -20,11 +20,18 @@ export interface Invoice {
   card_amount?: number
   upi_amount?: number
   credit_amount?: number
+  credit_paid?: number
+  credit_status?: string
+  note?: string | null
+  alteration_qty?: number
   credit_due_date?: string
   credit_due_days?: number
   is_return: boolean
   created_at: string
   edit_count?: number
+  /** A bill that only exists on this PC (not on the server yet): its queue id. */
+  pendingId?: number
+  _pending?: boolean
   customers?: {
     name: string
     phone: string
@@ -115,7 +122,8 @@ export function useInvoices() {
 
         if (paymentFilter === 'credit_overdue_15') {
           const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
-          query = query.eq('payment_mode', 'credit').lte('created_at', fifteenDaysAgo)
+          // Overdue = still owing: a bill the customer has settled is not overdue.
+          query = query.eq('payment_mode', 'credit').lte('created_at', fifteenDaysAgo).or('credit_status.is.null,credit_status.neq.paid')
         } else {
           if (from) query = query.gte('created_at', from)
           if (to) query = query.lt('created_at', to)
@@ -141,6 +149,8 @@ export function useInvoices() {
     // Merge pending/offline sales from local cache
     const pending = getPendingSales() || []
     const pendingMapped: Invoice[] = pending.map((p: any) => ({
+      _pending: true,
+      pendingId: p.pendingId,
       id: p.saleId || 'local-' + p.pendingId,
       invoice_no: p.invoiceNo || 'INV-LOCAL',
       customer_id: p.customer?.id,
@@ -151,10 +161,14 @@ export function useInvoices() {
       net_amount: p.netAmount || p.net_amount || 0,
       gst_amount: p.gstAmount || p.gst_amount || 0,
       payment_mode: p.paymentMode || p.payment_mode || 'cash',
+      // How it was paid, so unsent bills are counted by their real split like the others.
+      cash_amount: p.tenders?.cash, card_amount: p.tenders?.card, upi_amount: p.tenders?.upi, credit_amount: p.creditRemainder,
+      note: p.note, alteration_qty: p.alterationQty,
       is_return: false,
       created_at: p.createdAt || p.date || new Date().toISOString(),
       customers: p.customer ? { name: p.customer.name, phone: p.customer.phone } : null,
-      users: p.salesmanName ? { name: p.salesmanName } : null,
+      // Bills queued by an older version kept only the salesman's id: look the name up.
+      users: (p.salesmanName || salesmanNameFor(p.salesmanId)) ? { name: p.salesmanName || salesmanNameFor(p.salesmanId) } : null,
       sale_items: p.cart?.map((item: any, idx: number) => ({
         id: 'item-' + idx,
         qty: item.qty,
@@ -165,7 +179,11 @@ export function useInvoices() {
         products: {
           id: item.product?.id || 'p-id',
           name: item.product?.name || 'Product',
-          gst_rate: item.product?.gst_rate || 0
+          gst_rate: item.product?.gst_rate || 0,
+          // The unsent bill kept the whole product: show it (design, size, colour, barcode, category)
+          // so the bill can be checked, printed and re-made properly.
+          design_no: item.product?.design_no, size: item.product?.size, colour: item.product?.colour,
+          barcode: item.product?.barcode || item.product?.sku, categories: item.product?.categories
         }
       }))
     }))

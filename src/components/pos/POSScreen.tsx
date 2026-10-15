@@ -9,7 +9,9 @@ import { BillModal } from './BillModal';
 import { AddProductModal } from './AddProductModal';
 import { OldLotAlertModal } from './OldLotAlertModal';
 import { CustomerHistoryModal } from '../customers/CustomerHistoryModal';
-import { getCachedSalesmen, saveSalesmenToCache } from '../../utils/offlineCache';
+import { getCachedSalesmen, saveSalesmenToCache, getPendingSales, clearPendingSale, holdPendingSale } from '../../utils/offlineCache';
+import { findCustomerByPhone } from '../../utils/customerLookup';
+import { journalBill } from '../../utils/billJournal';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import '../../styles/pos.css';
@@ -19,6 +21,9 @@ export default function POSScreen() {
   const [selectedSalesman, setSelectedSalesman] = useState<any>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   const [historyCustomer, setHistoryCustomer] = useState<any>(null);
+  const [salesmenLoaded, setSalesmenLoaded] = useState(false);
+  // An unsent bill being re-made here (Invoices -> Edit on a bill that is only on this PC).
+  const [rebillOf, setRebillOf] = useState<{ pendingId: number; invoiceNo: string } | null>(null);
 
   useEffect(() => {
     const fetchSalesmen = async () => {
@@ -45,22 +50,57 @@ export default function POSScreen() {
 
       const merged = Array.from(map.values())
       setSalesmen(merged)
+      setSalesmenLoaded(true)
     }
     fetchSalesmen()
   }, [])
 
   const pos = usePOS(selectedSalesman?.id || null);
+
+  // Fill the screen from an unsent bill: same salesman, same customer (the real saved one if the phone
+  // is already a customer), same items at today's stock and price. Nothing is saved until the
+  // bill is completed; then the old unsent bill is removed so it is not counted twice.
+  useEffect(() => {
+    if (!salesmenLoaded) return
+    let raw: string | null = null
+    try { raw = sessionStorage.getItem('pos_rebill'); if (raw) sessionStorage.removeItem('pos_rebill') } catch { /* nothing to open */ }
+    if (!raw) return
+    void (async () => {
+      try {
+        const r = JSON.parse(raw as string)
+        const sm = salesmen.find(s => s.id === r.salesmanId)
+        if (sm) setSelectedSalesman(sm)
+        const real = r.customer?.phone ? await findCustomerByPhone(r.customer.phone) : null
+        if (r.customer) pos.selectCustomer(real || r.customer)
+        const ids = (r.items || []).map((i: any) => i.productId).filter(Boolean)
+        const { data } = ids.length ? await supabase.from('products').select('*, categories(name)').in('id', ids) : { data: [] as any[] }
+        const fresh = new Map((data || []).map((p: any) => [p.id, p]))
+        for (const it of r.items || []) {
+          const prod = fresh.get(it.productId) || it.product
+          if (!prod) continue
+          for (let n = 0; n < (Number(it.qty) || 1); n++) await pos.addToCart(prod, true)
+        }
+        if (r.note) setBillNote(r.note)
+        if (r.alterationQty) setAlterationQty(Number(r.alterationQty) || 0)
+        setRebillOf({ pendingId: r.pendingId, invoiceNo: r.invoiceNo })
+        toast(`Re-making ${r.invoiceNo}: check the items, then complete the bill`, { icon: '✏️', duration: 6000 })
+      } catch { toast.error('Could not open the unsent bill here') }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesmenLoaded])
   const [showModal, setShowModal] = useState(false);
   const [completedSaleData, setCompletedSaleData] = useState<any>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addProductBarcode, setAddProductBarcode] = useState('');
   const [billNote, setBillNote] = useState('');
+  const [alterationQty, setAlterationQty] = useState(0);   // pieces going to the alteration tailor
   // Bumped after every bill: the search box and payment panel start over blank,
   // and so does the salesman — the next bill is a new sale, not a copy of the last.
   const [billKey, setBillKey] = useState(0);
   const startFresh = () => {
     pos.clearCart();
     setBillNote('');
+    setAlterationQty(0);
     setSelectedSalesman(null);
     setBillKey(k => k + 1);
   };
@@ -70,9 +110,14 @@ export default function POSScreen() {
       toast.error('⚠️ Please select a salesperson before completing the sale', { duration: 3000 });
       return;
     }
-    const saleData = await pos.completeSale();
+    const saleData = await pos.completeSale({ note: billNote, alterationQty });
     if (saleData) {
-      if (billNote.trim()) saleData.note = billNote.trim();
+      if (rebillOf) {
+        const old = getPendingSales().find((s: any) => s.pendingId === rebillOf.pendingId)
+        if (old) journalBill('replaced', old, `re-made as ${saleData.invoiceNo}`)
+        clearPendingSale(rebillOf.pendingId)
+        setRebillOf(null)
+      }
       // Store sale data BEFORE clearing cart so the modal can still display it
       setCompletedSaleData(saleData);
       setShowModal(true);
@@ -99,6 +144,17 @@ export default function POSScreen() {
     <Layout>
       <div className="pos-screen">
         <div className="pos-left">
+          {rebillOf && (
+            <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '12px', padding: '10px 14px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ color: '#6b21a8', fontWeight: 700, fontSize: '13px' }}>✏️ Re-making unsent bill {rebillOf.invoiceNo}</span>
+              <span style={{ color: '#7c3aed', fontSize: '12px' }}>Check the items, then complete the bill. The old unsent bill is removed automatically.</span>
+              <button onClick={() => { holdPendingSale(rebillOf.pendingId, false); setRebillOf(null); pos.clearCart(); setSelectedSalesman(null) }}
+                style={{ marginLeft: 'auto', background: 'white', color: '#7c3aed', border: '1px solid #d8b4fe', borderRadius: '8px', padding: '5px 12px', fontSize: '12px', cursor: 'pointer' }}>
+                Cancel (keep the old bill)
+              </button>
+            </div>
+          )}
+
           {/* Salesman Selector */}
           <div style={{
             display: 'flex',
@@ -287,6 +343,8 @@ export default function POSScreen() {
             {...pos}
             cartLength={pos.cart.length}
             completeSale={handleCompleteSale}
+            alterationQty={alterationQty}
+            setAlterationQty={setAlterationQty}
             onViewHistory={(c) => setHistoryCustomer(c)}
           />
         </div>

@@ -30,6 +30,8 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
   const [discount, setDiscount] = useState(0)
   const [tenders, setTenders] = useState({ cash: 0, card: 0, upi: 0 })
   const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
+  const [alteration, setAlteration] = useState(0)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
@@ -51,6 +53,8 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
       setSalesmanId(data.salesman_id || '')
       setSalesmen(staff.data || [])
       setDiscount(Number(data.discount_amount) || 0)
+      setNote(data.note || '')
+      setAlteration(Number(data.alteration_qty) || 0)
       setTenders({ cash: Number(data.cash_amount) || 0, card: Number(data.card_amount) || 0, upi: Number(data.upi_amount) || 0 })
       setLines((data.sale_items || []).map((i: any) => ({
         product_id: i.product_id,
@@ -153,6 +157,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     const changes: Record<string, unknown> = {
       discount_amount: Math.round(discount * 100) / 100,
       cash_amount: totals.kept.cash, card_amount: totals.kept.card, upi_amount: totals.kept.upi,
+      note: note.trim(), alteration_qty: alteration,
     }
     if (customerChanged) changes.customer_id = customer?.id || ''
     if (salesmanChanged) changes.salesman_id = salesmanId || ''
@@ -333,6 +338,19 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                 {totals.udhar > 0 ? `Pending ${money(totals.udhar)}` : 'Fully paid'}
                 {totals.change > 0 && ` · change ${money(totals.change)} (saved as ${money(totals.paid)})`}
               </span>
+            </div>
+
+            <div style={S.grid2}>
+              <div>
+                <div style={S.section}>Bill note</div>
+                <textarea style={{ ...S.input, width: '100%', minHeight: 44, resize: 'vertical' }} value={note}
+                  onChange={e => setNote(e.target.value)} placeholder="Printed on the bill" />
+              </div>
+              <div>
+                <div style={S.section}>✂ Alteration (pieces)</div>
+                <input style={{ ...S.input, width: '100%' }} type="number" min={0} step={1} value={alteration || ''}
+                  placeholder="0" onChange={e => setAlteration(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+              </div>
             </div>
 
             <div style={S.section}>Reason for the edit <span style={{ color: '#dc2626' }}>*</span></div>

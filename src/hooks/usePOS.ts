@@ -1,8 +1,11 @@
+import { resolveCustomerId } from '../utils/customerLookup'
+import { creditPendingOf } from '../utils/credit'
+import { journalBill } from '../utils/billJournal'
 import { appliedTenders } from '../utils/tenders'
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
-import { savePendingSale, getCachedProducts, saveCustomerToCache, findCachedCustomer } from '../utils/offlineCache'
+import { savePendingSale, getCachedProducts, saveCustomerToCache, findCachedCustomer, getCachedSalesmen, salesmanNameFor } from '../utils/offlineCache'
 import { calculateCustomerTier, getTierInfo, type CustomerTier } from '../utils/customerTier'
 import type { CreditNote } from './useCreditNotes'
 
@@ -89,6 +92,55 @@ export function usePOS(salesmanId: string | null = null) {
   const [searchedPhone, setSearchedPhone] = useState('')
   const [customerTier, setCustomerTier] = useState<CustomerTier>('New')
   const [activeCreditNotes, setActiveCreditNotes] = useState<CreditNote[]>([])
+  // What this customer still OWES from earlier bills / exchanges (the opposite of store credit).
+  const [customerDues, setCustomerDues] = useState<{ id: string; source: 'sale' | 'exchange'; no: string; date: string; pending: number; credit_amount: number; credit_paid: number }[]>([])
+
+  const loadDues = useCallback(async (custId: string | undefined) => {
+    if (!custId || !navigator.onLine) { setCustomerDues([]); return }
+    try {
+      const [s, x] = await Promise.all([
+        supabase.from('sales')
+          .select('id, invoice_no, created_at, net_amount, payment_mode, cash_amount, card_amount, upi_amount, credit_amount, credit_paid, credit_status, is_return')
+          .eq('customer_id', custId).eq('is_return', false).eq('payment_mode', 'credit'),
+        supabase.from('exchange_bills')
+          .select('id, exchange_no, created_at, credit_amount, credit_paid, credit_status')
+          .eq('customer_id', custId).gt('credit_amount', 0),
+      ])
+      const rows = [
+        ...(s.data || []).map((r: any) => ({ id: r.id, source: 'sale' as const, no: r.invoice_no, date: r.created_at,
+          pending: creditPendingOf(r), credit_amount: Number(r.credit_amount) || 0, credit_paid: Number(r.credit_paid) || 0 })),
+        ...(x.data || []).filter((r: any) => r.credit_status !== 'paid').map((r: any) => ({ id: r.id, source: 'exchange' as const, no: r.exchange_no, date: r.created_at,
+          pending: Math.max(0, Math.round(((Number(r.credit_amount) || 0) - (Number(r.credit_paid) || 0)) * 100) / 100),
+          credit_amount: Number(r.credit_amount) || 0, credit_paid: Number(r.credit_paid) || 0 })),
+      ].filter(r => r.pending > 0).sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+      setCustomerDues(rows)
+    } catch { setCustomerDues([]) }
+  }, [])
+
+  /**
+   * Collect old dues at the counter: oldest first, recorded on those bills exactly as
+   * Accounts does (credit_paid, credit_tender, credit_status), so cash position and
+   * Accounts count it. Separate from the new bill being made.
+   */
+  const collectDues = useCallback(async (amount: number, tender: 'cash' | 'upi' | 'card') => {
+    let left = Math.round((Number(amount) || 0) * 100) / 100
+    if (left <= 0) { toast.error('Enter the amount received'); return false }
+    let collected = 0
+    for (const r of customerDues) {
+      if (left <= 0) break
+      const pay = Math.min(left, r.pending)
+      const newPaid = Math.round((r.credit_paid + pay) * 100) / 100
+      const settled = pay >= r.pending - 0.009   // cleared what was pending (also right for bills older than the payment split)
+      const { error } = await supabase.from(r.source === 'exchange' ? 'exchange_bills' : 'sales')
+        .update({ credit_paid: newPaid, credit_tender: tender, credit_status: settled ? 'paid' : 'partial' })
+        .eq('id', r.id)
+      if (error) { toast.error(`Could not record the payment on ${r.no}: ${error.message}`); break }
+      collected += pay; left = Math.round((left - pay) * 100) / 100
+    }
+    if (collected > 0) toast.success(`₹${collected.toLocaleString('en-IN')} of old dues collected (${tender.toUpperCase()})`)
+    await loadDues(customer?.id)
+    return collected > 0
+  }, [customerDues, customer, loadDues])
   const [creditToApply, setCreditToApply] = useState(0)
   const [manualDiscount, setManualDiscount] = useState(0)
   const [manualDiscountMode, setManualDiscountMode] = useState<'flat' | 'pct'>('flat')
@@ -300,7 +352,8 @@ export function usePOS(salesmanId: string | null = null) {
   })()
 
   const payableBeforeCredit = Math.max(0, subtotal - couponDiscount - loyaltyDiscount - manualDiscountAmount)
-  const availableCredit = activeCreditNotes.reduce((s, n) => s + (n.balance_amount || 0), 0)
+  // Amounts come back from the database as text: add them as numbers.
+  const availableCredit = activeCreditNotes.reduce((s, n) => s + (Number(n.balance_amount) || 0), 0)
   const maxApplicableCredit = Math.min(availableCredit, payableBeforeCredit)
   const creditNoteDiscount = Math.max(0, Math.min(creditToApply, maxApplicableCredit))
   const creditAllocations = (() => {
@@ -308,7 +361,7 @@ export function usePOS(salesmanId: string | null = null) {
     return [...activeCreditNotes]
       .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
       .map(note => {
-        const applied = Math.min(note.balance_amount, remaining)
+        const applied = Math.min(Number(note.balance_amount) || 0, remaining)
         remaining -= applied
         return { note, applied }
       })
@@ -376,14 +429,16 @@ export function usePOS(salesmanId: string | null = null) {
         }
 
         // 2. Fetch Active Credit Notes
+        // Plain select: credit notes have no category link, and asking for one made the
+        // database refuse the whole request — so POS always showed "no store credit".
         const { data: cns } = await supabase
           .from('credit_notes')
-          .select('*, categories(name)')
+          .select('*')
           .or(`customer_id.eq.${cust.id},customer_phone.eq.${cust.phone}`)
           .eq('status', 'active')
           .gt('balance_amount', 0)
 
-        if (cns) setActiveCreditNotes(cns)
+        if (cns) setActiveCreditNotes(cns.filter((c: any) => !c.expires_at || new Date(c.expires_at).getTime() > Date.now()))
       } else {
         // Fallback for offline cache
         const localCNsStr = localStorage.getItem('gsoft_credit_notes_cache')
@@ -457,9 +512,11 @@ export function usePOS(salesmanId: string | null = null) {
     setCreditToApply(0)
     if (!cust) {
       setActiveCreditNotes([])
+      setCustomerDues([])
       setCustomerTier('New')
       return
     }
+    void loadDues(cust.id)
     loadCustomerExtraInfo(cust)
   }, [loadCustomerExtraInfo])
 
@@ -530,7 +587,10 @@ export function usePOS(salesmanId: string | null = null) {
     return localInvoiceNo()
   }
 
-  const completeSale = useCallback(async () => {
+  /** extra: the bill note and how many pieces go for alteration — saved with the sale. */
+  const completeSale = useCallback(async (extra: { note?: string; alterationQty?: number } = {}) => {
+    const note = (extra.note || '').trim() || undefined
+    const alterationQty = Math.max(0, Math.floor(Number(extra.alterationQty) || 0))
     if (cart.length === 0) {
       toast.error('Cart is empty')
       return null
@@ -541,16 +601,24 @@ export function usePOS(salesmanId: string | null = null) {
       return null
     }
 
+    // Every bill carries the salesman who made the sale. (Only skipped when no staff are set up at all.)
+    if (!salesmanId && (getCachedSalesmen() || []).length > 0) {
+      toast.error('👤 Select the salesman first!', { duration: 3000 })
+      return null
+    }
+
     if (!navigator.onLine) {
       const offlineSale = {
         invoiceNo: 'OFF-' + Date.now(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
         netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
-        salesmanId, counterId: COUNTER_ID,
+        salesmanId, salesmanName: salesmanNameFor(salesmanId), counterId: COUNTER_ID,
+        note, alterationQty,
         date: new Date().toISOString()
       }
       savePendingSale(offlineSale)
+      journalBill('queued', offlineSale, 'no internet')
       setLastSale(offlineSale)
       toast.success('Bill saved offline! Will sync when internet returns.', { duration: 4000 })
       return offlineSale
@@ -577,6 +645,8 @@ export function usePOS(salesmanId: string | null = null) {
           is_return: false
       }
       if (salesmanId) saleRecord.salesman_id = salesmanId
+      if (note) saleRecord.note = note
+      if (alterationQty) saleRecord.alteration_qty = alterationQty
       // Always set explicitly: relying on the column default left fully-paid bills
       // reading as 'unpaid', which Receivables would have counted as money owed.
       saleRecord.credit_status = creditRemainder > 0 ? 'unpaid' : 'paid'
@@ -594,6 +664,14 @@ export function usePOS(salesmanId: string | null = null) {
         if (!n) break
         invoiceNo = `INV-${String(Number(n[1]) + 1).padStart(4, '0')}`
         saleRecord.invoice_no = invoiceNo
+        ;({ data: sale, error } = await insertSale())
+      }
+
+      // The bill points at a customer the database does not have (made on this PC, or a
+      // save the server refused): use the real one with that phone, or make it, and retry.
+      if (error && /sales_customer_id_fkey/.test(error.message)) {
+        const realId = await resolveCustomerId(customer)
+        saleRecord.customer_id = realId
         ;({ data: sale, error } = await insertSale())
       }
 
@@ -731,10 +809,12 @@ export function usePOS(salesmanId: string | null = null) {
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
         salesmanName,
         creditNoteDiscount,
+        note, alterationQty,
         date: new Date().toISOString()
       }
 
       setLastSale(saleData)
+      journalBill('saved', saleData)
       toast.success(`✅ ${invoiceNo}`)
       return saleData
     } catch (err: any) {
@@ -746,13 +826,17 @@ export function usePOS(salesmanId: string | null = null) {
         netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
         creditDueDays: creditRemainder > 0 ? creditDueDays : undefined,
         creditDueDate: creditRemainder > 0 ? creditDueDate : undefined,
-        salesmanId, counterId: COUNTER_ID,
+        salesmanId, salesmanName: salesmanNameFor(salesmanId), counterId: COUNTER_ID,
         creditNoteDiscount,
+        note, alterationQty,
         date: new Date().toISOString()
       }
       savePendingSale(offlineSale)
+      journalBill('queued', offlineSale, String(err?.message || 'server refused the bill'))
       setLastSale(offlineSale)
-      toast.success('Bill saved! ✅', { duration: 4000 })
+      // Not "saved ✅": the server did NOT take this bill. Say so, and why.
+      toast(`⚠️ Bill kept on THIS PC only — the server did not take it (${String(err?.message || 'unknown reason').slice(0, 90)}). It is sent again automatically. Do not clear data.`,
+        { duration: 12000, style: { background: '#fff7ed', color: '#9a3412', border: '1px solid #fed7aa', maxWidth: 460 } })
       return offlineSale
     } finally {
       setIsSaving(false)
@@ -844,6 +928,7 @@ export function usePOS(salesmanId: string | null = null) {
     customerTier,
     activeCreditNotes, creditToApply, setCreditToApply, clearCredit,
     creditNoteDiscount, creditAllocations, availableCredit, maxApplicableCredit,
+    customerDues, collectDues,
     manualDiscount, setManualDiscount, manualDiscountMode, setManualDiscountMode, manualDiscountAmount,
     coupon, couponCode, setCouponCode, applyCoupon,
     removeCoupon: () => { setCoupon(null); setCouponCode('') },

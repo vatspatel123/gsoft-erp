@@ -99,7 +99,10 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
               color: saleData.paymentMode === 'credit' ? '#dc2626' : '#9333ea',
               padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase'
             }}>
-              {saleData.paymentMode === 'credit' ? '⚠️ CREDIT (PENDING)' : saleData.paymentMode}
+              {saleData.paymentMode === 'credit'
+                ? (Number(saleData.creditRemainder) > 0 && Number(saleData.creditRemainder) < Number(saleData.netAmount) - 0.01
+                    ? `⚠️ PENDING ₹${Number(saleData.creditRemainder).toLocaleString('en-IN')}` : '⚠️ CREDIT (PENDING)')
+                : saleData.paymentMode}
             </span>
             {saleData.paymentMode === 'credit' && (
               <span style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 600 }}>

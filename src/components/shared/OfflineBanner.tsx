@@ -11,6 +11,21 @@ export function OfflineBanner() {
     return () => clearInterval(t)
   }, [])
 
+  // Online, but bills the server has not taken yet: this is the dangerous case (it looks
+  // like everything is fine), so it is never silent. They are retried every 2 minutes.
+  if (isOnline && pendingCount > 0) {
+    return (
+      <div style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca', padding: '8px 20px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', flexShrink: 0, flexWrap: 'wrap' }}>
+        <span style={{ color: '#b91c1c', fontWeight: 700 }}>⚠️ {pendingCount} bill{pendingCount > 1 ? 's are' : ' is'} saved only on this PC — NOT on the server yet</span>
+        <span style={{ color: '#64748b' }}>They appear in Invoices as INV-L… / OFF-… and are sent again automatically. Do not clear data.</span>
+        <button onClick={() => { void (window as any).syncPendingSales?.() }}
+          style={{ marginLeft: 'auto', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', padding: '5px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+          Send now
+        </button>
+      </div>
+    )
+  }
+
   if (isOnline) return null
 
   return (

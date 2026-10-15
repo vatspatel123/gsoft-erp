@@ -2,7 +2,8 @@ import { User, X, Star, Banknote, CreditCard, Smartphone, BookOpen, History, Tic
 import type { Customer, Coupon, PaymentMode } from '../../hooks/usePOS';
 import { type CustomerTier, getTierInfo } from '../../utils/customerTier';
 import type { CreditNote } from '../../hooks/useCreditNotes';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { findCustomerByPhone } from '../../utils/customerLookup';
 import { supabase } from '../../lib/supabase';
 import { saveCustomerToCache } from '../../utils/offlineCache';
 import toast from 'react-hot-toast';
@@ -54,6 +55,10 @@ interface OrderSummaryProps {
   totalDiscount: number;
   netAmount: number;
   completeSale: () => void;
+  alterationQty?: number;
+  setAlterationQty?: (n: number) => void;
+  customerDues?: { id: string; source: 'sale' | 'exchange'; no: string; date: string; pending: number }[];
+  collectDues?: (amount: number, tender: 'cash' | 'upi' | 'card') => Promise<boolean>;
   isSaving: boolean;
   clearCart: () => void;
   cartLength: number;
@@ -61,6 +66,10 @@ interface OrderSummaryProps {
 
 export function OrderSummary(props: OrderSummaryProps) {
   const [customerSearch, setCustomerSearch] = useState('')
+  const [collectOpen, setCollectOpen] = useState(false)          // collecting old dues
+  const [collectAmt, setCollectAmt] = useState('')
+  const [collectTender, setCollectTender] = useState<'cash' | 'upi' | 'card'>('cash')
+  const [collecting, setCollecting] = useState(false)
   const [customerResults, setCustomerResults] = useState<any[]>([])
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
   const [customerLoading, setCustomerLoading] = useState(false)
@@ -141,12 +150,19 @@ export function OrderSummary(props: OrderSummaryProps) {
     setShowNewForm(false)
   }
 
+  const savingCustomer = useRef(false)   // a second press of Save while the first is still saving
   const handleSaveNewCustomer = async () => {
     const phone = customerSearch.replace(/\D/g, '')
     if (!phone || phone.length < 10) {
       toast.error('Enter valid 10 digit phone number')
       return
     }
+    if (savingCustomer.current) return
+    savingCustomer.current = true
+    try { await saveNewCustomer(phone) } finally { savingCustomer.current = false }
+  }
+
+  const saveNewCustomer = async (phone: string) => {
 
     const newCustomer = {
       id: crypto.randomUUID(),
@@ -186,6 +202,21 @@ export function OrderSummary(props: OrderSummaryProps) {
           toast.success('Customer saved! ✅')
           return
         }
+        // The server said no. If the phone is already a customer, that customer is who
+        // we want. Anything else: say so. Carrying on with a customer the database does
+        // not have made the bill fail later and vanish into the offline queue.
+        const existing = await findCustomerByPhone(phone)
+        if (existing) {
+          saveCustomerToCache(existing)
+          props.onCustomerFound(existing)
+          setCustomerSearch(existing.name + ' — ' + existing.phone)
+          setShowCustomerDropdown(false)
+          setShowNewForm(false)
+          toast.success(`Customer already saved: ${existing.name}`)
+          return
+        }
+        toast.error('Customer not saved: ' + (error?.message || 'the server did not answer'), { duration: 6000 })
+        return
       } catch (err) {
         console.warn('DB customer save notice, using local customer:', err)
       }
@@ -489,6 +520,47 @@ export function OrderSummary(props: OrderSummaryProps) {
               <Ticket size={12} /> Credit Control
             </div>
 
+            {/* What the customer still OWES from earlier bills — shown so it can be collected now. */}
+            {(props.customerDues?.length || 0) > 0 && (() => {
+              const dues = props.customerDues || []
+              const total = dues.reduce((s, d) => s + d.pending, 0)
+              return (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '8px 10px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                    <span style={{ color: '#b91c1c', fontWeight: 700 }}>⚠️ Pending dues: ₹{total.toLocaleString('en-IN')}</span>
+                    {!collectOpen && (
+                      <button onClick={() => { setCollectOpen(true); setCollectAmt(String(total)) }}
+                        style={{ background: '#dc2626', color: 'white', border: 'none', borderRadius: '7px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                        Collect
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#7f1d1d', marginTop: '3px' }}>
+                    {dues.map(d => `${d.no} ₹${d.pending.toLocaleString('en-IN')}`).join(' · ')}
+                  </div>
+                  {collectOpen && (
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="number" min={0} value={collectAmt} onChange={e => setCollectAmt(e.target.value)} placeholder="Amount"
+                        style={{ flex: 1, minWidth: '70px', border: '1px solid #fecaca', borderRadius: '7px', padding: '6px 8px', fontSize: '12px', fontFamily: "'DM Mono', monospace" }} />
+                      <select value={collectTender} onChange={e => setCollectTender(e.target.value as any)}
+                        style={{ border: '1px solid #fecaca', borderRadius: '7px', padding: '6px', fontSize: '12px' }}>
+                        <option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option>
+                      </select>
+                      <button disabled={collecting} onClick={async () => {
+                        setCollecting(true)
+                        const ok = await props.collectDues?.(Math.min(Number(collectAmt) || 0, total), collectTender)
+                        setCollecting(false)
+                        if (ok) setCollectOpen(false)
+                      }} style={{ background: '#16a34a', color: 'white', border: 'none', borderRadius: '7px', padding: '6px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                        {collecting ? 'Saving…' : 'Receive'}
+                      </button>
+                      <button onClick={() => setCollectOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '11px' }}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
             {(() => {
               const available = Number(props.availableCredit || 0)
               const maxUsable = Number(props.maxApplicableCredit || 0)
@@ -604,6 +676,20 @@ export function OrderSummary(props: OrderSummaryProps) {
             <span style={{ fontFamily: "'DM Mono', monospace" }}>
               ₹{(remaining > 0 ? remaining : changeDue).toFixed(2)}
             </span>
+          </div>
+
+          {/* Alteration: how many pieces go to the tailor — printed big on the bill */}
+          <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', minWidth: '70px' }}>✂ Alteration</span>
+            <input
+              type="number" min={0} step={1} inputMode="numeric"
+              value={props.alterationQty ? props.alterationQty : ''}
+              onChange={e => props.setAlterationQty?.(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              placeholder="pieces"
+              style={{ flex: 1, minWidth: 0, border: `1.5px solid ${props.alterationQty ? '#dc2626' : '#f3e8ff'}`, borderRadius: '8px',
+                padding: '8px 10px', fontSize: '13px', fontFamily: "'DM Mono', monospace", outline: 'none', color: '#1a0a2e', background: 'white' }}
+            />
+            {!!props.alterationQty && <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 700 }}>pcs</span>}
           </div>
 
           {/* Credit Sale (Pending / Pay Later) Due Date Terms */}

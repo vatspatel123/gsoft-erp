@@ -134,6 +134,12 @@ export function getCachedSalesmen():
   } catch { return null }
 }
 
+/** A salesman's name from this PC's saved staff list (works offline). */
+export function salesmanNameFor(id: string | null | undefined): string | null {
+  if (!id) return null
+  return (getCachedSalesmen() || []).find((s: any) => s.id === id)?.name ?? null
+}
+
 // ── Customers Cache ─────────────────────
 export function saveCustomerToCache(
   customer: any
@@ -205,6 +211,41 @@ export function savePendingSale(
       JSON.stringify(pending)
     )
   } catch {}
+}
+
+/**
+ * Put recovered bills back into the queue of bills waiting for the server (see
+ * tools/find-lost-bills.js). Skips a bill already in the queue; keeps every pendingId unique.
+ */
+export function addPendingBills(bills: any[]): { added: number; skipped: number } {
+  const pending = getPendingSales()
+  let added = 0, skipped = 0
+  for (const b of bills) {
+    if (!b || !b.invoiceNo || !Array.isArray(b.cart) || !b.cart.length || pending.some((p: any) => p.invoiceNo === b.invoiceNo)) { skipped++; continue }
+    let id = Number(b.pendingId) || Date.now()
+    while (pending.some((p: any) => p.pendingId === id)) id++
+    pending.push({ ...b, pendingId: id, createdAt: b.createdAt || new Date().toISOString() })
+    added++
+  }
+  try { localStorage.setItem(CACHE_KEYS.pendingSales, JSON.stringify(pending)) } catch { return { added: 0, skipped: bills.length } }
+  return { added, skipped }
+}
+
+/** How long a bill being re-made in POS is kept out of the automatic sending. */
+export const HOLD_MS = 30 * 60 * 1000
+export const isHeld = (s: any) => !!s?.heldAt && Date.now() - s.heldAt < HOLD_MS
+
+/**
+ * Put an unsent bill aside while it is re-made in POS (so the automatic sending does not also send
+ * the old copy), or release it. A forgotten hold expires on its own after HOLD_MS.
+ */
+export function holdPendingSale(pendingId: number, on: boolean): void {
+  const updated = getPendingSales().map((s: any) => {
+    if (s.pendingId !== pendingId) return s
+    const { heldAt: _h, ...rest } = s
+    return on ? { ...rest, heldAt: Date.now() } : rest
+  })
+  try { localStorage.setItem(CACHE_KEYS.pendingSales, JSON.stringify(updated)) } catch { /* not kept */ }
 }
 
 export function getPendingSales(): any[] {

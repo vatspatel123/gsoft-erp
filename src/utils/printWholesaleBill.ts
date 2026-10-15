@@ -4,6 +4,7 @@ import { sendWhatsApp } from './whatsapp'
 import { printHTML } from './printHTML'
 import { fmtDateTime } from './date'
 import { rupeesInWords } from './numberWords'
+import { hsnOf } from './hsn'
 
 const esc = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const amt = (n: number) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2)
@@ -27,7 +28,7 @@ export function buildWholesaleBillHTML(saleData: any): string {
   const lines = cart.map((item: any, i: number) => ({
     no: i + 1,
     name: item.product?.name || 'Product',
-    hsn: item.product?.hsn_code || '',
+    hsn: hsnOf(item.product),
     qty: Number(item.qty) || 0,
     rate: Number(item.unit_price) || 0,
     lineDisc: Number(item.discount_pct) || 0,

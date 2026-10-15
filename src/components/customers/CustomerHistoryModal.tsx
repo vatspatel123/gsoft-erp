@@ -1,3 +1,4 @@
+import { creditPendingOf } from '../../utils/credit'
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { X, Receipt, ArrowLeftRight, Ticket, Clock, Star, Phone, MessageCircle, Printer, AlertTriangle } from 'lucide-react'
@@ -38,6 +39,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
             .from('sales')
             .select(`
               id, invoice_no, total_amount, discount_amount, net_amount, gst_amount, payment_mode, created_at, is_return,
+              cash_amount, card_amount, upi_amount, credit_amount, credit_paid, credit_status, credit_due_date,
               sale_items (id, qty, unit_price, discount_pct, line_total, products (name, size, colour, sku, barcode))
             `)
             .eq('customer_id', customer.id)
@@ -102,8 +104,9 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
     .filter(cn => cn.status === 'active' && cn.balance_amount > 0)
     .reduce((sum, cn) => sum + Number(cn.balance_amount || 0), 0)
 
-  const unpaidCreditSales = sales.filter(s => s.payment_mode === 'credit' && !s.is_return)
-  const totalUnpaidCredit = unpaidCreditSales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+  // Only what is really still owed: the unpaid part of each bill, less anything collected since.
+  const unpaidCreditSales = sales.filter(s => creditPendingOf(s) > 0)
+  const totalUnpaidCredit = unpaidCreditSales.reduce((sum, s) => sum + creditPendingOf(s), 0)
 
   const sendWhatsAppLedger = () => {
     if (!customer.phone) {
@@ -139,7 +142,7 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
       `નમસ્તે *${customer.name}*,%0A` +
       `આપનું બિલ નંબર *#${sale.invoice_no}* (તારીખ: ${dateStr}) નું બાકી રકમ *₹${Number(sale.net_amount).toFixed(2)}* છે.%0A` +
       `કૃપા કરીને વહેલી તકે ચુકવણી કરશો.%0A%0A` +
-      `_Dear ${customer.name}, gentle reminder regarding your outstanding bill #${sale.invoice_no} of ₹${Number(sale.net_amount).toFixed(2)} dated ${dateStr}._%0A` +
+      `_Dear ${customer.name}, gentle reminder regarding your outstanding bill #${sale.invoice_no} (pending ₹${creditPendingOf(sale).toFixed(2)}) dated ${dateStr}._%0A` +
       `Thank you!`
 
     sendWhatsApp(fullPhone, msg, { encoded: true })
@@ -311,10 +314,12 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                                   <span style={{
                                     marginLeft: '8px', fontSize: '10px', padding: '2px 6px',
                                     borderRadius: '99px', fontWeight: 600,
-                                    background: s.payment_mode === 'credit' ? '#fef2f2' : '#dcfce7',
-                                    color: s.payment_mode === 'credit' ? '#dc2626' : '#166534'
+                                    background: creditPendingOf(s) > 0 ? '#fef2f2' : '#dcfce7',
+                                    color: creditPendingOf(s) > 0 ? '#dc2626' : '#166534'
                                   }}>
-                                    {s.payment_mode?.toUpperCase()}
+                                    {creditPendingOf(s) > 0
+                                      ? (creditPendingOf(s) >= Number(s.net_amount) - 0.01 ? 'CREDIT' : `PENDING ₹${creditPendingOf(s).toLocaleString('en-IN')}`)
+                                      : (s.payment_mode === 'credit' ? 'PAID' : s.payment_mode?.toUpperCase())}
                                   </span>
                                 </div>
                                 <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
@@ -540,8 +545,11 @@ export function CustomerHistoryModal({ customer, onClose }: CustomerHistoryModal
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                               <div style={{ textAlign: 'right' }}>
                                 <div style={{ fontSize: '16px', fontWeight: 800, color: '#dc2626', fontFamily: 'DM Mono, monospace' }}>
-                                  ₹{Number(s.net_amount).toFixed(2)}
+                                  ₹{creditPendingOf(s).toFixed(2)}
                                 </div>
+                                {creditPendingOf(s) < Number(s.net_amount) - 0.01 && (
+                                  <div style={{ fontSize: '10px', color: '#94a3b8' }}>of the ₹{Number(s.net_amount).toFixed(2)} bill</div>
+                                )}
                               </div>
                               <button
                                 onClick={() => send15DayOverdueReminder(s)}

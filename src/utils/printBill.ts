@@ -322,6 +322,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     .pv { font-variant-numeric:tabular-nums; }
     .credit { border:1.5px dashed #000; padding:4px; margin-top:6px; text-align:center; font-size:11px; }
     .note { font-size:11px; font-weight:400; font-style:italic; margin-top:5px; }
+    .alter { font-size:15px; font-weight:800; text-align:center; border:1.5px dashed #000; padding:4px; margin-top:6px; letter-spacing:.04em; }
     .foot { text-align:center; font-style:italic; font-size:13px; margin-top:9px; }
   </style>
 </head>
@@ -385,6 +386,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
     </div>
   ` : ''}
 
+  ${Number(saleData.alterationQty) > 0 ? `<div class="alter">ALTERATION: ${Number(saleData.alterationQty)} PCS</div>` : ''}
   ${note ? `<div class="note">Note: ${esc(note)}</div>` : ''}
 
   ${d.showFooter ? `<div class="foot">${esc(s.billFooter || 'Thank you for shopping!')}</div>` : ''}

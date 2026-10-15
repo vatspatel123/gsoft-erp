@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Every completed bill, written to a file on this PC that the app cannot empty.
+  journal: { add: (entry) => ipcRenderer.invoke('journal:add', entry) },
+
   // Local backups, saved on this PC. Absent in the browser build.
   backup: {
     write: (payload) => ipcRenderer.invoke('backup:write', payload),

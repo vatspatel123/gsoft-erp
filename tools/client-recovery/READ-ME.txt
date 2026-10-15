@@ -1,0 +1,10 @@
+FIND THE LOST BILLS  (for Urmii All Plus)
+
+1. Right-click this zip and choose "Extract All" (do not run it from inside the zip).
+2. Open the extracted folder and double-click   RUN-ME.bat
+   (If Windows says "protected your PC", click "More info" then "Run anyway".)
+3. When it asks, CLOSE the Retail ERP software. Do not open it again until this is finished.
+4. Wait until it says "Finished".
+5. On your Desktop you will find  LostBills-RESULT-....zip   Send that file to Agam on WhatsApp.
+
+It only COPIES the software's saved data and reads the copy. Nothing in the software or your data is changed or deleted.

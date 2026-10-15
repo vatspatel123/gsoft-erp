@@ -1,3 +1,4 @@
+import { creditPendingOf } from '../utils/credit'
 import { useEffect } from 'react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -51,14 +52,16 @@ export function useNotifications() {
         const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
         const { data: overdue15Days } = await supabase
           .from('sales')
-          .select('net_amount')
+          .select('net_amount, payment_mode, cash_amount, card_amount, upi_amount, credit_amount, credit_paid, credit_status, is_return')
           .eq('payment_mode', 'credit')
           .lte('created_at', fifteenDaysAgo)
           .eq('is_return', false)
 
-        if (overdue15Days && overdue15Days.length > 0) {
-          const totalOverdue = overdue15Days.reduce((sum, s) => sum + (s.net_amount || 0), 0)
-          toast(`⚠️ ${overdue15Days.length} customer credit bill${overdue15Days.length > 1 ? 's' : ''} overdue (> 15 days) — Total ₹${totalOverdue.toLocaleString('en-IN')}. Check Invoices to send WhatsApp reminders.`, {
+        // What is still owed on each bill (not its whole amount), and only bills with something owed.
+        const owing = (overdue15Days || []).filter(s => creditPendingOf(s) > 0)
+        if (owing.length > 0) {
+          const totalOverdue = owing.reduce((sum, s) => sum + creditPendingOf(s), 0)
+          toast(`⚠️ ${owing.length} customer credit bill${owing.length > 1 ? 's' : ''} overdue (> 15 days) — Total ₹${totalOverdue.toLocaleString('en-IN')}. Check Invoices to send WhatsApp reminders.`, {
             duration: 8000,
             style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }
           })

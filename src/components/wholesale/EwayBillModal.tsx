@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { supabase } from '../../lib/supabase'
 import { getSettings } from '../../utils/settings'
 import { printHTML } from '../../utils/printHTML'
+import { hsnOf } from '../../utils/hsn'
 import {
   STATE_CODES, TRANS_MODES, buildEwayHTML, buildEwayJSON, downloadFile, ewayProblems,
   type EwayForm, type EwayParty,
@@ -34,7 +35,7 @@ export function EwayBillModal({ saleData, onClose }: { saleData: any; onClose: (
     items: (saleData.cart || []).map((i: any) => ({
       name: i.product?.name || 'Item',
       desc: [i.product?.design_no && `D:${i.product.design_no}`, i.product?.size, i.product?.colour].filter(Boolean).join(' · '),
-      hsn: String(i.product?.hsn_code || ''), qty: Number(i.qty) || 0,
+      hsn: hsnOf(i.product), qty: Number(i.qty) || 0,
       taxable: Number(i.qty) * Number(i.unit_price) * (1 - (Number(i.discount_pct) || 0) / 100) * disc,
       gstRate: Number(i.gst_rate) || 0,
     })),

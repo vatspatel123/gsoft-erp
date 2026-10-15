@@ -27,6 +27,7 @@ declare global {
         logout: () => Promise<{ ok: boolean }>
         onStatus: (cb: (s: WhatsAppState) => void) => () => void
       }
+      journal?: { add: (entry: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }> }
       backup?: {
         write: (payload: { tables: Record<string, unknown[]>; meta: Record<string, unknown> })
           => Promise<{ ok: boolean; name?: string; path?: string; size?: number; reason?: string }>

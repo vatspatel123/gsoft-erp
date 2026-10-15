@@ -5,7 +5,9 @@ import { getSettings, saveSettings, DEFAULT_SETTINGS, pushShopSettings, pullShop
 import { supabase } from '../lib/supabase'
 import { printBill, buildBillHTML, buildBillMessage } from '../utils/printBill'
 import { clearLocal } from '../utils/localStore'
+import { loadCategoryHsn, normName } from '../utils/hsn'
 import { runBackup } from '../utils/backup'
+import { addPendingBills, getPendingSales } from '../utils/offlineCache'
 import { fmtDateTime } from '../utils/date'
 import { printHTML, listPrinters, canSelectPrinters, autoAssignPrinters, clearPrintQueues, pendingJobs } from '../utils/printHTML'
 import { printBarcodeLabels } from '../utils/printLabels'
@@ -132,6 +134,89 @@ function SaveBtn({ onClick, loading }: { onClick: () => void; loading?: boolean 
 }
 
 // ─── TAB 1: Shop Info ────────────────────────────────────────────────────────
+
+/**
+ * HSN code per category. Wholesale and e-way bills print it for every product in the
+ * category (a code typed on a single product still wins). TOP / top and 3 pc / 3pc are
+ * one line here, and a code set on it applies to every spelling.
+ */
+function HsnByCategoryCard() {
+  const [rows, setRows] = useState<{ key: string; label: string; products: number; ids: string[]; hsn: string; saved: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    const [cats, prods] = await Promise.all([
+      supabase.from('categories').select('id, name, hsn_code'),
+      supabase.from('products').select('category_id').not('category_id', 'is', null).limit(50000),
+    ])
+    const count = new Map<string, number>()
+    for (const p of (prods.data || []) as any[]) count.set(p.category_id, (count.get(p.category_id) || 0) + 1)
+    const groups = new Map<string, any>()
+    for (const c of (cats.data || []) as any[]) {
+      const key = normName(c.name)
+      const g = groups.get(key) || { key, label: c.name, products: 0, ids: [], hsn: '', saved: '' }
+      g.products += count.get(c.id) || 0
+      g.ids.push(c.id)
+      if (!g.hsn && c.hsn_code) { g.hsn = c.hsn_code; g.saved = c.hsn_code }
+      // The spelling used most often is the one shown.
+      if ((count.get(c.id) || 0) > (g.top || 0)) { g.top = count.get(c.id) || 0; g.label = c.name }
+      groups.set(key, g)
+    }
+    setRows([...groups.values()].sort((a, b) => b.products - a.products))
+    setLoading(false)
+  }
+  useEffect(() => { void load() }, [])
+
+  const changed = rows.filter(r => r.hsn !== r.saved)
+  const save = async () => {
+    const bad = changed.find(r => r.hsn && !/^\d{4,8}$/.test(r.hsn))
+    if (bad) { toast.error(`${bad.label}: HSN must be 4–8 digits`); return }
+    setSaving(true)
+    const results = await Promise.all(changed.map(r =>
+      supabase.from('categories').update({ hsn_code: r.hsn || null }).in('id', r.ids)))
+    setSaving(false)
+    const failed = results.find(r => r.error)
+    if (failed?.error) { toast.error('Not saved: ' + failed.error.message); return }
+    toast.success(`HSN saved for ${changed.length} categor${changed.length === 1 ? 'y' : 'ies'}`)
+    await Promise.all([load(), loadCategoryHsn()])
+  }
+
+  const missing = rows.filter(r => !r.hsn && r.products > 0).length
+  return (
+    <Card>
+      <SectionTitle sub="Printed on wholesale bills and used by the e-way bill, for every product in the category">HSN code by category</SectionTitle>
+      {loading ? <div style={{ fontSize: '13px', color: '#64748b' }}>Loading…</div> : (
+        <>
+          {missing > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: '10px', padding: '8px 12px', fontSize: '12.5px', marginBottom: '10px' }}>
+              {missing} categor{missing === 1 ? 'y has' : 'ies have'} no HSN yet, so their items show a blank HSN on the bill and the e-way bill cannot be made. Fill them in below (ask your CA if unsure).
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '8px' }}>
+            {rows.map(r => (
+              <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fdf8ff', border: `1px solid ${!r.hsn && r.products ? '#fde68a' : '#f3e8ff'}`, borderRadius: '10px', padding: '8px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a0a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>{r.products} product{r.products === 1 ? '' : 's'}</div>
+                </div>
+                <input value={r.hsn} inputMode="numeric" placeholder="HSN"
+                  onChange={e => setRows(rs => rs.map(x => (x.key === r.key ? { ...x, hsn: e.target.value.replace(/\D/g, '').slice(0, 8) } : x)))}
+                  style={{ width: '84px', padding: '6px 8px', border: '1px solid #e9d5ff', borderRadius: '8px', fontSize: '13px', fontFamily: "'DM Mono', monospace" }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: '12px' }}>
+            <button onClick={save} disabled={saving || !changed.length}
+              style={{ padding: '9px 18px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', cursor: changed.length ? 'pointer' : 'default', opacity: changed.length ? 1 : 0.5, fontFamily: "'DM Sans', sans-serif" }}>
+              {saving ? 'Saving…' : changed.length ? `Save HSN (${changed.length} changed)` : 'Save HSN'}
+            </button>
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
 
 function ShopInfoTab() {
   const [form, setForm] = useState(() => {
@@ -1032,6 +1117,21 @@ function PcBackupCard() {
           style={{ padding: '9px 18px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
           Open backup folder
         </button>
+        <label title="A bills file made by tools/find-lost-bills.js: the bills go back to the queue and are sent to the server"
+          style={{ padding: '9px 18px', background: 'white', color: '#9333ea', border: '1px solid #e9d5ff', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+          Restore lost bills from a file
+          <input type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={async e => {
+            const file = e.target.files?.[0]; e.target.value = ''
+            if (!file) return
+            try {
+              const bills = JSON.parse(await file.text())
+              const r = addPendingBills(Array.isArray(bills) ? bills : [bills])
+              if (!r.added) { toast.error(`No bill added (${r.skipped} skipped: already waiting, or not a bill)`); return }
+              toast.success(`${r.added} bill${r.added > 1 ? 's' : ''} put back (${getPendingSales().length} waiting) — sending to the server…`, { duration: 6000 })
+              void (window as any).syncPendingSales?.()
+            } catch { toast.error('That file is not a recovered-bills file') }
+          }} />
+        </label>
       </div>
     </Card>
   )
@@ -1101,7 +1201,7 @@ function DataBackupTab() {
     if (cacheText !== 'CONFIRM') { toast.error('Type CONFIRM to proceed'); return }
     const keys = [
       'gsoft_products_cache', 'gsoft_customers_cache', 'gsoft_credit_notes_cache',
-      'gsoft_expenses_cache', 'gsoft_purchase_returns_cache', 'gsoft_pending_sales',
+      'gsoft_expenses_cache', 'gsoft_purchase_returns_cache',   // not gsoft_pending_sales: bills not on the server yet must survive this
       'gsoft_salesmen_cache', 'expense_counter', 'purchase_counter',
     ]
     let removed = 0
@@ -1542,7 +1642,7 @@ export function SettingsPage() {
 
         {/* Right content */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          {activeTab === 'shop'          && <ShopInfoTab />}
+          {activeTab === 'shop'          && <><ShopInfoTab /><HsnByCategoryCard /></>}
           {activeTab === 'print'         && <BillPrintTab />}
           {activeTab === 'staff'         && <StaffPINTab />}
           {activeTab === 'whatsapp'      && <WhatsAppTab />}

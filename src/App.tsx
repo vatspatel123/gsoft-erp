@@ -3,10 +3,13 @@ import { Toaster } from 'react-hot-toast'
 import { useEffect, useState } from 'react'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useNotifications } from './hooks/useNotifications'
-import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale } from './utils/offlineCache'
+import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale, isHeld } from './utils/offlineCache'
 import { pullShopSettings, getSettings, saveSettings } from './utils/settings'
 import { autoAssignPrinters, canSelectPrinters } from './utils/printHTML'
 import { backupIfDue } from './utils/backup'
+import { loadCategoryHsn } from './utils/hsn'
+import { resolveCustomerId } from './utils/customerLookup'
+import { journalBill } from './utils/billJournal'
 import { enterToNextField } from './utils/enterNavigation'
 import { supabase } from './lib/supabase'
 import toast from 'react-hot-toast'
@@ -57,6 +60,9 @@ function AppContent() {
       if (changed.length) saveSettings(Object.fromEntries(changed.map(k => [k, patch[k]])))
     }).catch(() => {})
   }, [])
+
+  // Category HSN codes (a few dozen rows) for wholesale and e-way bills.
+  useEffect(() => { if (session) void loadCategoryHsn() }, [!!session])
 
   // Backup to this PC: once shortly after sign-in (if the newest is over ~11 h old), then
   // checked every 30 minutes, which makes about two a day on a PC that stays on all day.
@@ -109,7 +115,18 @@ function AppContent() {
   // Enter moves to the next field everywhere — see utils/enterNavigation.ts.
   useEffect(() => {
     window.addEventListener('keydown', enterToNextField)
-    return () => window.removeEventListener('keydown', enterToNextField)
+    // A focused number box changes its value when the mouse wheel turns over it, so a scroll
+    // meant for the page quietly changed qty, price or payment amounts. Take the focus off the
+    // box first: the value stays as typed and the page scrolls as intended.
+    const noWheelChange = () => {
+      const el = document.activeElement
+      if (el instanceof HTMLInputElement && el.type === 'number') el.blur()
+    }
+    window.addEventListener('wheel', noWheelChange, { passive: true, capture: true })
+    return () => {
+      window.removeEventListener('keydown', enterToNextField)
+      window.removeEventListener('wheel', noWheelChange, { capture: true })
+    }
   }, [])
 
   // Splash screen — 2 seconds
@@ -154,17 +171,25 @@ function AppContent() {
 
   // Sync pending offline sales when back online
   useEffect(() => {
+    let running = false      // two overlapping runs would send the same bill twice
     const sync = async () => {
+      if (running) return
       const pending = getPendingSales()
       if (pending.length === 0) return
+      running = true
+      try {
       let synced = 0
       for (const sale of pending) {
+        if (isHeld(sale)) continue     // being re-made in POS right now: do not send the old copy too
         try {
+          // The customer on a bill made offline may not exist in the database yet (or at
+          // all): without a real one the sale is refused and the bill stays queued for good.
+          const customerId = sale.customer ? await resolveCustomerId(sale.customer) : null
           const { data, error } = await supabase
             .from('sales')
             .insert({
               invoice_no: sale.invoiceNo,
-              customer_id: sale.customer?.id || null,
+              customer_id: customerId,
               counter_id: sale.counterId,
               salesman_id: sale.salesmanId || null,
               total_amount: sale.subtotal,
@@ -176,6 +201,8 @@ function AppContent() {
               card_amount: sale.tenders?.card || 0,
               upi_amount: sale.tenders?.upi || 0,
               credit_amount: sale.creditRemainder || 0,
+              note: sale.note || null,
+              alteration_qty: Math.max(0, Number(sale.alterationQty) || 0),
               credit_status: sale.creditRemainder > 0 ? 'unpaid' : 'paid',
               ...(sale.creditRemainder > 0 ? {
                 credit_due_days: sale.creditDueDays,
@@ -212,6 +239,7 @@ function AppContent() {
                 supabase.rpc('decrement_stock', { p_id: i.product.id, qty: i.qty })))
             }
             clearPendingSale(sale.pendingId)
+            journalBill('synced', sale)
             synced++
           }
         } catch (e) {
@@ -219,10 +247,14 @@ function AppContent() {
         }
       }
       if (synced > 0) toast.success(`${synced} offline bill${synced > 1 ? 's' : ''} synced to cloud!`)
+      } finally { running = false }
     }
 
     (window as any).syncPendingSales = sync
     if (isOnline) sync()
+    // A bill the server refused is tried again every couple of minutes, not only on restart.
+    const again = setInterval(() => { if (navigator.onLine) void sync() }, 2 * 60 * 1000)
+    return () => clearInterval(again)
   }, [isOnline])
 
   // Auto-updater notifications
