@@ -45,6 +45,7 @@ export function useWholesale() {
   const [freight, setFreight] = useState(0)
   const [paymentMode, setPaymentMode] = useState<WholesalePaymentMode>('credit')
   const [notes, setNotes] = useState('')
+  const [billDate, setBillDate] = useState('')   // 'YYYY-MM-DD' for a bill forgotten earlier; '' = today
   const [isSaving, setIsSaving] = useState(false)
   const [lastSale, setLastSale] = useState<any>(null)
 
@@ -116,6 +117,7 @@ export function useWholesale() {
     setFreight(0)
     setPaymentMode('credit')
     setNotes('')
+    setBillDate('')
   }
 
   // ─── Complete sale ────────────────────────────────────────────────────────
@@ -126,6 +128,10 @@ export function useWholesale() {
     setIsSaving(true)
     try {
       const invoiceNo = generateInvoiceNo()
+      // The picked day at the current clock time, never in the future.
+      const now = new Date()
+      const picked = billDate ? new Date(`${billDate}T${now.toTimeString().slice(0, 8)}`) : now
+      const billWhen = isNaN(picked.getTime()) || picked > now ? now : picked
 
       // 1. Insert sale header
       const { data: sale, error: saleErr } = await supabase
@@ -144,6 +150,7 @@ export function useWholesale() {
           payment_mode: paymentMode,
           payment_status: paymentMode === 'credit' ? 'pending' : 'paid',
           notes: notes.trim() || null,
+          ...(billDate ? { created_at: billWhen.toISOString() } : {}),
         })
         .select()
         .single()
@@ -206,7 +213,7 @@ export function useWholesale() {
 
       const saleData = {
         invoiceNo,
-        date: fmtDateTime(new Date()),
+        date: fmtDateTime(billWhen),
         party,
         cart,
         subtotal,
@@ -238,7 +245,7 @@ export function useWholesale() {
     discountPct, setDiscountPct,
     freight, setFreight,
     paymentMode, setPaymentMode,
-    notes, setNotes,
+    notes, setNotes, billDate, setBillDate,
     isSaving, lastSale, setLastSale,
     // derived
     subtotal, billDiscAmt, afterDiscount, gstAmount, roundOff, netAmount,

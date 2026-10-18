@@ -553,6 +553,20 @@ export function WholesalePage() {
               </div>
             </div>
 
+            {/* A bill forgotten earlier: tick, pick the day it really happened. */}
+            <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!ws.billDate} style={{ accentColor: '#d97706' }}
+                  onChange={e => ws.setBillDate(e.target.checked ? new Date().toLocaleDateString('en-CA') : '')} />
+                📅 Backdated bill
+              </label>
+              {!!ws.billDate && (
+                <input type="date" max={new Date().toLocaleDateString('en-CA')} value={ws.billDate}
+                  onChange={e => { const t = new Date().toLocaleDateString('en-CA'); ws.setBillDate(e.target.value > t ? t : e.target.value || t) }}
+                  style={{ ...inputStyle, width: 'auto', background: '#fffbeb', borderColor: '#f59e0b' }} />
+              )}
+            </div>
+
             {/* Notes */}
             <div style={{ marginBottom: '14px' }}>
               {sectionLabel('Notes (optional)')}

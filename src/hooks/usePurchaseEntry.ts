@@ -121,6 +121,7 @@ export function usePurchaseEntry(initialTab: 'new' | 'bills' = 'new') {
   const [items, setItems] = useState<PurchaseItem[]>(draft?.items?.length ? draft.items : [EMPTY_ITEM()])
   // Highest sequence barcode already in stock — see nextCode.
   const lastCode = useRef(0)
+  const origQty = useRef<Record<string, number>>({})   // qty per product when the edit was opened, to know what was added
   const loadLastCode = async () => {
     const { data } = await supabase.from('products').select('barcode').not('barcode', 'is', null)
     lastCode.current = Math.max(0, ...(data || []).filter(r => isSeqCode(r.barcode)).map(r => Number(r.barcode)))
@@ -370,6 +371,8 @@ export function usePurchaseEntry(initialTab: 'new' | 'bills' = 'new') {
         line_total: qty * cost,
       }
     })
+    origQty.current = {}
+    for (const r of rows) if (r.product?.id) origQty.current[r.product.id] = (origQty.current[r.product.id] || 0) + (Number(r.qty) || 0)
     setEditing({ id: bill.id, no: bill.purchase_no, netBefore: Number(bill.net_amount) || 0, paid: Number(bill.amount_paid) || 0 })
     setEditReason('')
     applyForm({
@@ -391,7 +394,7 @@ export function usePurchaseEntry(initialTab: 'new' | 'bills' = 'new') {
   }
 
   /** Save the edit through edit_purchase (stock moves by the difference). Returns the new lines, for labels. */
-  const saveEdit = async (): Promise<PurchaseItem[] | null> => {
+  const saveEdit = async (): Promise<(PurchaseItem & { _more: number })[] | null> => {
     if (!editing) return null
     const rows = items.filter(isStarted)
     if (!rows.length) { toast.error('A purchase bill needs at least one item'); return null }
@@ -422,7 +425,7 @@ export function usePurchaseEntry(initialTab: 'new' | 'bills' = 'new') {
     setLoading(false)
     if (!res.ok) { toast.error(res.error, { duration: 7000 }); return null }
     toast.success(`${editing.no} updated · net ₹${res.net.toLocaleString('en-IN')}`)
-    const added = rows.filter(r => !r.product)
+    const added = rows.map(r => ({ ...r, _more: Math.max(0, (Number(r.qty) || 0) - (r.product?.id ? origQty.current[r.product.id] || 0 : 0)) }))
     cancelEdit()
     setTab('bills')
     return added

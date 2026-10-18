@@ -59,6 +59,8 @@ interface OrderSummaryProps {
   setAlterationQty?: (n: number) => void;
   shipping?: number;
   setShipping?: (v: number) => void;
+  billDate?: string;
+  setBillDate?: (v: string) => void;
   customerDues?: { id: string; source: 'sale' | 'exchange'; no: string; date: string; pending: number }[];
   collectDues?: (amount: number, tender: 'cash' | 'upi' | 'card') => Promise<boolean>;
   isSaving: boolean;
@@ -685,6 +687,25 @@ export function OrderSummary(props: OrderSummaryProps) {
               </button>
             )}
           </div>
+
+          {/* A bill forgotten earlier: tick, pick the day it really happened. */}
+          {(() => {
+            const today = new Date().toLocaleDateString('en-CA')
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px', minWidth: '78px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!props.billDate} style={{ accentColor: '#d97706' }}
+                    onChange={e => props.setBillDate?.(e.target.checked ? today : '')} />
+                  📅 Backdated bill
+                </label>
+                {!!props.billDate && (
+                  <input type="date" max={today} value={props.billDate}
+                    onChange={e => props.setBillDate?.(e.target.value > today ? today : e.target.value || today)}
+                    style={{ flex: 1, minWidth: 0, border: '1.5px solid #f59e0b', borderRadius: '8px', padding: '7px 10px', fontSize: '13px', outline: 'none', color: '#1a0a2e', background: '#fffbeb' }} />
+                )}
+              </div>
+            )
+          })()}
 
           {/* Allocation status — anything unallocated becomes udhar */}
           <div style={{

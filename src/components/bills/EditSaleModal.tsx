@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { supabase } from '../../lib/supabase'
 import { editSale, saleTotals, saleLineTotal, money, type SaleLine } from '../../utils/billEdits'
 import { S } from './billEditStyles'
+import { sortProducts } from '../../utils/productOrder'
 
 interface Props {
   saleId: string
@@ -42,7 +43,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     ;(async () => {
       const [{ data, error }, staff] = await Promise.all([
         supabase.from('sales')
-          .select('*, customers(id, name, phone), sale_items(product_id, qty, unit_price, discount_pct, gst_rate, products(id, name, barcode, sku, size, stock_qty, gst_rate))')
+          .select('*, customers(id, name, phone), sale_items(product_id, qty, unit_price, discount_pct, gst_rate, products(id, name, barcode, sku, size, colour, design_no, hsn_code, mrp, stock_qty, gst_rate))')
           .eq('id', saleId).single(),
         supabase.from('users').select('id, name').eq('is_active', true).order('name'),
       ])
@@ -62,7 +63,8 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
         product_id: i.product_id,
         name: i.products?.name || 'Product',
         barcode: i.products?.barcode || i.products?.sku,
-        size: i.products?.size,
+        size: i.products?.size, colour: i.products?.colour, design_no: i.products?.design_no,
+        hsn_code: i.products?.hsn_code, mrp: i.products?.mrp,
         qty: Number(i.qty),
         unit_price: Number(i.unit_price),
         discount_pct: Number(i.discount_pct) || 0,
@@ -119,14 +121,14 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     && phone.replace(/\D/g, '').length > 0
 
   const searchProducts = async () => {
-    const q = query.trim().replace(/[,()%]/g, '')
+    const q = query.trim().replace(/[",()%]/g, ' ').trim()
     if (!q) return
     const { data } = await supabase.from('products')
-      .select('id, name, barcode, sku, size, stock_qty, gst_rate, unit_price, mrp')
+      .select('id, name, barcode, sku, size, colour, design_no, hsn_code, stock_qty, gst_rate, unit_price, mrp')
       .eq('is_active', true)
-      .or(`barcode.eq.${q},sku.eq.${q},name.ilike.%${q}%,design_no.ilike.%${q}%`)
-      .limit(8)
-    setResults(data || [])
+      .or(['name', 'sku', 'barcode', 'design_no', 'pcode', 'batch_no'].map(f => `${f}.ilike."%${q}%"`).join(','))
+      .limit(60)
+    setResults(sortProducts(data || [], q))
     if (!data?.length) toast('Nothing found', { icon: '🔍' })
   }
 
@@ -135,7 +137,8 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
       const at = ls.findIndex(l => l.product_id === p.id)
       if (at >= 0) return ls.map((l, j) => (j === at ? { ...l, qty: l.qty + 1 } : l))
       return [...ls, {
-        product_id: p.id, name: p.name, barcode: p.barcode || p.sku, size: p.size,
+        product_id: p.id, name: p.name, barcode: p.barcode || p.sku, size: p.size, colour: p.colour, design_no: p.design_no,
+        hsn_code: p.hsn_code, mrp: p.mrp,
         qty: 1, unit_price: Number(p.unit_price ?? p.mrp) || 0, discount_pct: 0,
         gst_rate: Number(p.gst_rate) || 0, orig_qty: 0, stock_qty: Number(p.stock_qty) || 0,
       }]
@@ -212,7 +215,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                     <tr key={l.product_id + i}>
                       <td style={S.td}>
                         <div style={{ fontWeight: 600 }}>{l.name}</div>
-                        <div style={S.muted}>{[l.barcode, l.size].filter(Boolean).join(' · ')}
+                        <div style={S.muted}>{[l.design_no && `Design ${l.design_no}`, l.colour, l.size && `Size ${l.size}`, l.barcode, l.hsn_code && `HSN ${l.hsn_code}`, l.mrp && `MRP ₹${l.mrp}`].filter(Boolean).join(' · ')}
                           {l.orig_qty !== l.qty && <span style={S.changed}> was {l.orig_qty}</span>}</div>
                       </td>
                       <td style={S.td}><input style={S.num} type="number" min={1} step={1} value={l.qty}
@@ -250,7 +253,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                 {results.map(p => (
                   <button key={p.id} style={S.result} onClick={() => addProduct(p)}>
                     <Plus size={14} /> <b>{p.name}</b>
-                    <span style={S.muted}>{[p.barcode, p.size, `stock ${p.stock_qty}`].filter(Boolean).join(' · ')}</span>
+                    <span style={S.muted}>{[p.design_no && `Design ${p.design_no}`, p.colour, p.size, p.barcode, `stock ${p.stock_qty}`].filter(Boolean).join(' · ')}</span>
                     <span style={{ marginLeft: 'auto' }}>{money(p.unit_price ?? p.mrp)}</span>
                   </button>
                 ))}

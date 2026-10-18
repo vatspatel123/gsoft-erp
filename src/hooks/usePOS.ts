@@ -95,6 +95,14 @@ export function usePOS(salesmanId: string | null = null) {
   // after discounts. No GST on it: item prices are GST-inclusive and the tax shown is
   // taken out of the goods only.
   const [shipping, setShippingRaw] = useState(0)
+  const [billDate, setBillDate] = useState('')   // 'YYYY-MM-DD' when a bill forgotten earlier is made now; '' = today
+  // The time the bill is dated: now, or the picked day at the current clock time (never in the future).
+  const billWhen = () => {
+    if (!billDate) return new Date().toISOString()
+    const now = new Date()
+    const d = new Date(`${billDate}T${now.toTimeString().slice(0, 8)}`)
+    return (isNaN(d.getTime()) || d > now ? now : d).toISOString()
+  }
   const setShipping = useCallback((v: number) => setShippingRaw(Math.max(0, Math.round((Number(v) || 0) * 100) / 100)), [])
   const [activeCreditNotes, setActiveCreditNotes] = useState<CreditNote[]>([])
   // What this customer still OWES from earlier bills / exchanges (the opposite of store credit).
@@ -621,7 +629,7 @@ export function usePOS(salesmanId: string | null = null) {
         netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
         salesmanId, salesmanName: salesmanNameFor(salesmanId), counterId: COUNTER_ID,
         note, alterationQty, shipping,
-        date: new Date().toISOString()
+        date: billWhen(), backdated: !!billDate
       }
       savePendingSale(offlineSale)
       journalBill('queued', offlineSale, 'no internet')
@@ -654,6 +662,7 @@ export function usePOS(salesmanId: string | null = null) {
       if (note) saleRecord.note = note
       if (alterationQty) saleRecord.alteration_qty = alterationQty
       if (shipping > 0) saleRecord.shipping_amount = shipping
+      if (billDate) saleRecord.created_at = billWhen()
       // Always set explicitly: relying on the column default left fully-paid bills
       // reading as 'unpaid', which Receivables would have counted as money owed.
       saleRecord.credit_status = creditRemainder > 0 ? 'unpaid' : 'paid'
@@ -817,7 +826,7 @@ export function usePOS(salesmanId: string | null = null) {
         salesmanName,
         creditNoteDiscount,
         note, alterationQty, shipping,
-        date: new Date().toISOString()
+        date: billWhen(), backdated: !!billDate
       }
 
       setLastSale(saleData)
@@ -836,7 +845,7 @@ export function usePOS(salesmanId: string | null = null) {
         salesmanId, salesmanName: salesmanNameFor(salesmanId), counterId: COUNTER_ID,
         creditNoteDiscount,
         note, alterationQty, shipping,
-        date: new Date().toISOString()
+        date: billWhen(), backdated: !!billDate
       }
       savePendingSale(offlineSale)
       journalBill('queued', offlineSale, String(err?.message || 'server refused the bill'))
@@ -853,6 +862,7 @@ export function usePOS(salesmanId: string | null = null) {
   const clearCart = useCallback(() => {
     setCart([])
     setShippingRaw(0)
+    setBillDate('')
     setCustomer(null)
     setCoupon(null)
     setCouponCode('')
@@ -938,7 +948,7 @@ export function usePOS(salesmanId: string | null = null) {
     creditNoteDiscount, creditAllocations, availableCredit, maxApplicableCredit,
     customerDues, collectDues,
     manualDiscount, setManualDiscount, manualDiscountMode, setManualDiscountMode, manualDiscountAmount,
-    shipping, setShipping,
+    shipping, setShipping, billDate, setBillDate,
     coupon, couponCode, setCouponCode, applyCoupon,
     removeCoupon: () => { setCoupon(null); setCouponCode('') },
     paymentMode: derivedPaymentMode,

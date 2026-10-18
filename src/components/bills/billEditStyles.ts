@@ -30,7 +30,7 @@ export const S: Record<string, CSSProperties> = {
   authBox: { marginTop: 8, padding: 10, borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' },
   totals: { display: 'flex', flexWrap: 'wrap', gap: '8px 18px', alignItems: 'baseline', padding: '10px 14px',
             background: '#faf5ff', borderRadius: 10, fontSize: 13 },
-  results: { border: '1px solid #e9d5ff', borderRadius: 10, overflow: 'hidden' },
+  results: { border: '1px solid #e9d5ff', borderRadius: 10, overflowY: 'auto', maxHeight: 280 },
   result: { display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '8px 12px', background: '#fff', border: 'none',
             borderBottom: '1px solid #f5f3ff', cursor: 'pointer', fontSize: 13, fontFamily: font, textAlign: 'left' },
   btnPrimary: { padding: '10px 20px', background: '#9333ea', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14,

@@ -215,6 +215,8 @@ const toLabelProducts = (items: any[]) => items.map((item: any) => ({
   barcode: item.barcode || item.product?.barcode || item.product?.sku || '',
   batch_no: '',
   defaultCopies: typeof item.qty === 'number' ? item.qty : 1,
+  // after an edit: tick only the lines whose quantity went up (or are new), with that many labels
+  ...(item._more !== undefined ? { initialCopies: item._more, initialIncluded: item._more > 0 } : {}),
 }))
 
 function SuccessModal({
@@ -339,7 +341,7 @@ export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' |
   const [editLabels, setEditLabels] = useState<any[] | null>(null)   // new lines added in an edit
   const saveEdit = async () => {
     const added = await hook.saveEdit()
-    if (added?.length) setEditLabels(toLabelProducts(added))
+    if (added?.some(r => r._more > 0)) setEditLabels(toLabelProducts(added))
   }
   const tableRef = useRef<HTMLDivElement>(null)
 

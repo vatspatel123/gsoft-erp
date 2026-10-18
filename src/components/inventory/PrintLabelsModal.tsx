@@ -25,9 +25,9 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
   const [rows, setRows] = useState(() =>
     products.map(p => ({
       id: p.id,
-      included: true,
+      included: p.initialIncluded ?? true,
       barcode: p.barcode || p.batch_no || p.sku || '',
-      copies: 1,
+      copies: Math.min(999, Math.max(0, Math.floor(Number(p.initialCopies ?? 1)) || 0)),
       product: p,
     }))
   )
@@ -46,7 +46,7 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
     setRows(prev => prev.map(r => r.id === id ? { ...r, barcode: val } : r))
 
   const updateCopies = (id: string, val: number) =>
-    setRows(prev => prev.map(r => r.id === id ? { ...r, copies: Math.max(1, val) } : r))
+    setRows(prev => prev.map(r => r.id === id ? { ...r, copies: Math.min(999, Math.max(0, Math.floor(val) || 0)) } : r))
 
   // One sheet of stickers is a normal print; hundreds is someone having held an
   // arrow down. Ask rather than commit a roll of labels to it.
@@ -202,7 +202,9 @@ export function PrintLabelsModal({ products, isOpen, onClose }: Props) {
                   />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <button onClick={() => updateCopies(row.id, row.copies - 1)} style={{ width: '22px', height: '22px', border: '1px solid #f3e8ff', borderRadius: '4px', background: 'white', cursor: 'pointer', fontSize: '12px', color: '#9333ea', padding: 0 }}>−</button>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#1a0a2e', width: '20px', textAlign: 'center', fontFamily: 'DM Mono, monospace' }}>{row.copies}</span>
+                    <input type="number" min={0} max={999} value={row.copies} onChange={e => updateCopies(row.id, parseInt(e.target.value))}
+                      title="0 = no label for this product"
+                      style={{ width: '44px', fontSize: '12px', fontWeight: 600, color: '#1a0a2e', textAlign: 'center', fontFamily: 'DM Mono, monospace', border: '1px solid #f3e8ff', borderRadius: '4px', padding: '2px' }} />
                     <button onClick={() => updateCopies(row.id, row.copies + 1)} style={{ width: '22px', height: '22px', border: '1px solid #f3e8ff', borderRadius: '4px', background: 'white', cursor: 'pointer', fontSize: '12px', color: '#9333ea', padding: 0 }}>+</button>
                   </div>
                 </div>
