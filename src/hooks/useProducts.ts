@@ -5,6 +5,7 @@ import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 import { useLiveRefresh } from './useLiveRefresh'
 import { writeLocal, seedLocal } from '../utils/localStore'
 import { categoryFor } from '../utils/hsn'
+import { sortProducts } from '../utils/productOrder'
 
 export function useProducts() {
   const [products, setProducts] = useState<any[]>([])
@@ -64,7 +65,7 @@ export function useProducts() {
       if (req !== lastReq.current) return
       if (error) throw error
       // An empty answer is the answer ("no match"), not a reason to show the old cache.
-      setProducts(data || [])
+      setProducts(sortBy === 'name' ? sortProducts(data || [], term) : (data || []))
       fresh.current = true; shown.current = true
       if (!term && !categoryFilter && statusFilter === 'all') void writeLocal(`products:${sortBy}`, data || [])
       if (data?.length) {

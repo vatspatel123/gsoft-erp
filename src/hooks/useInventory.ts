@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { getCachedProducts, saveProductsToCache } from '../utils/offlineCache'
 import { useLiveRefresh } from './useLiveRefresh'
 import { writeLocal, seedLocal } from '../utils/localStore'
+import { sortProducts } from '../utils/productOrder'
 
 // stock_damage_log.type only accepts these four. The UI collects a free-text
 // reason, so map it; anything unrecognised is recorded as generic damage.
@@ -255,7 +256,7 @@ export function useInventory() {
     }
   }
 
-  const filteredProducts = products
+  const filteredProducts = sortProducts(products, search)
     .filter(p => {
       if (search) {
         const q = search.toLowerCase()

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import toast from 'react-hot-toast'
+import { sortProducts } from '../../utils/productOrder'
 import { saveProductsToCache, searchCachedProducts, isCacheValid, getCachedProducts } from '../../utils/offlineCache'
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { colourToCSS as colourCSS } from '../../utils/design'
@@ -218,7 +219,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
       for (const p of cached) map.set(p.id, p)
       for (const p of fetched) map.set(p.id, p)
 
-      const merged = Array.from(map.values())
+      const merged = sortProducts(Array.from(map.values()), searchStr)
       setResults(merged)
       setShow(merged.length > 0)
     } catch (e) {

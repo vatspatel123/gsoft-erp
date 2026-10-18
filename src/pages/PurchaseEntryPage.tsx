@@ -1,3 +1,4 @@
+import { useSizes } from '../utils/productOrder'
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { Layout } from '../components/shared/Layout'
 import { usePurchaseEntry } from '../hooks/usePurchaseEntry'
@@ -35,9 +36,6 @@ const labelStyle: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px',
 }
 
-const SIZES = ['XS','S','M','L','XL','2XL','3XL','4XL','5XL','6XL','7XL',
-  '28','30','32','34','36','38','40','42','44','46','48',
-  'Free Size','One Size']
 const GST_RATES = [0, 5, 12, 18, 28]
 
 // ─── Product name cell ────────────────────────────────────────────────────────
@@ -336,6 +334,7 @@ function SuccessModal({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' | 'bills' } = {}) {
+  const allSizes = useSizes()
   const hook = usePurchaseEntry(initialTab)
   const [editLabels, setEditLabels] = useState<any[] | null>(null)   // new lines added in an edit
   const saveEdit = async () => {
@@ -457,7 +456,7 @@ export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' |
 
                 <div ref={tableRef} style={{ overflowX: 'auto' }}>
                   <ProductNameList />
-                  <datalist id="purchase-sizes">{SIZES.map(sz => <option key={sz} value={sz} />)}</datalist>
+                  <datalist id="purchase-sizes">{allSizes.map(sz => <option key={sz} value={sz} />)}</datalist>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '900px' }}>
                     <thead>
                       <tr style={{ borderBottom: `2px solid ${G.border}` }}>
@@ -603,16 +602,18 @@ export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' |
                               <select
                                 value=""
                                 onChange={e => {
-                                  if (e.target.value && item.groupId) {
-                                    hook.duplicateGroupAsSize(item.groupId, e.target.value)
+                                  const v = e.target.value === '__new' ? (window.prompt('Type the new size (e.g. 8XL, 50, 3XL-4XL):') || '').trim() : e.target.value
+                                  if (v && item.groupId) {
+                                    hook.duplicateGroupAsSize(item.groupId, v)
                                   }
                                 }}
                                 style={{ ...inputStyle, width: '110px', display: 'inline-block', borderColor: G.border, color: G.primary }}
                               >
                                 <option value="">choose size…</option>
-                                {SIZES.filter(s => s !== item.size).map(s => (
+                                {allSizes.filter(s => s !== item.size).map(s => (
                                   <option key={s} value={s}>{s}</option>
                                 ))}
+                                <option value="__new">+ New size…</option>
                               </select>
                             </td>
                           </tr>

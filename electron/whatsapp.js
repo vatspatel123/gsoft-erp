@@ -17,6 +17,7 @@ let me = null
 let meName = null
 let stopping = false
 let starting = false
+let fails = 0
 let win = null
 
 const send = (payload) => {
@@ -54,6 +55,8 @@ async function connect(mainWindow, { reset = false } = {}) {
     const { state, saveCreds } = await useMultiFileAuthState(dir)
     const { version } = await fetchLatestBaileysVersion()
 
+    // A second press of "Link WhatsApp" used to open a second socket next to a stuck one.
+    if (sock) { try { sock.ev.removeAllListeners('connection.update'); sock.end(undefined) } catch {} sock = null }
     stopping = false
     setStatus('connecting')
 
@@ -74,6 +77,7 @@ async function connect(mainWindow, { reset = false } = {}) {
       }
       if (connection === 'open') {
         lastQr = null
+        fails = 0
         me = sock?.user?.id || null
         meName = sock?.user?.name || null
         setStatus('connected')
@@ -86,8 +90,17 @@ async function connect(mainWindow, { reset = false } = {}) {
           if (loggedOut) { try { fs.rmSync(dir, { recursive: true, force: true }) } catch {} }
           setStatus('disconnected', { reason: loggedOut ? 'logged_out' : 'stopped' })
         } else {
-          setStatus('connecting', { reason: 'reconnecting' })
-          setTimeout(() => { starting = false; connect(win).catch(() => setStatus('disconnected')) }, 3000)
+          const code = lastDisconnect?.error?.output?.statusCode
+          fails += 1
+          // A damaged saved link (500 bad session, 411 version mismatch) never heals by retrying: start clean, a new QR appears.
+          if (code === 500 || code === 411) {
+            try { fs.rmSync(dir, { recursive: true, force: true }) } catch {}
+            sock = null; lastQr = null; me = null; meName = null
+            setStatus('disconnected', { reason: 'The saved WhatsApp link was damaged. Press Link WhatsApp to scan again.' })
+            return
+          }
+          setStatus('connecting', { reason: `Reconnecting (code ${code ?? '?'}, try ${fails}). Check the internet on this PC.` })
+          setTimeout(() => { starting = false; connect(win).catch(() => setStatus('disconnected')) }, Math.min(3000 * fails, 30000))
         }
       }
     })

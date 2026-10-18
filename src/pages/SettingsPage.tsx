@@ -1505,9 +1505,9 @@ function WhatsAppTab() {
           </div>
         )}
 
-        {error && (
+        {(error || (status !== 'connected' && (state as any).reason)) && (
           <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px', fontSize: '12px', color: '#b91c1c', marginBottom: '16px' }}>
-            {error}
+            {error || (state as any).reason}
           </div>
         )}
 
@@ -1516,7 +1516,7 @@ function WhatsAppTab() {
             <button
               onClick={async () => {
                 setBusy(true)
-                try { await waConnect(status === 'qr'); await refresh() }
+                try { await waConnect(status !== 'disconnected'); await refresh() }
                 catch (e: any) { toast.error(e.message || 'Could not start WhatsApp') }
                 finally { setBusy(false) }
               }}
@@ -1527,7 +1527,7 @@ function WhatsAppTab() {
                 cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.7 : 1
               }}
             >
-              {busy ? 'Starting…' : status === 'qr' ? 'Refresh QR' : 'Link WhatsApp'}
+              {busy ? 'Starting…' : status === 'qr' ? 'Refresh QR' : status === 'connecting' ? 'Retry / get new QR' : 'Link WhatsApp'}
             </button>
           )}
           {status === 'connected' && (
