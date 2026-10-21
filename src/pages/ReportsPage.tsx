@@ -147,6 +147,7 @@ export default function ReportsPage() {
   const [sales, setSales] = useState<any[]>([])
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
+  const [dues, setDues] = useState<{ total: number; cash: number; count: number }>({ total: 0, cash: 0, count: 0 })   // old pending amounts paid in this period
   const [loading, setLoading] = useState(true)
 
   // Cash / bank actually on hand — cumulative, so it is an "as at today" figure
@@ -174,7 +175,7 @@ export default function ReportsPage() {
       const dateFrom = ist(from)
       const dateTo = ist(to)
 
-      const [s, i, e] = await Promise.all([
+      const [s, i, e, d] = await Promise.all([
         supabase.from('sales').select(`
           *, customers(name,phone),
           users(name,role),
@@ -194,9 +195,17 @@ export default function ReportsPage() {
           .eq('sales.is_return', false),
         supabase.from('expenses').select('*')
           .gte('expense_date', dateFrom)
-          .lte('expense_date', dateTo)
+          .lte('expense_date', dateTo),
+        // Old pending amounts are money received on the day they were PAID, not on the day of the bill.
+        supabase.from('customer_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to)
       ])
       if (!current) return
+      const paid = d.data || []   // empty until CUSTOMER_PAYMENTS.sql has been run
+      setDues({
+        total: paid.reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0),
+        cash: paid.filter((r: any) => String(r.tender).toLowerCase() === 'cash').reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0),
+        count: paid.length,
+      })
       setSales(s.data || [])
       setItems(i.data || [])
       setExpenses(e.data || [])
@@ -480,6 +489,9 @@ export default function ReportsPage() {
                     '₹' + totalRevenue
                       .toLocaleString('en-IN'),
                     sales.length + ' orders')}
+                  {statCard('Old Dues Collected',
+                    '₹' + dues.total.toLocaleString('en-IN'),
+                    dues.count ? `₹${dues.cash.toLocaleString('en-IN')} cash · ${dues.count} payment${dues.count > 1 ? 's' : ''}` : 'paid in this period', '#16a34a')}
                   {statCard('Total Orders',
                     String(sales.length),
                     'bills generated', '#16a34a')}

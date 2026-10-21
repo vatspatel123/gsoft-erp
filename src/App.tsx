@@ -39,6 +39,7 @@ import { FormatDesignerPage } from './pages/FormatDesignerPage'
 import type { Session } from '@supabase/supabase-js'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { SubscriptionLockedScreen } from './components/auth/SubscriptionLockedScreen'
+import { lastInvoiceNo, rememberInvoiceNo, invoiceNoOf } from './utils/invoiceNo'
 // Inner component so useNavigate works (must be inside BrowserRouter)
 function AppContent() {
   const navigate = useNavigate()
@@ -185,10 +186,10 @@ function AppContent() {
           // The customer on a bill made offline may not exist in the database yet (or at
           // all): without a real one the sale is refused and the bill stays queued for good.
           const customerId = sale.customer ? await resolveCustomerId(sale.customer) : null
-          const { data, error } = await supabase
+          const send = (invNo: string) => supabase
             .from('sales')
             .insert({
-              invoice_no: sale.invoiceNo,
+              invoice_no: invNo,
               customer_id: customerId,
               counter_id: sale.counterId,
               salesman_id: sale.salesmanId || null,
@@ -214,6 +215,15 @@ function AppContent() {
             })
             .select()
             .single()
+          let { data, error } = await send(sale.invoiceNo)
+          // Another till (or the website) took this number while the bill waited: use the next free one.
+          if (error && /sales_invoice_no_key/.test(error.message)) {
+            const { data: rows } = await supabase.from('sales').select('invoice_no').like('invoice_no', 'INV-%')
+              .order('created_at', { ascending: false }).limit(200)
+            const top = (rows || []).reduce((m: number, r: any) => { const h = /^INV-(\d+)$/.exec(String(r.invoice_no)); return h ? Math.max(m, Number(h[1])) : m }, lastInvoiceNo())
+            rememberInvoiceNo(top + 1)
+            ;({ data, error } = await send(invoiceNoOf(top + 1)))
+          }
           if (!error && data) {
             if (sale.cart && sale.cart.length > 0) {
               // barcode is required on sale_items: without it every item was refused,

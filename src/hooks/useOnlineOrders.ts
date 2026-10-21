@@ -232,27 +232,26 @@ export function useOnlineOrders() {
         is_return: false
       }
 
-      if (navigator.onLine) {
-        const { data: sale } = await supabase
-          .from('sales')
-          .insert(saleRecord)
-          .select()
-          .single()
-
-        if (sale && order.items && order.items.length > 0) {
-          await supabase.from('sale_items').insert(
-            order.items.map(i => ({
-              sale_id: sale.id,
-              product_id: i.product_id || null,
-              barcode: i.sku || i.design_no || 'WEB',
-              qty: i.qty,
-              unit_price: i.unit_price,
-              discount_pct: 0,
-              gst_rate: 5,
-              line_total: i.line_total
-            }))
-          )
-        }
+      // No items or no internet means no bill: the old code saved an empty bill and still marked the order done.
+      if (!order.items || order.items.length === 0) { toast.error('This order has no items, so no bill was made'); return }
+      if (!navigator.onLine) { toast.error('No internet: connect first, then make the bill'); return }
+      const { data: sale, error: saleErr } = await supabase.from('sales').insert(saleRecord).select().single()
+      if (saleErr || !sale) throw new Error(saleErr?.message || 'The bill was not saved')
+      const { error: itemsErr } = await supabase.from('sale_items').insert(
+        order.items.map(i => ({
+          sale_id: sale.id,
+          product_id: i.product_id || null,
+          barcode: i.sku || i.design_no || 'WEB',
+          qty: i.qty,
+          unit_price: i.unit_price,
+          discount_pct: 0,
+          gst_rate: 5,
+          line_total: i.line_total
+        }))
+      )
+      if (itemsErr) {
+        await supabase.from('sales').delete().eq('id', sale.id)    // take the empty bill back out
+        throw new Error('Items were not saved (' + itemsErr.message + '), so no bill was made')
       }
 
       await updateOrderStatus(order.id, 'confirmed')

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
+import { recordDuePayment } from '../utils/duePayments'
 
 export interface PayableRow {
   id: string
@@ -51,6 +52,8 @@ export interface DayBookRow {
   cashIn: number
   upiIn: number
   cardIn: number
+  duesIn: number         // old pending amounts collected this day (all tenders)
+  duesCash: number       // ...of which in cash
   creditGiven: number
   cashOut: number
   digitalOut: number
@@ -78,7 +81,7 @@ export function useAccounts() {
     try {
       const since = new Date(Date.now() - 60 * 86400000).toISOString()
 
-      const [pay, rec, cn, sales, exp, excRec] = await Promise.all([
+      const [pay, rec, cn, sales, dues, exp, excRec] = await Promise.all([
         // Payables: anything not settled with a supplier.
         supabase
           .from('purchase_bills')
@@ -109,6 +112,9 @@ export function useAccounts() {
           .select('created_at, cash_amount, card_amount, upi_amount, credit_amount, is_return')
           .gte('created_at', since),
 
+        // Old pending amounts collected: counted on the day they were paid, not the day of the bill.
+        supabase.from('customer_payments').select('paid_at, amount, tender').gte('paid_at', since),
+
         supabase
           .from('expenses')
           .select('expense_date, amount, payment_mode')
@@ -138,7 +144,7 @@ export function useAccounts() {
       const byDay = new Map<string, DayBookRow>()
       const row = (date: string) => {
         if (!byDay.has(date)) {
-          byDay.set(date, { date, cashIn: 0, upiIn: 0, cardIn: 0, creditGiven: 0, cashOut: 0, digitalOut: 0, net: 0 })
+          byDay.set(date, { date, cashIn: 0, upiIn: 0, cardIn: 0, duesIn: 0, duesCash: 0, creditGiven: 0, cashOut: 0, digitalOut: 0, net: 0 })
         }
         return byDay.get(date)!
       }
@@ -152,6 +158,13 @@ export function useAccounts() {
         r.creditGiven += Number(s.credit_amount) || 0
       }
 
+      for (const d of dues.data || []) {       // empty until CUSTOMER_PAYMENTS.sql has been run
+        const r = row(String(d.paid_at).slice(0, 10))
+        const amt = Number(d.amount) || 0
+        r.duesIn += amt
+        if (String(d.tender).toLowerCase() === 'cash') r.duesCash += amt
+      }
+
       for (const e of exp.data || []) {
         const r = row(String(e.expense_date).slice(0, 10))
         if (e.payment_mode === 'cash') r.cashOut += Number(e.amount) || 0
@@ -160,7 +173,7 @@ export function useAccounts() {
 
       const days = Array.from(byDay.values()).map(r => ({
         ...r,
-        net: r.cashIn + r.upiIn + r.cardIn - r.cashOut - r.digitalOut
+        net: r.cashIn + r.upiIn + r.cardIn + r.duesIn - r.cashOut - r.digitalOut
       })).sort((a, b) => b.date.localeCompare(a.date))
 
       setDayBook(days)
@@ -211,6 +224,7 @@ export function useAccounts() {
         .update({ credit_paid: newPaid, credit_tender: tender, credit_status: settled ? 'paid' : 'partial' })
         .eq('id', row.id)
       if (error) throw error
+      void recordDuePayment({ sale_id: row.source === 'sale' ? row.id : null, exchange_id: row.source === 'exchange' ? row.id : null, customer_id: row.customer_id, amount: pay, tender })
       setReceivables(prev => settled
         ? prev.filter(r => r.id !== row.id)
         : prev.map(r => r.id === row.id ? { ...r, credit_paid: newPaid, credit_status: 'partial' } : r))

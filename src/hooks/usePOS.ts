@@ -8,6 +8,8 @@ import toast from 'react-hot-toast'
 import { savePendingSale, getCachedProducts, saveCustomerToCache, findCachedCustomer, getCachedSalesmen, salesmanNameFor } from '../utils/offlineCache'
 import { calculateCustomerTier, getTierInfo, type CustomerTier } from '../utils/customerTier'
 import type { CreditNote } from './useCreditNotes'
+import { offlineInvoiceNo, lastInvoiceNo, rememberInvoiceNo, invoiceNoOf } from '../utils/invoiceNo'
+import { recordDuePayment } from '../utils/duePayments'
 
 export interface Product {
   id: string
@@ -70,8 +72,7 @@ const COUNTER_ID = 'd7e9d1ad-47e8-49c0-9e5b-f3e8721d1e00'
  * INV-0001 series, so a sale made offline can never take a number the next
  * online sale will also claim.
  */
-const localInvoiceNo = () =>
-  'INV-L' + String(Date.now()).slice(-6)
+const localInvoiceNo = offlineInvoiceNo
 
 export function usePOS(salesmanId: string | null = null) {
   const [cart, setCart] = useState<CartItem[]>([])
@@ -148,6 +149,7 @@ export function usePOS(salesmanId: string | null = null) {
         .update({ credit_paid: newPaid, credit_tender: tender, credit_status: settled ? 'paid' : 'partial' })
         .eq('id', r.id)
       if (error) { toast.error(`Could not record the payment on ${r.no}: ${error.message}`); break }
+      void recordDuePayment({ sale_id: r.source === 'sale' ? r.id : null, exchange_id: r.source === 'exchange' ? r.id : null, customer_id: customer?.id, amount: pay, tender })
       collected += pay; left = Math.round((left - pay) * 100) / 100
     }
     if (collected > 0) toast.success(`₹${collected.toLocaleString('en-IN')} of old dues collected (${tender.toUpperCase()})`)
@@ -592,7 +594,9 @@ export function usePOS(salesmanId: string | null = null) {
               const hit = /^INV-(\d+)$/.exec(String(no || ''))
               return hit ? Math.max(m, Number(hit[1])) : m
             }, 0)
-          return `INV-${String(last + 1).padStart(4, '0')}`
+          const next = Math.max(last, lastInvoiceNo()) + 1   // also past any number still waiting offline on this PC
+          rememberInvoiceNo(next)
+          return invoiceNoOf(next)
         }
       }
     } catch (e) {
@@ -623,7 +627,7 @@ export function usePOS(salesmanId: string | null = null) {
 
     if (!navigator.onLine) {
       const offlineSale = {
-        invoiceNo: 'OFF-' + Date.now(),
+        invoiceNo: localInvoiceNo(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
         netAmount, paymentMode: derivedPaymentMode, tenders: paid, creditRemainder,
@@ -678,7 +682,8 @@ export function usePOS(salesmanId: string | null = null) {
       for (let i = 0; error && /sales_invoice_no_key/.test(error.message) && i < 5; i++) {
         const n = /^INV-(\d+)$/.exec(invoiceNo)
         if (!n) break
-        invoiceNo = `INV-${String(Number(n[1]) + 1).padStart(4, '0')}`
+        invoiceNo = invoiceNoOf(Number(n[1]) + 1)
+        rememberInvoiceNo(Number(n[1]) + 1)
         saleRecord.invoice_no = invoiceNo
         ;({ data: sale, error } = await insertSale())
       }

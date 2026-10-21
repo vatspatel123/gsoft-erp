@@ -101,13 +101,13 @@ export function AccountingPage() {
     } else {
       exportToCSV(
         a.dayBook.map(d => ({
-          date: d.date, cashIn: d.cashIn.toFixed(2), upiIn: d.upiIn.toFixed(2), cardIn: d.cardIn.toFixed(2),
+          date: d.date, cashIn: d.cashIn.toFixed(2), upiIn: d.upiIn.toFixed(2), cardIn: d.cardIn.toFixed(2), duesIn: d.duesIn.toFixed(2),
           creditGiven: d.creditGiven.toFixed(2), cashOut: d.cashOut.toFixed(2), digitalOut: d.digitalOut.toFixed(2),
           net: d.net.toFixed(2)
         })),
         'day_book',
         [{ key: 'date', label: 'Date' }, { key: 'cashIn', label: 'Cash In' }, { key: 'upiIn', label: 'UPI In' },
-         { key: 'cardIn', label: 'Card In' }, { key: 'creditGiven', label: 'Credit Given' },
+         { key: 'cardIn', label: 'Card In' }, { key: 'duesIn', label: 'Old Dues Collected' }, { key: 'creditGiven', label: 'Credit Given' },
          { key: 'cashOut', label: 'Cash Out' }, { key: 'digitalOut', label: 'Digital Out' }, { key: 'net', label: 'Net' }]
       )
     }
@@ -301,31 +301,36 @@ export function AccountingPage() {
           <div style={card}>
             <div style={{ fontSize: '15px', fontWeight: 600, color: '#1a0a2e', marginBottom: '4px' }}>Cash Book — last 60 days</div>
             <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px' }}>
-              Money in is taken from the actual tender split on each bill, so a part-cash / part-UPI sale counts in both columns.
+              Money in is taken from the actual tender split on each bill, so a part-cash / part-UPI sale counts in both columns. Old pending amounts are counted on the day they were paid, not the day of the bill.
             </div>
 
             {a.dayBook.length === 0 ? (
               <EmptyState icon="📒" title="No cash movement recorded" subtitle="Sales and expenses from the last 60 days will appear here." />
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <div style={{ minWidth: '660px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 1fr 1fr 1fr 1fr', padding: '10px 12px', borderBottom: '1px solid #f3e8ff', fontSize: '10px', fontWeight: 700, color: '#9333ea', textTransform: 'uppercase' }}>
+                <div style={{ minWidth: '760px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr', padding: '10px 12px', borderBottom: '1px solid #f3e8ff', fontSize: '10px', fontWeight: 700, color: '#9333ea', textTransform: 'uppercase' }}>
                     <div>Date</div>
                     <div style={{ textAlign: 'right' }}>Cash In</div>
                     <div style={{ textAlign: 'right' }}>UPI In</div>
                     <div style={{ textAlign: 'right' }}>Card In</div>
+                    <div style={{ textAlign: 'right' }}>Old Dues Collected</div>
                     <div style={{ textAlign: 'right' }}>Pending Given</div>
                     <div style={{ textAlign: 'right' }}>Expenses</div>
                     <div style={{ textAlign: 'right' }}>Net</div>
                   </div>
                   {a.dayBook.map(d => (
-                    <div key={d.date} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 1fr 1fr 1fr 1fr', padding: '10px 12px', borderBottom: '1px solid #fdf8ff', fontSize: '12.5px', fontFamily: 'DM Mono, monospace' }}>
+                    <div key={d.date} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr', padding: '10px 12px', borderBottom: '1px solid #fdf8ff', fontSize: '12.5px', fontFamily: 'DM Mono, monospace' }}>
                       <div style={{ fontFamily: 'DM Sans, sans-serif', color: '#1a0a2e' }}>
                         {fmtDayMonth(new Date(d.date))}
                       </div>
                       <div style={{ textAlign: 'right', color: d.cashIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.cashIn)}</div>
                       <div style={{ textAlign: 'right', color: d.upiIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.upiIn)}</div>
                       <div style={{ textAlign: 'right', color: d.cardIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.cardIn)}</div>
+                      <div style={{ textAlign: 'right', color: d.duesIn > 0 ? '#16a34a' : '#cbd5e1' }}>
+                        {INR(d.duesIn)}
+                        {d.duesIn > 0 && <div style={{ fontSize: '10px', color: '#94a3b8' }}>{INR(d.duesCash)} cash</div>}
+                      </div>
                       <div style={{ textAlign: 'right', color: d.creditGiven > 0 ? '#f59e0b' : '#cbd5e1' }}>{INR(d.creditGiven)}</div>
                       <div style={{ textAlign: 'right', color: (d.cashOut + d.digitalOut) > 0 ? '#ef4444' : '#cbd5e1' }}>{INR(d.cashOut + d.digitalOut)}</div>
                       <div style={{ textAlign: 'right', fontWeight: 700, color: d.net >= 0 ? '#16a34a' : '#ef4444' }}>{INR(d.net)}</div>
