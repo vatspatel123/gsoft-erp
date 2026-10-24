@@ -133,6 +133,41 @@ function SaveBtn({ onClick, loading }: { onClick: () => void; loading?: boolean 
   )
 }
 
+// The store login's password. The current one is checked first, so a cashier at an
+// open PC can't change it. Other PCs on this login must sign in again afterwards.
+function LoginPasswordCard() {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [again, setAgain] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const change = async () => {
+    if (next.length < 6) return toast.error('New password must be at least 6 characters')
+    if (next !== again) return toast.error('The two new passwords do not match')
+    setSaving(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user?.email) return toast.error('Not signed in')
+      const { error: wrong } = await supabase.auth.signInWithPassword({ email: user.email, password: current })
+      if (wrong) return toast.error('Current password is wrong')
+      const { error } = await supabase.auth.updateUser({ password: next })
+      if (error) return toast.error(error.message)
+      toast.success('Login password changed')
+      setCurrent(''); setNext(''); setAgain('')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <SectionTitle sub="The password typed on the login screen. Other computers will ask for the new one.">Login password</SectionTitle>
+      <Field label="Current password"><input type="password" value={current} onChange={e => setCurrent(e.target.value)} style={inputStyle} /></Field>
+      <Field label="New password"><input type="password" value={next} onChange={e => setNext(e.target.value)} style={inputStyle} /></Field>
+      <Field label="New password again"><input type="password" value={again} onChange={e => setAgain(e.target.value)} style={inputStyle} /></Field>
+      <SaveBtn onClick={change} loading={saving} />
+    </Card>
+  )
+}
+
 // ─── TAB 1: Shop Info ────────────────────────────────────────────────────────
 
 /**
@@ -1644,7 +1679,7 @@ export function SettingsPage() {
         <div style={{ flex: 1, minWidth: 0 }}>
           {activeTab === 'shop'          && <><ShopInfoTab /><HsnByCategoryCard /></>}
           {activeTab === 'print'         && <BillPrintTab />}
-          {activeTab === 'staff'         && <StaffPINTab />}
+          {activeTab === 'staff'         && <><StaffPINTab /><LoginPasswordCard /></>}
           {activeTab === 'whatsapp'      && <WhatsAppTab />}
           {activeTab === 'notifications' && <NotificationsTab />}
           {activeTab === 'data'          && <DataBackupTab />}

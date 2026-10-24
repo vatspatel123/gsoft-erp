@@ -147,6 +147,8 @@ export default function ReportsPage() {
   const [sales, setSales] = useState<any[]>([])
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
+  const [wh, setWh] = useState({ cash: 0, bank: 0, received: 0, due: 0, bills: 0 })   // wholesale money in this period
+  const [exch, setExch] = useState({ cash: 0, card: 0, upi: 0, refunds: 0, count: 0 })   // exchanges made in this period
   const [dues, setDues] = useState<{ total: number; cash: number; count: number }>({ total: 0, cash: 0, count: 0 })   // old pending amounts paid in this period
   const [loading, setLoading] = useState(true)
 
@@ -175,7 +177,7 @@ export default function ReportsPage() {
       const dateFrom = ist(from)
       const dateTo = ist(to)
 
-      const [s, i, e, d] = await Promise.all([
+      const [s, i, e, d, x, ws, wp] = await Promise.all([
         supabase.from('sales').select(`
           *, customers(name,phone),
           users(name,role),
@@ -197,7 +199,12 @@ export default function ReportsPage() {
           .gte('expense_date', dateFrom)
           .lte('expense_date', dateTo),
         // Old pending amounts are money received on the day they were PAID, not on the day of the bill.
-        supabase.from('customer_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to)
+        supabase.from('customer_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to),
+        supabase.from('exchange_bills')
+          .select('balance_type, balance_amount, cash_amount, card_amount, upi_amount, refund_mode')
+          .gte('created_at', from).lte('created_at', to),
+        supabase.from('wholesale_sales').select('cash_amount, upi_amount, cheque_amount, credit_amount').gte('created_at', from).lte('created_at', to),
+        supabase.from('wholesale_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to)
       ])
       if (!current) return
       const paid = d.data || []   // empty until CUSTOMER_PAYMENTS.sql has been run
@@ -205,6 +212,25 @@ export default function ReportsPage() {
         total: paid.reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0),
         cash: paid.filter((r: any) => String(r.tender).toLowerCase() === 'cash').reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0),
         count: paid.length,
+      })
+      const xs = x.error ? [] : x.data || []
+      const sum = (f: (r: any) => number) => xs.reduce((a: number, r: any) => a + f(r), 0)
+      setExch({
+        cash: sum(r => r.balance_type === 'customer_pays' ? Number(r.cash_amount) || 0 : 0),
+        card: sum(r => r.balance_type === 'customer_pays' ? Number(r.card_amount) || 0 : 0),
+        upi: sum(r => r.balance_type === 'customer_pays' ? Number(r.upi_amount) || 0 : 0),
+        refunds: sum(r => r.balance_type === 'store_credit' && (r.refund_mode === 'cash' || r.refund_mode === 'upi') ? Number(r.balance_amount) || 0 : 0),
+        count: xs.length,
+      })
+      const wsr = ws.error ? [] : ws.data || []   // empty until WHOLESALE_PAYMENTS.sql has been run
+      const wpr = wp.error ? [] : wp.data || []
+      const wsum = (rows: any[], f: (r: any) => number) => rows.reduce((a, r) => a + f(r), 0)
+      setWh({
+        cash: wsum(wsr, r => Number(r.cash_amount) || 0) + wsum(wpr, r => String(r.tender).toLowerCase() === 'cash' ? Number(r.amount) || 0 : 0),
+        bank: wsum(wsr, r => (Number(r.upi_amount) || 0) + (Number(r.cheque_amount) || 0)) + wsum(wpr, r => String(r.tender).toLowerCase() === 'cash' ? 0 : Number(r.amount) || 0),
+        received: wsum(wpr, r => Number(r.amount) || 0),
+        due: wsum(wsr, r => Number(r.credit_amount) || 0),
+        bills: wsr.length,
       })
       setSales(s.data || [])
       setItems(i.data || [])
@@ -492,6 +518,12 @@ export default function ReportsPage() {
                   {statCard('Old Dues Collected',
                     '₹' + dues.total.toLocaleString('en-IN'),
                     dues.count ? `₹${dues.cash.toLocaleString('en-IN')} cash · ${dues.count} payment${dues.count > 1 ? 's' : ''}` : 'paid in this period', '#16a34a')}
+                  {statCard('Wholesale Money',
+                    '₹' + (wh.cash + wh.bank).toLocaleString('en-IN'),
+                    wh.bills || wh.received ? `₹${wh.cash.toLocaleString('en-IN')} cash · ₹${wh.received.toLocaleString('en-IN')} received later · ₹${wh.due.toLocaleString('en-IN')} left due` : 'no wholesale money in this period', '#0ea5e9')}
+                  {statCard('Exchange Money',
+                    '₹' + (exch.cash + exch.card + exch.upi - exch.refunds).toLocaleString('en-IN'),
+                    exch.count ? `₹${(exch.cash).toLocaleString('en-IN')} cash in · ₹${exch.refunds.toLocaleString('en-IN')} refunded · ${exch.count} exchange${exch.count > 1 ? 's' : ''}` : 'no exchanges in this period', '#9333ea')}
                   {statCard('Total Orders',
                     String(sales.length),
                     'bills generated', '#16a34a')}

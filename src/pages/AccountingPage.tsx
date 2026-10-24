@@ -301,7 +301,7 @@ export function AccountingPage() {
           <div style={card}>
             <div style={{ fontSize: '15px', fontWeight: 600, color: '#1a0a2e', marginBottom: '4px' }}>Cash Book — last 60 days</div>
             <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px' }}>
-              Money in is taken from the actual tender split on each bill, so a part-cash / part-UPI sale counts in both columns. Old pending amounts are counted on the day they were paid, not the day of the bill.
+              Money in is taken from the actual tender split on each bill, so a part-cash / part-UPI sale counts in both columns. Old pending amounts are counted on the day they were paid, not the day of the bill. Exchanges count on the day they were made: what the customer paid is added, a cash / UPI refund is taken off. Wholesale: what was paid at billing counts on the bill's day, payments from a party on the day received (cheques count with UPI).
             </div>
 
             {a.dayBook.length === 0 ? (

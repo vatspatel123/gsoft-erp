@@ -5,9 +5,9 @@ import { deleteBill } from '../../utils/billEdits'
 import { S } from './billEditStyles'
 
 /** Confirm deleting a sales or purchase bill with the admin password. */
-export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted, title, note }: {
+export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted, title, note, redo }: {
   type: 'sale' | 'purchase' | 'exchange'; billId: string; billNo: string; onClose: () => void; onDeleted: () => void
-  title?: string; note?: string
+  title?: string; note?: string; redo?: boolean
 }) {
   const [reason, setReason] = useState('')
   const [password, setPassword] = useState('')
@@ -21,7 +21,7 @@ export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted, titl
     const res = await deleteBill(type, billId, reason.trim(), password)
     setBusy(false)
     if (!res.ok) { setError(res.error); return }
-    toast.success(`${billNo} deleted — stock put back`)
+    toast.success(redo ? `${billNo} undone — make it again below` : `${billNo} deleted — stock put back`)
     onDeleted(); onClose()
   }
 
@@ -57,7 +57,7 @@ export function DeleteBillModal({ type, billId, billNo, onClose, onDeleted, titl
           <button style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }} onClick={onClose}>Cancel</button>
           <button data-enter-submit disabled={busy} onClick={submit} style={{ padding: '9px 16px', borderRadius: 10, border: 'none', background: '#dc2626',
             color: '#fff', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center', opacity: busy ? 0.6 : 1 }}>
-            {busy ? <Loader2 size={15} className="spinner" /> : <Trash2 size={15} />} Delete bill
+            {busy ? <Loader2 size={15} className="spinner" /> : <Trash2 size={15} />} {redo ? 'Undo & edit' : 'Delete bill'}
           </button>
         </div>
       </div>

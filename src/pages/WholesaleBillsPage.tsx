@@ -16,7 +16,11 @@ import {
   printWholesaleBill, sendWholesaleWhatsApp, saleDataFromRow, WHOLESALE_BILL_SELECT,
 } from '../utils/printWholesaleBill'
 
-const pending = (b: any) => (b.payment_status === 'paid' ? 0 : Number(b.net_amount) || 0)
+// What the party still owes on a bill. Bills saved before WHOLESALE_PAYMENTS.sql have no due columns:
+// those are owed in full until marked paid.
+const pending = (b: any) => b.credit_amount == null
+  ? (b.payment_status === 'paid' ? 0 : Number(b.net_amount) || 0)
+  : Math.max(0, Math.round(((Number(b.credit_amount) || 0) - (Number(b.credit_paid) || 0)) * 100) / 100)
 const partyName = (p: any) => p?.business_name || p?.name || '—'
 
 /** Print, WhatsApp, e-way bill and edit for one saved wholesale bill. */
@@ -34,12 +38,47 @@ function BillActions({ bill, onEway, onEdit }: { bill: any; onEway: (b: any) => 
 }
 
 /** A wholesale party at a glance: details, totals and every bill with its items. */
-function PartyModal({ party, bills, onClose, onEway, onEdit, onEditParty }: { party: any; bills: any[]; onClose: () => void; onEway: (b: any) => void; onEdit: (id: string) => void; onEditParty: () => void }) {
+function PartyModal({ party, bills, onClose, onEway, onEdit, onEditParty, onChanged }: { party: any; bills: any[]; onChanged: () => void; onClose: () => void; onEway: (b: any) => void; onEdit: (id: string) => void; onEditParty: () => void }) {
   const [open, setOpen] = useState<string | null>(null)
   const mine = bills.filter(b => b.wholesale_customer_id === party.id)
+  const [payments, setPayments] = useState<any[]>([])
+  const [payOpen, setPayOpen] = useState(false)
+  const [payAmt, setPayAmt] = useState('')
+  const [payTender, setPayTender] = useState<'cash' | 'upi' | 'card' | 'cheque'>('cash')
+  const [payDate, setPayDate] = useState(() => new Date().toLocaleDateString('en-CA'))
+  const [payNote, setPayNote] = useState('')
+  const [paying, setPaying] = useState(false)
+  const loadPayments = useCallback(async () => {
+    const { data } = await supabase.from('wholesale_payments').select('*').eq('wholesale_customer_id', party.id).order('paid_at', { ascending: false })
+    setPayments(data || [])   // empty until WHOLESALE_PAYMENTS.sql has been run
+  }, [party.id])
+  useEffect(() => { void loadPayments() }, [loadPayments])
   const total = mine.reduce((s, b) => s + (Number(b.net_amount) || 0), 0)
   const due = mine.reduce((s, b) => s + pending(b), 0)
   const pieces = mine.reduce((s, b) => s + (b.wholesale_sale_items || []).reduce((n: number, i: any) => n + Number(i.qty || 0), 0), 0)
+
+  const recordPayment = async () => {
+    const amount = Number(payAmt)
+    if (!(amount > 0)) { toast.error('Enter the amount received'); return }
+    if (amount > due + 0.009) { toast.error(`This party owes only ${money(due)}`); return }
+    setPaying(true)
+    // The picked day at the current clock time, never in the future.
+    const now = new Date()
+    const picked = new Date(`${payDate}T${now.toTimeString().slice(0, 8)}`)
+    const when = isNaN(picked.getTime()) || picked > now ? now : picked
+    const { data, error } = await supabase.rpc('record_wholesale_payment',
+      { p_party: party.id, p_amount: amount, p_tender: payTender, p_paid_at: when.toISOString(), p_note: payNote })
+    setPaying(false)
+    if (error) {
+      toast.error(/Could not find the function|does not exist/i.test(error.message)
+        ? 'Run WHOLESALE_PAYMENTS.sql in Supabase first, then try again' : error.message)
+      return
+    }
+    const cleared = ((data as any)?.settled || []).map((x: any) => x.invoice_no).join(', ')
+    toast.success(`${money(amount)} recorded${cleared ? ` — ${cleared}` : ''}`)
+    setPayOpen(false); setPayAmt(''); setPayNote('')
+    void loadPayments(); onChanged()
+  }
 
   const sendStatement = () => {
     const shop = getSettings().shopName || 'Retail ERP'
@@ -77,6 +116,28 @@ function PartyModal({ party, bills, onClose, onEway, onEdit, onEditParty }: { pa
             <div><button style={S.btnOutline} onClick={sendStatement}><MessageCircle size={14} /> Send pending statement on WhatsApp</button></div>
           )}
 
+          {due > 0 && (
+            <div>
+              {!payOpen
+                ? <button style={S.btnPrimary} onClick={() => { setPayAmt(String(due)); setPayOpen(true) }}>Record payment received</button>
+                : (
+                  <div style={S.authBox}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>Payment received from {partyName(party)} (owes {money(due)})</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input style={{ ...S.input, width: 130 }} type="number" min={0} max={due} value={payAmt} onChange={e => setPayAmt(e.target.value)} placeholder="Amount" autoFocus />
+                      <select style={S.input} value={payTender} onChange={e => setPayTender(e.target.value as any)}>
+                        <option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="cheque">Cheque</option>
+                      </select>
+                      <input style={S.input} type="date" value={payDate} max={new Date().toLocaleDateString('en-CA')} onChange={e => setPayDate(e.target.value)} />
+                      <input style={{ ...S.input, flex: 1, minWidth: 140 }} value={payNote} onChange={e => setPayNote(e.target.value)} placeholder="Note (optional)" />
+                      <button style={S.btnPrimary} disabled={paying} onClick={recordPayment}>{paying ? 'Saving…' : 'Save payment'}</button>
+                      <button style={S.btnOutline} onClick={() => setPayOpen(false)}>Cancel</button>
+                    </div>
+                    <div style={S.muted}>It clears this party's oldest unpaid bills first.</div>
+                  </div>)}
+            </div>
+          )}
+
           <div style={S.section}>Bills</div>
           <table style={S.table}>
             <thead><tr>
@@ -96,7 +157,10 @@ function PartyModal({ party, bills, onClose, onEway, onEdit, onEditParty }: { pa
                     <td style={S.td}>{fmtDate(b.created_at)}</td>
                     <td style={{ ...S.td, textAlign: 'right' }}>{(b.wholesale_sale_items || []).reduce((n: number, i: any) => n + Number(i.qty || 0), 0)}</td>
                     <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(Number(b.net_amount))}</td>
-                    <td style={{ ...S.td, color: pending(b) > 0 ? '#b45309' : '#15803d' }}>{pending(b) > 0 ? `pending · ${b.payment_mode}` : `paid · ${b.payment_mode}`}</td>
+                    <td style={{ ...S.td, color: pending(b) > 0 ? '#b45309' : '#15803d' }}>{pending(b) > 0
+                      ? (b.credit_paid > 0 || (b.credit_amount != null && Number(b.credit_amount) < Number(b.net_amount))
+                          ? `${money(pending(b))} due` : `pending · ${b.payment_mode}`)
+                      : `paid${b.credit_amount > 0 ? ' · credit settled' : ` · ${b.payment_mode}`}`}</td>
                     <td style={S.td}><BillActions bill={b} onEway={onEway} onEdit={onEdit} /></td>
                   </tr>
                   {open === b.id && (
@@ -114,6 +178,23 @@ function PartyModal({ party, bills, onClose, onEway, onEdit, onEditParty }: { pa
               {!mine.length && <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center', color: '#94a3b8' }}>No bills yet</td></tr>}
             </tbody>
           </table>
+
+          {payments.length > 0 && (<>
+            <div style={S.section}>Payments received</div>
+            <table style={S.table}>
+              <thead><tr><th style={S.th}>Date</th><th style={{ ...S.th, textAlign: 'right' }}>Amount</th><th style={S.th}>Paid by</th><th style={S.th}>Cleared</th><th style={S.th}>Note</th></tr></thead>
+              <tbody>
+                {payments.map(x => (
+                  <tr key={x.id}>
+                    <td style={S.td}>{fmtDate(x.paid_at)}</td>
+                    <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(Number(x.amount))}</td>
+                    <td style={S.td}>{x.tender}</td>
+                    <td style={S.td}>{(x.settled || []).map((c: any) => c.invoice_no).join(', ') || '—'}</td>
+                    <td style={S.td}>{x.note || ''}</td>
+                  </tr>))}
+              </tbody>
+            </table>
+          </>)}
         </div>
       </div>
     </div>
@@ -143,7 +224,7 @@ export function WholesaleBillsPage({ initialTab = 'bills' }: { initialTab?: 'bil
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
-  useLiveRefresh(['wholesale_sales'], load)
+  useLiveRefresh(['wholesale_sales', 'wholesale_payments'], load)
 
   const q = search.trim().toLowerCase()
   const shownBills = useMemo(() => bills.filter(b => !q ||
@@ -240,7 +321,7 @@ export function WholesaleBillsPage({ initialTab = 'bills' }: { initialTab?: 'bil
         </div>
       </div>
 
-      {party && <PartyModal party={party} bills={bills} onClose={() => setParty(null)} onEway={b => setEway(b)} onEdit={setEditId}
+      {party && <PartyModal party={party} bills={bills} onChanged={load} onClose={() => setParty(null)} onEway={b => setEway(b)} onEdit={setEditId}
         onEditParty={() => setPartyForm({ party })} />}
       {partyForm && <PartyFormModal party={partyForm.party} onClose={() => setPartyForm(null)}
         onSaved={saved => { if (party?.id === saved.id) setParty(saved); load() }} />}

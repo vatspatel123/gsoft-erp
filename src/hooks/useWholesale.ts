@@ -44,6 +44,8 @@ export function useWholesale() {
   const [discountPct, setDiscountPct] = useState(0)
   const [freight, setFreight] = useState(0)
   const [paymentMode, setPaymentMode] = useState<WholesalePaymentMode>('credit')
+  // How much the party pays now (null = all of it); the rest is left due on their account.
+  const [paidNow, setPaidNow] = useState<number | null>(null)
   const [notes, setNotes] = useState('')
   const [billDate, setBillDate] = useState('')   // 'YYYY-MM-DD' for a bill forgotten earlier; '' = today
   const [isSaving, setIsSaving] = useState(false)
@@ -116,6 +118,7 @@ export function useWholesale() {
     setDiscountPct(0)
     setFreight(0)
     setPaymentMode('credit')
+    setPaidNow(null)
     setNotes('')
     setBillDate('')
   }
@@ -134,9 +137,10 @@ export function useWholesale() {
       const billWhen = isNaN(picked.getTime()) || picked > now ? now : picked
 
       // 1. Insert sale header
-      const { data: sale, error: saleErr } = await supabase
-        .from('wholesale_sales')
-        .insert({
+      const paidAmt = paymentMode === 'credit' ? 0 : Math.min(netAmount, Math.max(0, paidNow ?? netAmount))
+      const dueAmt = Math.round((netAmount - paidAmt) * 100) / 100
+      const hasDue = dueAmt > 0.009
+      const base = {
           invoice_no: invoiceNo,
           wholesale_customer_id: party.id,
           subtotal,
@@ -147,13 +151,34 @@ export function useWholesale() {
           gst_amount: gstAmount,
           round_off: roundOff,
           net_amount: netAmount,
-          payment_mode: paymentMode,
-          payment_status: paymentMode === 'credit' ? 'pending' : 'paid',
           notes: notes.trim() || null,
           ...(billDate ? { created_at: billWhen.toISOString() } : {}),
+        }
+      // payment_mode reads 'credit' whenever something is left due. WHOLESALE_PAYMENTS.sql adds the
+      // split columns; until it has been run the bill is saved the old way (whole bill under one mode).
+      let legacy = false
+      let { data: sale, error: saleErr } = await supabase
+        .from('wholesale_sales')
+        .insert({
+          ...base,
+          payment_mode: hasDue ? 'credit' : paymentMode,
+          payment_status: hasDue ? 'pending' : 'paid',
+          cash_amount: paymentMode === 'cash' ? paidAmt : 0,
+          upi_amount: paymentMode === 'upi' ? paidAmt : 0,
+          cheque_amount: paymentMode === 'cheque' ? paidAmt : 0,
+          credit_amount: dueAmt,
+          credit_paid: 0,
         })
         .select()
         .single()
+      if (saleErr && /cash_amount|upi_amount|cheque_amount|credit_amount|credit_paid/.test(saleErr.message || '')) {
+        legacy = true
+        ;({ data: sale, error: saleErr } = await supabase
+          .from('wholesale_sales')
+          .insert({ ...base, payment_mode: paymentMode, payment_status: paymentMode === 'credit' ? 'pending' : 'paid' })
+          .select()
+          .single())
+      }
 
       if (saleErr || !sale) {
         toast.error('Error saving sale: ' + (saleErr?.message || 'Unknown'))
@@ -195,21 +220,15 @@ export function useWholesale() {
         }
       }
 
-      // 4. Update party outstanding + total_business
-      if (paymentMode === 'credit') {
-        await supabase
-          .from('wholesale_customers')
-          .update({
-            outstanding_balance: (party.outstanding_balance || 0) + netAmount,
-            total_business: (party.total_business || 0) + netAmount,
-          })
-          .eq('id', party.id)
-      } else {
-        await supabase
-          .from('wholesale_customers')
-          .update({ total_business: (party.total_business || 0) + netAmount })
-          .eq('id', party.id)
-      }
+      // 4. Update party outstanding + total_business. Only what is left due is owed.
+      const owed = legacy ? (paymentMode === 'credit' ? netAmount : 0) : dueAmt
+      await supabase
+        .from('wholesale_customers')
+        .update({
+          ...(owed > 0 ? { outstanding_balance: (party.outstanding_balance || 0) + owed } : {}),
+          total_business: (party.total_business || 0) + netAmount,
+        })
+        .eq('id', party.id)
 
       const saleData = {
         invoiceNo,
@@ -224,7 +243,9 @@ export function useWholesale() {
         gstAmount,
         roundOff,
         netAmount,
-        paymentMode,
+        paymentMode: hasDue ? 'credit' : paymentMode,
+        paidNow: paidAmt,
+        dueAmount: owed,
         notes,
       }
 
@@ -244,7 +265,7 @@ export function useWholesale() {
     gstType, setGstType,
     discountPct, setDiscountPct,
     freight, setFreight,
-    paymentMode, setPaymentMode,
+    paymentMode, setPaymentMode, paidNow, setPaidNow,
     notes, setNotes, billDate, setBillDate,
     isSaving, lastSale, setLastSale,
     // derived

@@ -411,7 +411,7 @@ export function PurchaseReturnPage() {
                           <div>
                             <div style={{ fontSize: '13px', fontWeight: 600 }}>{p.name}</div>
                             <div style={{ fontSize: '11px', color: '#64748b' }}>
-                              Stock: {p.stock_qty} · {p.size ? `Size: ${p.size} · ` : ''}{p.barcode || p.sku}
+                              Stock: {p.stock_qty} · {p.size ? `Size: ${p.size} · ` : ''}{p.colour ? `Colour: ${p.colour} · ` : ''}{p.barcode || p.sku}
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>

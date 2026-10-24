@@ -553,6 +553,28 @@ export function WholesalePage() {
               </div>
             </div>
 
+            {/* Part payment: what the party pays now; the rest stays due on their account. */}
+            {ws.paymentMode !== 'credit' && ws.netAmount > 0 && (() => {
+              const paid = Math.min(ws.netAmount, Math.max(0, ws.paidNow ?? ws.netAmount))
+              const due = Math.round((ws.netAmount - paid) * 100) / 100
+              return (
+                <div style={{ marginBottom: '14px' }}>
+                  {sectionLabel('Paid Now')}
+                  <input type="number" min={0} max={ws.netAmount} value={ws.paidNow ?? ws.netAmount}
+                    onChange={e => ws.setPaidNow(e.target.value === '' ? 0 : Math.min(ws.netAmount, Math.max(0, parseFloat(e.target.value) || 0)))}
+                    style={{ ...inputStyle, fontFamily: 'DM Mono, monospace' }} />
+                  <div style={{ fontSize: '11px', marginTop: '4px', color: due > 0 ? '#b45309' : B.muted }}>
+                    {due > 0 ? `₹${due.toLocaleString('en-IN')} stays due on the party's account` : 'Paid in full'}
+                  </div>
+                </div>
+              )
+            })()}
+            {ws.paymentMode === 'credit' && ws.party && (
+              <div style={{ marginBottom: '14px', fontSize: '11px', color: '#b45309' }}>
+                Nothing paid now — the whole bill is added to the party's due. Record their payment later from Wholesale Bills → party.
+              </div>
+            )}
+
             {/* A bill forgotten earlier: tick, pick the day it really happened. */}
             <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <label style={{ fontSize: '12px', fontWeight: 600, color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>

@@ -48,7 +48,7 @@ export function useCashPosition(asOf?: string) {
       const cutoff = asOf || new Date().toISOString().slice(0, 10)
       const cutoffTs = cutoff + 'T23:59:59'
 
-      const [store, sales, expenses, bills] = await Promise.all([
+      const [store, sales, expenses, bills, exch, whSales, whPaid] = await Promise.all([
         // Ordered deterministically: a bare limit(1) can return the orphaned second
         // store, which would attach the float to a store holding none of the data.
         supabase.from('stores').select('id, opening_cash, opening_bank').order('created_at', { ascending: true }).limit(1).maybeSingle(),
@@ -57,7 +57,12 @@ export function useCashPosition(asOf?: string) {
           .select('cash_amount, card_amount, upi_amount, credit_paid, credit_tender, is_return')
           .lte('created_at', cutoffTs),
         supabase.from('expenses').select('amount, payment_mode').lte('expense_date', cutoff),
-        supabase.from('purchase_bills').select('amount_paid, payment_tender, payment_status')
+        supabase.from('purchase_bills').select('amount_paid, payment_tender, payment_status'),
+        supabase.from('exchange_bills')
+          .select('balance_type, balance_amount, cash_amount, card_amount, upi_amount, credit_paid, credit_tender, refund_mode')
+          .lte('created_at', cutoffTs),
+        supabase.from('wholesale_sales').select('cash_amount, upi_amount, cheque_amount').lte('created_at', cutoffTs),
+        supabase.from('wholesale_payments').select('amount, tender').lte('paid_at', cutoffTs)
       ])
 
       const p: CashPosition = { ...ZERO }
@@ -76,6 +81,34 @@ export function useCashPosition(asOf?: string) {
           if (isCash(s.credit_tender)) p.udharCollectedCash += collected
           else if (isDigital(s.credit_tender)) p.udharCollectedBank += collected
         }
+      }
+
+      // Exchanges: what the customer paid in, less cash / UPI refunds paid out, and pending amounts collected later.
+      for (const x of exch.error ? [] : exch.data || []) {
+        if (x.balance_type === 'customer_pays') {
+          p.salesCash += Number(x.cash_amount) || 0
+          p.salesUpi += Number(x.upi_amount) || 0
+          p.salesCard += Number(x.card_amount) || 0
+        } else if (x.balance_type === 'store_credit') {
+          if (x.refund_mode === 'cash') p.salesCash -= Number(x.balance_amount) || 0
+          else if (x.refund_mode === 'upi') p.salesUpi -= Number(x.balance_amount) || 0
+        }
+        const collected = Number(x.credit_paid) || 0
+        if (collected > 0) {
+          if (isCash(x.credit_tender)) p.udharCollectedCash += collected
+          else if (isDigital(x.credit_tender)) p.udharCollectedBank += collected
+        }
+      }
+
+      // Wholesale (empty until WHOLESALE_PAYMENTS.sql is run): paid at billing, and payments received later. A cheque is bank money.
+      for (const w of whSales.error ? [] : whSales.data || []) {
+        p.salesCash += Number(w.cash_amount) || 0
+        p.salesUpi += (Number(w.upi_amount) || 0) + (Number(w.cheque_amount) || 0)
+      }
+      for (const w of whPaid.error ? [] : whPaid.data || []) {
+        const amt = Number(w.amount) || 0
+        if (isCash(w.tender)) p.udharCollectedCash += amt
+        else p.udharCollectedBank += amt
       }
 
       for (const e of expenses.data || []) {

@@ -8,6 +8,7 @@ import { getPendingSales } from '../utils/offlineCache'
 import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
 import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
 import { appliedTenders, type Tenders } from '../utils/tenders'
+import { exchangeNoFor } from '../utils/invoiceNo'
 import { fmtDate } from '../utils/date'
 import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 
@@ -78,7 +79,7 @@ const btnOutline: React.CSSProperties = {
 export function ExchangePage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [pageTab, setPageTab] = useState<'new' | 'history'>('new')
+  const [pageTab, setPageTab] = useState<'new' | 'history'>(searchParams.get('tab') === 'history' ? 'history' : 'new')
 
   // Step 1
   const [searchTab, setSearchTab] = useState<'invoice' | 'phone' | 'barcode'>('invoice')
@@ -421,9 +422,10 @@ export function ExchangePage() {
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
     setProcessing(true)
     try {
-      const exchangeNo = 'EXC-' +
-        new Date().toISOString().slice(0, 10).replace(/-/g, '') +
-        '-' + String(Math.floor(Math.random() * 9000) + 1000)
+      // EXE-0082 for bill INV-0082 (EXE-0082-2 for a second exchange on it); old-style bills keep EXC-date-number.
+      const { data: used } = await supabase.from('exchange_bills').select('exchange_no').eq('original_invoice_no', originalInvoice.invoice_no)
+      const exchangeNo = exchangeNoFor(originalInvoice.invoice_no, (used || []).map((r: any) => r.exchange_no)) ||
+        'EXC-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(Math.floor(Math.random() * 9000) + 1000)
 
       // Try to create exchange record in DB
       let exchangeId: string | null = null
@@ -691,6 +693,7 @@ export function ExchangePage() {
 
         {removing && (
           <DeleteBillModal type="exchange" billId={removing.exc.id} billNo={removing.exc.exchange_no}
+            redo={removing.redo}
             title={removing.redo ? `Edit exchange ${removing.exc.exchange_no}?` : undefined}
             note={removing.redo ? `This exchange is undone (stock, credit note and points put back), then New Exchange opens with bill ${removing.exc.original_invoice_no} so you can make it again correctly.` : undefined}
             onClose={() => setRemoving(null)}

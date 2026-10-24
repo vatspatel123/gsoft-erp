@@ -667,6 +667,34 @@ export function OrderSummary(props: OrderSummaryProps) {
             })}
           </div>
 
+          {/* Pending / udhar: the part of the bill the customer pays later. It is whatever the
+              three boxes above don't cover, so this row just sets them for you. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '74px', flexShrink: 0, fontSize: '12px', fontWeight: 700, color: '#b45309' }}>
+              <BookOpen size={14} /> Pending
+            </div>
+            <input
+              type="number" min={0}
+              value={remaining > 0 ? remaining : ''}
+              onChange={e => {
+                const pending = Math.min(props.netAmount, Math.max(0, parseFloat(e.target.value) || 0))
+                const others = Number(props.tenders?.card || 0) + Number(props.tenders?.upi || 0)
+                props.setTender?.('cash', Math.max(0, Math.round((props.netAmount - pending - others) * 100) / 100))
+              }}
+              placeholder="0.00"
+              title="Amount the customer will pay later (udhar). Cash is adjusted to match."
+              style={{ flex: 1, minWidth: 0, border: `1px solid ${remaining > 0 ? '#f59e0b' : '#f3e8ff'}`, borderRadius: '8px',
+                padding: '8px 10px', fontSize: '13px', fontFamily: "'DM Mono', monospace", outline: 'none', color: '#1a0a2e', background: 'white' }}
+            />
+            <button
+              onClick={() => { props.setTender?.('cash', 0); props.setTender?.('card', 0); props.setTender?.('upi', 0) }}
+              title="Nothing paid now: the whole bill is udhar"
+              style={{ border: '1px solid #fde68a', background: '#fffbeb', color: '#b45309', borderRadius: '8px',
+                padding: '8px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Full
+            </button>
+          </div>
+
           {/* Delivery / courier charge — Instagram and phone orders. Added to the bill total. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '4px', minWidth: '78px' }}>

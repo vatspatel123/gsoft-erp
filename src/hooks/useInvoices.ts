@@ -65,8 +65,18 @@ export interface Salesman {
   name: string
 }
 
+/** An exchange, shown in the Sales & Invoices list beside the bills. Managed on the Exchange page. */
+export interface ExchangeRow {
+  id: string; exchange_no: string; original_invoice_no: string | null; created_at: string
+  return_amount: number; new_sale_amount: number; balance_amount: number
+  balance_type: 'nil' | 'customer_pays' | 'store_credit'
+  cash_amount: number; card_amount: number; upi_amount: number; credit_amount: number
+  customers: { name: string; phone: string } | null
+}
+
 export function useInvoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [exchanges, setExchanges] = useState<ExchangeRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('all')
@@ -211,6 +221,20 @@ export function useInvoices() {
     setLoading(false)
   }
 
+  // Exchanges in the same dates. They have no salesman or sale payment mode, so those filters hide them.
+  const fetchExchanges = async () => {
+    if (salesmanFilter !== 'all' || (paymentFilter !== 'all' && paymentFilter !== 'credit')) { setExchanges([]); return }
+    const { from, to } = getDateFilter()
+    let q = supabase.from('exchange_bills')
+      .select('id, exchange_no, original_invoice_no, created_at, return_amount, new_sale_amount, balance_amount, balance_type, cash_amount, card_amount, upi_amount, credit_amount, customers(name, phone)')
+      .order('created_at', { ascending: false })
+    if (from) q = q.gte('created_at', from)
+    if (to) q = q.lt('created_at', to)
+    if (paymentFilter === 'credit') q = q.gt('credit_amount', 0)
+    const { data, error } = await q
+    if (!error) setExchanges((data || []) as unknown as ExchangeRow[])   // offline or table missing: just no exchange rows
+  }
+
   const fetchSalesmen = async () => {
     try {
       const { data, error } = await supabase
@@ -230,8 +254,10 @@ export function useInvoices() {
   }, [])
   useEffect(() => {
     fetchInvoices()
+    void fetchExchanges()
   }, [dateRange, paymentFilter, salesmanFilter, customFrom, customTo])
   useLiveRefresh(['sales'], fetchInvoices)
+  useLiveRefresh(['exchange_bills'], fetchExchanges)
 
   useEffect(() => {
     fetchSalesmen()
@@ -244,6 +270,13 @@ export function useInvoices() {
       inv.invoice_no.toLowerCase().includes(q) ||
       inv.customers?.name?.toLowerCase().includes(q)
     )
+  })
+
+  const filteredExchanges = exchanges.filter((x) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return x.exchange_no.toLowerCase().includes(q) || (x.original_invoice_no || '').toLowerCase().includes(q) ||
+      (x.customers?.name || '').toLowerCase().includes(q)
   })
 
   const totalRevenue = invoices.reduce(
@@ -303,6 +336,7 @@ export function useInvoices() {
 
   return {
     invoices: filteredInvoices,
+    exchanges: filteredExchanges,
     loading,
     search,
     setSearch,

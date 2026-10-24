@@ -15,3 +15,17 @@ export const offlineInvoiceNo = (): string => {
   rememberInvoiceNo(last + 1)
   return pad(last + 1)
 }
+
+/**
+ * Exchange number from the bill it exchanges: INV-0082 -> EXE-0082, then EXE-0082-2, -3 …
+ * `taken` = exchange numbers already used for that bill. A deleted exchange frees its number,
+ * so "Edit" (undo, make again) gets the same number back. Returns null for old-style
+ * invoice numbers, which keep the dated EXC- number.
+ */
+export const exchangeNoFor = (invoiceNo: string, taken: string[]): string | null => {
+  const hit = /^INV-(\d+)$/.exec(invoiceNo || '')
+  if (!hit) return null
+  const base = `EXE-${hit[1]}`
+  if (!taken.includes(base)) return base
+  for (let n = 2; ; n++) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`
+}

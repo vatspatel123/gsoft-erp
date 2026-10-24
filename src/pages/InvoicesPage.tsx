@@ -35,6 +35,7 @@ import { fmtDate, fmtDateTime } from '../utils/date'
 export function InvoicesPage() {
   const {
     invoices,
+    exchanges,
     loading,
     search,
     setSearch,
@@ -408,7 +409,7 @@ export function InvoicesPage() {
               <Loader2 size={24} className="spinner" />
               <span>Loading invoices...</span>
             </div>
-          ) : invoices.length === 0 ? (
+          ) : invoices.length === 0 && exchanges.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">📭</div>
               <div className="empty-state-title">No Invoices Found</div>
@@ -430,6 +431,36 @@ export function InvoicesPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {exchanges.map((x) => (
+                    <tr key={x.id} style={{ background: '#faf5ff' }}>
+                      <td>
+                        <span className="invoice-no">{x.exchange_no}</span>
+                        <div className="refunded-badge" style={{ background: '#ede9fe', color: '#6d28d9' }}>EXCHANGE</div>
+                      </td>
+                      <td>
+                        <div className="date-time">
+                          <div className="date-time-date">{fmtDate(new Date(x.created_at))}</div>
+                          <div className="date-time-time">{new Date(x.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                      </td>
+                      <td>{x.customers?.name || 'Walk-in'}</td>
+                      <td>Bill {x.original_invoice_no || '—'}: ₹{Number(x.return_amount).toFixed(0)} back, ₹{Number(x.new_sale_amount).toFixed(0)} given</td>
+                      <td>—</td>
+                      <td>{x.balance_type === 'customer_pays'
+                        ? [x.cash_amount > 0 && 'Cash', x.card_amount > 0 && 'Card', x.upi_amount > 0 && 'UPI', x.credit_amount > 0 && 'Pending'].filter(Boolean).join(' + ') || '—'
+                        : x.balance_type === 'store_credit' ? 'Store credit' : 'No balance'}</td>
+                      <td style={{ fontWeight: 700 }}>
+                        {x.balance_type === 'customer_pays' ? `+₹${Number(x.balance_amount).toFixed(2)}`
+                          : x.balance_type === 'store_credit' ? `−₹${Number(x.balance_amount).toFixed(2)}` : '₹0.00'}
+                      </td>
+                      <td>
+                        <button className="action-btn primary" title="Open in Exchange history" style={{ color: '#9333ea' }}
+                          onClick={() => navigate('/exchange?tab=history')}>
+                          <ArrowLeftRight size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                   {invoices.map((invoice) => (
                     <tr key={invoice.id} style={{ opacity: invoice.is_return ? 0.7 : 1 }}>
                       <td>

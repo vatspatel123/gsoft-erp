@@ -81,7 +81,7 @@ export function useAccounts() {
     try {
       const since = new Date(Date.now() - 60 * 86400000).toISOString()
 
-      const [pay, rec, cn, sales, dues, exp, excRec] = await Promise.all([
+      const [pay, rec, cn, sales, dues, exp, excRec, excDay, whSales, whPaid] = await Promise.all([
         // Payables: anything not settled with a supplier.
         supabase
           .from('purchase_bills')
@@ -126,6 +126,16 @@ export function useAccounts() {
           .select('id, exchange_no, customer_id, balance_amount, credit_amount, credit_paid, credit_status, credit_due_date, created_at, customers(id, name, phone)')
           .neq('credit_status', 'paid')
           .gt('credit_amount', 0),
+
+        // Money taken (or paid out) on an exchange counts on the day of the exchange.
+        supabase
+          .from('exchange_bills')
+          .select('created_at, balance_type, balance_amount, cash_amount, card_amount, upi_amount, credit_amount, refund_mode')
+          .gte('created_at', since),
+
+        // Wholesale: what was paid at billing counts on the bill's day, payments received later on the day received.
+        supabase.from('wholesale_sales').select('created_at, cash_amount, upi_amount, cheque_amount, credit_amount').gte('created_at', since),
+        supabase.from('wholesale_payments').select('paid_at, amount, tender').gte('paid_at', since),
       ])
 
       if (!pay.error) setPayables((pay.data || []) as any)
@@ -156,6 +166,35 @@ export function useAccounts() {
         r.upiIn += Number(s.upi_amount) || 0
         r.cardIn += Number(s.card_amount) || 0
         r.creditGiven += Number(s.credit_amount) || 0
+      }
+
+      // Exchange: the top-up the customer paid is money in; a cash / UPI refund is money out
+      // (taken off the same column, so the day's cash still matches the drawer).
+      for (const x of excDay.error ? [] : excDay.data || []) {
+        const r = row(String(x.created_at).slice(0, 10))
+        if (x.balance_type === 'customer_pays') {
+          r.cashIn += Number(x.cash_amount) || 0
+          r.upiIn += Number(x.upi_amount) || 0
+          r.cardIn += Number(x.card_amount) || 0
+          r.creditGiven += Number(x.credit_amount) || 0
+        } else if (x.balance_type === 'store_credit') {
+          if (x.refund_mode === 'cash') r.cashIn -= Number(x.balance_amount) || 0
+          else if (x.refund_mode === 'upi') r.upiIn -= Number(x.balance_amount) || 0
+        }
+      }
+
+      // Both empty until WHOLESALE_PAYMENTS.sql has been run. A cheque is bank money, counted with UPI.
+      for (const w of whSales.error ? [] : whSales.data || []) {
+        const r = row(String(w.created_at).slice(0, 10))
+        r.cashIn += Number(w.cash_amount) || 0
+        r.upiIn += (Number(w.upi_amount) || 0) + (Number(w.cheque_amount) || 0)
+        r.creditGiven += Number(w.credit_amount) || 0
+      }
+      for (const w of whPaid.error ? [] : whPaid.data || []) {
+        const r = row(String(w.paid_at).slice(0, 10))
+        const amt = Number(w.amount) || 0
+        r.duesIn += amt
+        if (String(w.tender).toLowerCase() === 'cash') r.duesCash += amt
       }
 
       for (const d of dues.data || []) {       // empty until CUSTOMER_PAYMENTS.sql has been run
