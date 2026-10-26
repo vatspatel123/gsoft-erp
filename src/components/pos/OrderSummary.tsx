@@ -98,6 +98,13 @@ export function OrderSummary(props: OrderSummaryProps) {
     }
     setCustomerLoading(true)
     let fetchedFromDb = false;
+    // Only the newest typing may fill the list: an answer for "953" arriving after "95377"
+    // used to replace it, showing numbers that don't match what was typed.
+    const seq = ++searchSeq.current
+    // Numbers that START with what was typed come first, then names, then numbers that only contain it.
+    const q = query.trim().toLowerCase()
+    const rank = (c: any) => String(c.phone || '').startsWith(query.trim()) ? 0 : String(c.name || '').toLowerCase().startsWith(q) ? 1 : 2
+    const best = (rows: any[]) => [...rows].sort((a, b) => rank(a) - rank(b) || String(a.name || '').localeCompare(String(b.name || ''))).slice(0, 8)
     
     if (navigator.onLine) {
       try {
@@ -106,10 +113,11 @@ export function OrderSummary(props: OrderSummaryProps) {
           .select('*')
           .or(`phone.ilike.%${query}%,name.ilike.%${query}%`)
           .order('name')
-          .limit(8)
+          .limit(40)
+        if (seq !== searchSeq.current) return
           
         if (!error && data) {
-          setCustomerResults(data)
+          setCustomerResults(best(data))
           setShowCustomerDropdown(true)
           fetchedFromDb = true
         }
@@ -123,10 +131,10 @@ export function OrderSummary(props: OrderSummaryProps) {
       try {
         const raw = localStorage.getItem('gsoft_customers_cache')
         const all = raw ? JSON.parse(raw).data || [] : []
-        const q = query.toLowerCase()
-        const filtered = all.filter((c: any) =>
+        const filtered = best(all.filter((c: any) =>
           c.phone?.includes(query) || c.name?.toLowerCase().includes(q)
-        ).slice(0, 8)
+        ))
+        if (seq !== searchSeq.current) return
         setCustomerResults(filtered)
         setShowCustomerDropdown(true)
       } catch (e) {
@@ -154,6 +162,7 @@ export function OrderSummary(props: OrderSummaryProps) {
     setShowNewForm(false)
   }
 
+  const searchSeq = useRef(0)
   const savingCustomer = useRef(false)   // a second press of Save while the first is still saving
   const handleSaveNewCustomer = async () => {
     const phone = customerSearch.replace(/\D/g, '')

@@ -36,6 +36,7 @@ export function InvoicesPage() {
   const {
     invoices,
     exchanges,
+    billRows,
     loading,
     search,
     setSearch,
@@ -431,7 +432,10 @@ export function InvoicesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {exchanges.map((x) => (
+                  {billRows.map((row) => {
+                    if (row.kind === 'exchange') {
+                      const x = row.x
+                      return (
                     <tr key={x.id} style={{ background: '#faf5ff' }}>
                       <td>
                         <span className="invoice-no">{x.exchange_no}</span>
@@ -445,7 +449,13 @@ export function InvoicesPage() {
                       </td>
                       <td>{x.customers?.name || 'Walk-in'}</td>
                       <td>Bill {x.original_invoice_no || '—'}: ₹{Number(x.return_amount).toFixed(0)} back, ₹{Number(x.new_sale_amount).toFixed(0)} given</td>
-                      <td>—</td>
+                      <td>
+                        <div className="salesman-cell" title="Salesman of the bill that was exchanged">
+                          {x.salesman_name
+                            ? (<><div className="salesman-avatar">{getInitials(x.salesman_name)}</div><span className="salesman-name">{x.salesman_name}</span></>)
+                            : <span className="salesman-name" style={{ color: '#94a3b8' }}>—</span>}
+                        </div>
+                      </td>
                       <td>{x.balance_type === 'customer_pays'
                         ? [x.cash_amount > 0 && 'Cash', x.card_amount > 0 && 'Card', x.upi_amount > 0 && 'UPI', x.credit_amount > 0 && 'Pending'].filter(Boolean).join(' + ') || '—'
                         : x.balance_type === 'store_credit' ? 'Store credit' : 'No balance'}</td>
@@ -460,8 +470,10 @@ export function InvoicesPage() {
                         </button>
                       </td>
                     </tr>
-                  ))}
-                  {invoices.map((invoice) => (
+                      )
+                    }
+                    const invoice = row.inv
+                    return (
                     <tr key={invoice.id} style={{ opacity: invoice.is_return ? 0.7 : 1 }}>
                       <td>
                         <span className="invoice-no">{invoice.invoice_no}</span>
@@ -653,7 +665,8 @@ export function InvoicesPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

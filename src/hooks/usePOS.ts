@@ -256,19 +256,17 @@ export function usePOS(salesmanId: string | null = null) {
         if (remainingStock <= product.low_stock_alert && remainingStock > 0) {
           toast(`Only ${remainingStock} left in stock!`, { icon: '⚠️' })
         }
-        return prev.map(i =>
-          i.product.id === product.id
-            ? { ...i, qty: newQty, line_total: calcLineTotal(i.unit_price, newQty, i.discount_pct) }
-            : i
-        )
+        // The latest product added (or scanned again) sits at the top of the cart.
+        return [{ ...ex, qty: newQty, line_total: calcLineTotal(ex.unit_price, newQty, ex.discount_pct) },
+          ...prev.filter(i => i.product.id !== product.id)]
       }
-      return [...prev, {
+      return [{
         product,
         qty: 1,
         unit_price: product.unit_price,
         discount_pct: 0,
         line_total: product.unit_price
-      }]
+      }, ...prev]
     })
   }, [findOlderLot])
 

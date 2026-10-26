@@ -892,3 +892,14 @@
     padding: 16px;
   }
 }
+
+
+/* Fit the whole row, actions included, on one screen: no sideways scrolling.
+   Scoped to the Invoices page so no other screen changes. */
+.invoices-page .invoices-table th,
+.invoices-page .invoices-table td { padding: 12px 8px; }
+.invoices-page .invoices-table td { white-space: normal; }
+.invoices-page .invoices-table td .invoice-no,
+.invoices-page .invoices-table td .date-time { white-space: nowrap; }
+.invoices-page .actions-cell { flex-wrap: wrap; gap: 4px; max-width: 132px; }
+.invoices-page .action-btn { width: 28px; height: 28px; font-size: 14px; }

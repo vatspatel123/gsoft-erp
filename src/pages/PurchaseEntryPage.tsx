@@ -385,25 +385,6 @@ export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' |
 
             {/* LEFT PANEL */}
             <div style={{ flex: '999 1 900px', minWidth: 0 }}>
-              {hook.editing && (
-                <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '14px', padding: '14px 16px', marginBottom: '12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#6b21a8', fontSize: '14px' }}>✏️ Editing purchase bill {hook.editing.no}</div>
-                      <div style={{ fontSize: '12px', color: '#7c3aed', marginTop: '2px' }}>
-                        Change, copy, add or remove lines as in a new entry. Stock moves by the difference; stock already sold can't be taken off.
-                        Copied or added lines become new products. Your new purchase (if any) is kept and comes back after.
-                      </div>
-                    </div>
-                    <button onClick={hook.cancelEdit} style={{ padding: '8px 14px', background: 'white', color: '#7c3aed', border: '1px solid #d8b4fe', borderRadius: '8px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
-                      Cancel edit
-                    </button>
-                  </div>
-                  <input value={hook.editReason} onChange={e => hook.setEditReason(e.target.value)}
-                    placeholder="Reason for the edit * (e.g. supplier sent 2 more pieces; wrong cost entered)"
-                    style={{ ...inputStyle, marginTop: '10px', borderColor: hook.editReason.trim().length < 3 ? '#d8b4fe' : G.border }} />
-                </div>
-              )}
               {/* Supplier */}
               <SupplierSection
                 supplier={hook.supplier}
@@ -784,6 +765,26 @@ export function PurchaseEntryPage({ initialTab = 'new' }: { initialTab?: 'new' |
                     no longer auto-publish to the online catalogue. Products can still be
                     listed individually from Online Listings. */}
 
+                {/* Editing a saved bill: the reason and Cancel sit right above Save. */}
+              {hook.editing && (
+                <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '14px', padding: '14px 16px', marginBottom: '12px', marginTop: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#6b21a8', fontSize: '14px' }}>✏️ Editing purchase bill {hook.editing.no}</div>
+                      <div style={{ fontSize: '12px', color: '#7c3aed', marginTop: '2px' }}>
+                        Change, copy, add or remove lines as in a new entry. Stock moves by the difference; stock already sold can't be taken off.
+                        Copied or added lines become new products. Your new purchase (if any) is kept and comes back after.
+                      </div>
+                    </div>
+                    <button onClick={hook.cancelEdit} style={{ padding: '8px 14px', background: 'white', color: '#7c3aed', border: '1px solid #d8b4fe', borderRadius: '8px', fontSize: '13px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
+                      Cancel edit
+                    </button>
+                  </div>
+                  <input value={hook.editReason} onChange={e => hook.setEditReason(e.target.value)}
+                    placeholder="Reason for the edit * (e.g. supplier sent 2 more pieces; wrong cost entered)"
+                    style={{ ...inputStyle, marginTop: '10px', borderColor: hook.editReason.trim().length < 3 ? '#d8b4fe' : G.border }} />
+                </div>
+              )}
                 {/* Save button */}
                 <button
                   data-enter-submit

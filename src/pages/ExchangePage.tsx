@@ -350,11 +350,10 @@ export function ExchangePage() {
     setNewItems(prev => {
       const existing = prev.find(i => i.product.id === product.id)
       if (existing) {
-        return prev.map(i => i.product.id === product.id
-          ? { ...i, qty: i.qty + 1, line_total: i.unit_price * (i.qty + 1) }
-          : i)
+        return [{ ...existing, qty: existing.qty + 1, line_total: existing.unit_price * (existing.qty + 1) },
+          ...prev.filter(i => i.product.id !== product.id)]
       }
-      return [...prev, { product, qty: 1, unit_price: product.unit_price, line_total: product.unit_price }]
+      return [{ product, qty: 1, unit_price: product.unit_price, line_total: product.unit_price }, ...prev]
     })
     setReplSearch('')
     setReplResults([])
@@ -875,6 +874,7 @@ export function ExchangePage() {
                                 </span>
                               )}
                               {si.products?.design_no && <span>D:{si.products.design_no}</span>}
+                              {(si.products?.barcode || si.products?.sku) && <span style={{ fontFamily: 'DM Mono, monospace', color: '#64748b' }}>#{si.products.barcode || si.products.sku}</span>}
                               <span>Qty: {si.qty}</span>
                             </div>
                           </div>

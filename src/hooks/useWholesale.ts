@@ -73,19 +73,17 @@ export function useWholesale() {
     setCart(prev => {
       const idx = prev.findIndex(i => i.product.id === product.id)
       if (idx >= 0) {
-        const updated = [...prev]
-        const item = { ...updated[idx], qty: updated[idx].qty + 1 }
-        updated[idx] = calcItem(item)
-        return updated
+        // The latest product added (or scanned again) sits at the top of the cart.
+        return [calcItem({ ...prev[idx], qty: prev[idx].qty + 1 }), ...prev.filter((_, k) => k !== idx)]
       }
-      return [...prev, calcItem({
+      return [calcItem({
         product,
         qty: 1,
         unit_price: price,
         mrp: Number(product.mrp) || price,
         discount_pct: 0,
         gst_rate: Number(product.gst_rate) || 0,
-      })]
+      }), ...prev]
     })
   }
 

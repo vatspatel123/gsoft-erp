@@ -67,7 +67,9 @@ export interface Salesman {
 
 /** An exchange, shown in the Sales & Invoices list beside the bills. Managed on the Exchange page. */
 export interface ExchangeRow {
-  id: string; exchange_no: string; original_invoice_no: string | null; created_at: string
+  id: string; exchange_no: string; original_invoice_no: string | null; original_sale_id?: string | null; created_at: string
+  /** Salesman of the original bill (exchanges have no salesman of their own yet). */
+  salesman_name?: string | null
   return_amount: number; new_sale_amount: number; balance_amount: number
   balance_type: 'nil' | 'customer_pays' | 'store_credit'
   cash_amount: number; card_amount: number; upi_amount: number; credit_amount: number
@@ -226,13 +228,24 @@ export function useInvoices() {
     if (salesmanFilter !== 'all' || (paymentFilter !== 'all' && paymentFilter !== 'credit')) { setExchanges([]); return }
     const { from, to } = getDateFilter()
     let q = supabase.from('exchange_bills')
-      .select('id, exchange_no, original_invoice_no, created_at, return_amount, new_sale_amount, balance_amount, balance_type, cash_amount, card_amount, upi_amount, credit_amount, customers(name, phone)')
+      .select('id, exchange_no, original_invoice_no, original_sale_id, created_at, return_amount, new_sale_amount, balance_amount, balance_type, cash_amount, card_amount, upi_amount, credit_amount, customers(name, phone)')
       .order('created_at', { ascending: false })
     if (from) q = q.gte('created_at', from)
     if (to) q = q.lt('created_at', to)
     if (paymentFilter === 'credit') q = q.gt('credit_amount', 0)
     const { data, error } = await q
-    if (!error) setExchanges((data || []) as unknown as ExchangeRow[])   // offline or table missing: just no exchange rows
+    if (error) return   // offline or table missing: just no exchange rows
+    const rows = (data || []) as unknown as ExchangeRow[]
+    // The salesman of the bill being exchanged; if this lookup fails the column just shows a dash.
+    try {
+      const ids = [...new Set(rows.map(r => r.original_sale_id).filter(Boolean))] as string[]
+      if (ids.length) {
+        const { data: bills } = await supabase.from('sales').select('id, users(name)').in('id', ids)
+        const by = new Map((bills || []).map((b: any) => [b.id, b.users?.name || null]))
+        rows.forEach(r => { r.salesman_name = (r.original_sale_id && by.get(r.original_sale_id)) || null })
+      }
+    } catch { /* leave the salesman blank */ }
+    setExchanges(rows)
   }
 
   const fetchSalesmen = async () => {
@@ -278,6 +291,12 @@ export function useInvoices() {
     return x.exchange_no.toLowerCase().includes(q) || (x.original_invoice_no || '').toLowerCase().includes(q) ||
       (x.customers?.name || '').toLowerCase().includes(q)
   })
+
+  // Bills and exchanges in ONE list, by the time each was made (newest first).
+  const billRows = [
+    ...filteredInvoices.map(inv => ({ kind: 'sale' as const, at: inv.created_at, inv })),
+    ...filteredExchanges.map(x => ({ kind: 'exchange' as const, at: x.created_at, x })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime() || (a.kind === 'sale' ? -1 : 1))
 
   const totalRevenue = invoices.reduce(
     (sum, inv) => sum + (inv.net_amount || 0),
@@ -337,6 +356,7 @@ export function useInvoices() {
   return {
     invoices: filteredInvoices,
     exchanges: filteredExchanges,
+    billRows,
     loading,
     search,
     setSearch,
