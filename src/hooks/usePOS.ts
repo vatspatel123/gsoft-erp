@@ -384,7 +384,9 @@ export function usePOS(salesmanId: string | null = null) {
 
   const totalDiscount = couponDiscount + loyaltyDiscount + manualDiscountAmount + creditNoteDiscount
   // No + gstAmount: the tax is already inside subtotal.
-  const netAmount = Math.max(0, Math.round((Math.max(0, subtotal - totalDiscount) + shipping) * 100) / 100)
+  // Shipping is added BEFORE flooring at zero: store credit can cover the shipping too (see
+  // payableBeforeCredit), so ₹3,000 credit on ₹2,900 + ₹100 shipping leaves ₹0, not ₹100.
+  const netAmount = Math.max(0, Math.round((subtotal - totalDiscount + shipping) * 100) / 100)
 
   const setTender = useCallback((kind: 'cash' | 'card' | 'upi', amount: number) => {
     setFullBy(null)   // typed by hand: it no longer follows the bill
