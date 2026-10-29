@@ -130,6 +130,8 @@ export function ExchangePage() {
       setInvoiceInput(inv)
       loadInvoiceByNo(inv)
     }
+    const exc = searchParams.get('exchange')   // from Invoices: open that exchange to exchange it again
+    if (exc) { setInvoiceInput(exc); void loadExchangeByNo(exc) }
   }, [])
 
   useEffect(() => {
@@ -146,8 +148,38 @@ export function ExchangePage() {
   }
 
   // ── Invoice loaders ──────────────────────────────────────────────────────
+  // An earlier exchange as the starting point: the pieces it GAVE the customer are what can come
+  // back now. It is shaped like a bill so the rest of this screen works unchanged; invoice_no stays
+  // the original bill's, so the next exchange number is EXE-0082-2, -3 …
+  const openExchangeAsSource = (exc: any) => {
+    const lines = (exc.exchange_new_items || []).map((i: any) => ({
+      id: i.id, product_id: i.product_id, qty: i.qty, unit_price: Number(i.unit_price) || 0,
+      line_total: Number(i.line_total) || 0, products: i.products,
+    }))
+    const inv = {
+      id: exc.original_sale_id, invoice_no: exc.original_invoice_no, customer_id: exc.customer_id,
+      customers: exc.customers, created_at: exc.created_at, from_exchange_no: exc.exchange_no,
+      net_amount: lines.reduce((t: number, l: any) => t + l.line_total, 0), sale_items: lines,
+    }
+    if (lines.length === 0) { toast.error(`${exc.exchange_no} gave no replacement pieces, so there is nothing to exchange`); return false }
+    setPageTab('new'); setOriginalInvoice(inv); initItemSelections(inv)
+    toast.success(`Loaded exchange ${exc.exchange_no}`)
+    return true
+  }
+  const EXCHANGE_SOURCE_SELECT = '*, customers(*), exchange_new_items(id, product_id, qty, unit_price, line_total, products(*))'
+  const loadExchangeByNo = async (no: string) => {
+    setLoadingInvoice(true)
+    try {
+      const { data } = await supabase.from('exchange_bills').select(EXCHANGE_SOURCE_SELECT).eq('exchange_no', no.trim().toUpperCase()).maybeSingle()
+      if (!data) { toast.error('Exchange not found'); return false }
+      return openExchangeAsSource(data)
+    } catch { toast.error('Could not load the exchange — check your connection'); return false }
+    finally { setLoadingInvoice(false) }
+  }
+
   const loadInvoiceByNo = async (no: string) => {
     if (!no.trim()) return
+    if (/^EX[EC]-/i.test(no.trim())) { await loadExchangeByNo(no); return }   // an exchange number, not a bill
     setLoadingInvoice(true)
     await ensureSynced()
     try {
@@ -178,6 +210,8 @@ export function ExchangePage() {
           toast.success(`Loaded invoice ${data.invoice_no}`)
           return
         }
+        // Not a bill number: a long number typed here is a barcode.
+        if (/^\d{4,13}$/.test(trimmed)) { await loadInvoiceByBarcode(trimmed); return }
       }
 
       // 3. Fallback: search local/pending sales
@@ -268,14 +302,35 @@ export function ExchangePage() {
         setLoadingInvoice(false)
         return
       }
-      const { data: prod } = await supabase
-        .from('products').select('id').eq('barcode', barcode.trim()).maybeSingle()
-      if (!prod) { toast.error('Product not found for this barcode'); setLoadingInvoice(false); return }
-      const { data: items } = await supabase
-        .from('sale_items').select('sale_id')
-        .eq('product_id', prod.id)
-        .order('created_at' as any, { ascending: false }).limit(1)
-      if (!items || items.length === 0) { toast.error('No invoice found for this product'); setLoadingInvoice(false); return }
+      // The number on the label can be the barcode, SKU, batch or product code, and a few
+      // products can share it: look at all of them, not just one exact barcode.
+      const code = barcode.trim().replace(/[",()%*]/g, '')
+      const { data: prods } = await supabase
+        .from('products').select('id')
+        .or(['barcode', 'sku', 'batch_no', 'pcode'].map(f => `${f}.eq.${code}`).join(',')).limit(30)
+      const ids = (prods || []).map((p: any) => p.id)
+      // A sold line also keeps the barcode it was sold under, so match on that as well. The newest bill
+      // wins; ordered here by the BILL's date (the lines table has no date column to order by).
+      const findLines = async (cond: string) =>
+        supabase.from('sale_items').select('sale_id, sales(created_at)').or(cond).limit(1000)
+      let lines = await findLines([ids.length ? `product_id.in.(${ids.join(',')})` : '', `barcode.eq.${code}`].filter(Boolean).join(','))
+      if (lines.error && ids.length) lines = await findLines(`product_id.in.(${ids.join(',')})`)   // no barcode column on lines
+      if (lines.error) { toast.error('Search failed: ' + lines.error.message); setLoadingInvoice(false); return }
+      const items = ((lines.data || []) as any[])
+        .sort((x, y) => String(y.sales?.created_at || '').localeCompare(String(x.sales?.created_at || '')))
+        .slice(0, 1)
+      // A piece that was GIVEN in an exchange has no bill of its own: find that exchange.
+      const { data: given } = ids.length
+        ? await supabase.from('exchange_new_items').select('exchange_id').in('product_id', ids).order('created_at', { ascending: false }).limit(1)
+        : { data: [] as any[] }
+      if (items.length === 0 && given?.length) {
+        const { data: exc } = await supabase.from('exchange_bills').select(EXCHANGE_SOURCE_SELECT).eq('id', given[0].exchange_id).maybeSingle()
+        if (exc) { openExchangeAsSource(exc); setLoadingInvoice(false); return }
+      }
+      if (items.length === 0) {
+        toast.error(ids.length ? 'No bill found for this product' : 'Product not found for this barcode')
+        setLoadingInvoice(false); return
+      }
       const { data } = await supabase
         .from('sales')
         .select('*, customers(*), users(*), sale_items(*, products(*))')
@@ -583,16 +638,36 @@ export function ExchangePage() {
     }, exc.credit_notes)
   }
 
-  const fetchHistory = async () => {
+  const [historySearch, setHistorySearch] = useState('')
+  // q: exchange number, bill number, customer name / phone, or the barcode of any piece in it.
+  const fetchHistory = async (q = '') => {
     setHistoryLoading(true)
     try {
-      const { data } = await supabase
+      let query = supabase
         .from('exchange_bills')
         .select('*, customers(name, phone), credit_notes:credit_note_id(*), ' +
           'exchange_return_items(qty, unit_price, line_total, products(name, size, colour)), ' +
           'exchange_new_items(qty, unit_price, line_total, products(name, size, colour))')
-        .order('created_at', { ascending: false })
-        .limit(50)
+      const term = q.trim().replace(/[",()%]/g, ' ').trim()
+      if (term) {
+        const ors = [`exchange_no.ilike.%${term}%`, `original_invoice_no.ilike.%${term}%`]
+        const [prods, custs] = await Promise.all([
+          supabase.from('products').select('id').or(`barcode.ilike.%${term}%,sku.ilike.%${term}%`).limit(50),
+          supabase.from('customers').select('id').or(`name.ilike.%${term}%,phone.ilike.%${term}%`).limit(50),
+        ])
+        if (custs.data?.length) ors.push(`customer_id.in.(${custs.data.map((c: any) => c.id).join(',')})`)
+        const pids = (prods.data || []).map((p: any) => p.id)
+        if (pids.length) {
+          const [r, n] = await Promise.all([
+            supabase.from('exchange_return_items').select('exchange_id').in('product_id', pids),
+            supabase.from('exchange_new_items').select('exchange_id').in('product_id', pids),
+          ])
+          const ids = [...new Set([...(r.data || []), ...(n.data || [])].map((x: any) => x.exchange_id))]
+          if (ids.length) ors.push(`id.in.(${ids.join(',')})`)
+        }
+        query = query.or(ors.join(','))
+      }
+      const { data } = await query.order('created_at', { ascending: false }).limit(term ? 100 : 50)
       setHistory(data || [])
     } catch { } finally { setHistoryLoading(false) }
   }
@@ -638,6 +713,13 @@ export function ExchangePage() {
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
+                <div style={{ padding: '12px 14px', display: 'flex', gap: '8px' }}>
+                  <input value={historySearch} onChange={e => setHistorySearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && fetchHistory(historySearch)}
+                    placeholder="Search by exchange no, bill no, customer, phone or barcode…" data-enter="own"
+                    style={{ flex: 1, padding: '9px 12px', border: '1px solid #f3e8ff', borderRadius: '10px', fontSize: '13px', fontFamily: 'DM Sans, sans-serif' }} />
+                  <button onClick={() => fetchHistory(historySearch)}
+                    style={{ padding: '9px 16px', background: '#9333ea', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Search</button>
+                </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid #f3e8ff' }}>
@@ -667,6 +749,10 @@ export function ExchangePage() {
                         </td>
                         <td style={{ padding: '12px 14px' }}>
                           <div style={{ display: 'flex', gap: '6px' }}>
+                            <button onClick={() => void loadExchangeByNo(exc.exchange_no)} title="Exchange again — open this exchange to exchange its pieces"
+                              style={{ background: '#f0fdf4', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#16a34a', fontSize: '11px' }}>
+                              🔁
+                            </button>
                             <button onClick={() => reprint(exc)} title="Reprint"
                               style={{ background: '#f5f3ff', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#9333ea', fontSize: '11px' }}>
                               🖨️
@@ -816,7 +902,7 @@ export function ExchangePage() {
                     <div style={{ marginTop: '16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                         <div>
-                          <div style={{ fontWeight: 700, color: '#16a34a', fontSize: '14px', fontFamily: 'DM Mono, monospace' }}>{originalInvoice.invoice_no}</div>
+                          <div style={{ fontWeight: 700, color: '#16a34a', fontSize: '14px', fontFamily: 'DM Mono, monospace' }}>{originalInvoice.invoice_no}{originalInvoice.from_exchange_no && <span style={{ color: '#9333ea', fontSize: '11px', marginLeft: '8px' }}>pieces from {originalInvoice.from_exchange_no}</span>}</div>
                           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                             {fmtDate(new Date(originalInvoice.created_at))} · {daysSince} day{daysSince !== 1 ? 's' : ''} ago
                           </div>

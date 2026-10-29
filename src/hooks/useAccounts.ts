@@ -264,6 +264,14 @@ export function useAccounts() {
         .eq('id', row.id)
       if (error) throw error
       void recordDuePayment({ sale_id: row.source === 'sale' ? row.id : null, exchange_id: row.source === 'exchange' ? row.id : null, customer_id: row.customer_id, amount: pay, tender })
+      // Show it in today's Cash Book at once (it is read from the database only on load).
+      setDayBook(prev => {
+        const day = new Date().toISOString().slice(0, 10)
+        const cash = String(tender).toLowerCase() === 'cash' ? pay : 0
+        const has = prev.some(d => d.date === day)
+        const rows = has ? prev : [{ date: day, cashIn: 0, upiIn: 0, cardIn: 0, duesIn: 0, duesCash: 0, creditGiven: 0, cashOut: 0, digitalOut: 0, net: 0 }, ...prev]
+        return rows.map(d => d.date === day ? { ...d, duesIn: d.duesIn + pay, duesCash: d.duesCash + cash, net: d.net + pay } : d)
+      })
       setReceivables(prev => settled
         ? prev.filter(r => r.id !== row.id)
         : prev.map(r => r.id === row.id ? { ...r, credit_paid: newPaid, credit_status: 'partial' } : r))
@@ -295,8 +303,10 @@ export function useAccounts() {
     payableAgeing: ageing(payables, payableOutstanding, p => p.created_at),
     receivableAgeing: ageing(receivables, receivableOutstanding, r => r.created_at),
     overdueReceivables: receivables.filter(r => r.credit_due_date && r.credit_due_date < today),
-    todayCashIn: todayRow?.cashIn || 0,
-    todayCashOut: todayRow?.cashOut || 0,
+    // All money in today (cash, UPI, card and old dues / wholesale payments collected) and all out,
+    // so In - Out is the Net shown beside them.
+    todayCashIn: todayRow ? todayRow.cashIn + todayRow.upiIn + todayRow.cardIn + todayRow.duesIn : 0,
+    todayCashOut: todayRow ? todayRow.cashOut + todayRow.digitalOut : 0,
     todayNet: todayRow?.net || 0,
     daysOld,
     settlePayable, settleReceivable,

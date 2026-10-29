@@ -344,7 +344,7 @@ export function InvoicesPage() {
               <Search size={16} className="search-icon" />
               <input
                 type="text"
-                placeholder="Search by invoice no or customer name..."
+                placeholder="Search by invoice no, customer name or phone..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -436,7 +436,8 @@ export function InvoicesPage() {
                     if (row.kind === 'exchange') {
                       const x = row.x
                       return (
-                    <tr key={x.id} style={{ background: '#faf5ff' }}>
+                    <tr key={x.id} style={{ background: '#faf5ff', cursor: 'pointer' }} title="Click to exchange this again"
+                      onClick={() => navigate(`/exchange?exchange=${x.exchange_no}`)}>
                       <td>
                         <span className="invoice-no">{x.exchange_no}</span>
                         <div className="refunded-badge" style={{ background: '#ede9fe', color: '#6d28d9' }}>EXCHANGE</div>
@@ -464,8 +465,8 @@ export function InvoicesPage() {
                           : x.balance_type === 'store_credit' ? `−₹${Number(x.balance_amount).toFixed(2)}` : '₹0.00'}
                       </td>
                       <td>
-                        <button className="action-btn primary" title="Open in Exchange history" style={{ color: '#9333ea' }}
-                          onClick={() => navigate('/exchange?tab=history')}>
+                        <button className="action-btn primary" title="Exchange this again" style={{ color: '#9333ea' }}
+                          onClick={e => { e.stopPropagation(); navigate(`/exchange?exchange=${x.exchange_no}`) }}>
                           <ArrowLeftRight size={16} />
                         </button>
                       </td>

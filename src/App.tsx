@@ -37,7 +37,7 @@ import { OnlineOrdersPage } from './pages/OnlineOrdersPage'
 import { WebsiteSettingsPage } from './pages/WebsiteSettingsPage'
 import { FormatDesignerPage } from './pages/FormatDesignerPage'
 import type { Session } from '@supabase/supabase-js'
-import { LoginScreen } from './components/auth/LoginScreen'
+import { LoginScreen, rememberLoginEmail } from './components/auth/LoginScreen'
 import { SubscriptionLockedScreen } from './components/auth/SubscriptionLockedScreen'
 import { lastInvoiceNo, rememberInvoiceNo, invoiceNoOf } from './utils/invoiceNo'
 // Inner component so useNavigate works (must be inside BrowserRouter)
@@ -80,6 +80,7 @@ function AppContent() {
       setSession(session)
       setAuthInitialized(true)
       if (session) {
+        rememberLoginEmail(session.user?.email)
         // The shop's bill layout, logo and conditions live with the store, not
         // with the computer, so a fresh install picks them up on first sign-in.
         void pullShopSettings()
@@ -94,6 +95,7 @@ function AppContent() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
+        rememberLoginEmail(session.user?.email)
         void pullShopSettings()
         supabase.from('stores').select('subscription_status').single().then(({ data }) => {
           if (data) setStoreStatus(data.subscription_status)

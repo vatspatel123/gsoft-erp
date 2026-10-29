@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = 'https://cogrniduhhoeepdkesjx.supabase.co'
-// Using the service_role key provided earlier
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvZ3JuaWR1aGhvZWVwZGtlc2p4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDEyMTc5NiwiZXhwIjoyMDg5Njk3Nzk2fQ.17FIelfCj3M3nYHwCFIZvtiLn2TVDggh4goRq9K7pI0'
+// Run with: SUPABASE_SERVICE_KEY=... ADMIN_PASSWORD=... node setup_auth.mjs
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
 
 async function setupAdminAccount() {
   const email = 'admin@retailerp.com'
-  const password = 'AdminPassword123!'
+  const password = process.env.ADMIN_PASSWORD   // set it when running; never write it in this file
 
   console.log('1. Creating admin auth user...')
   const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({

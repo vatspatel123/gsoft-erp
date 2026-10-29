@@ -6,6 +6,8 @@ import toast from 'react-hot-toast'
 // first sign-in, so from then on only the password is typed.
 const EMAIL_KEY = 'gsoft_login_email'
 const savedEmail = () => { try { return localStorage.getItem(EMAIL_KEY) || '' } catch { return '' } }
+/** Called for any live sign-in, so a PC that stays signed in across the update still learns the email before its first log-out. */
+export const rememberLoginEmail = (email?: string | null) => { try { if (email) localStorage.setItem(EMAIL_KEY, email) } catch { /* only a convenience */ } }
 
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '12px 16px', borderRadius: '12px',

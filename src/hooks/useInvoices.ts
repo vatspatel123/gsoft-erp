@@ -142,7 +142,10 @@ export function useInvoices() {
           if (to) query = query.lt('created_at', to)
 
           if (paymentFilter !== 'all') {
-            query = query.eq('payment_mode', paymentFilter)
+            // By the money actually taken in that mode, as Reports counts it: a bill paid part UPI,
+            // part credit has payment_mode 'credit' but still belongs under UPI. (Bills saved before
+            // the split was recorded have no amounts: those still match by payment_mode.)
+            query = query.or(`${paymentFilter}_amount.gt.0,payment_mode.eq.${paymentFilter}`)
           }
         }
 
@@ -204,7 +207,7 @@ export function useInvoices() {
     // Combine database invoices and local pending sales, avoiding duplicates by invoice_no
     const combinedMap = new Map<string, Invoice>()
     for (const inv of pendingMapped) {
-      if (paymentFilter !== 'all' && inv.payment_mode !== paymentFilter) continue
+      if (paymentFilter !== 'all' && tenderOf(inv, paymentFilter as any) <= 0) continue
       combinedMap.set(inv.invoice_no, inv)
     }
     for (const inv of fetchedInvoices) {
@@ -225,14 +228,14 @@ export function useInvoices() {
 
   // Exchanges in the same dates. They have no salesman or sale payment mode, so those filters hide them.
   const fetchExchanges = async () => {
-    if (salesmanFilter !== 'all' || (paymentFilter !== 'all' && paymentFilter !== 'credit')) { setExchanges([]); return }
+    if (salesmanFilter !== 'all' || paymentFilter === 'credit_overdue_15') { setExchanges([]); return }
     const { from, to } = getDateFilter()
     let q = supabase.from('exchange_bills')
       .select('id, exchange_no, original_invoice_no, original_sale_id, created_at, return_amount, new_sale_amount, balance_amount, balance_type, cash_amount, card_amount, upi_amount, credit_amount, customers(name, phone)')
       .order('created_at', { ascending: false })
     if (from) q = q.gte('created_at', from)
     if (to) q = q.lt('created_at', to)
-    if (paymentFilter === 'credit') q = q.gt('credit_amount', 0)
+    if (paymentFilter !== 'all') q = q.gt(`${paymentFilter}_amount`, 0)   // an exchange's top-up / pending amount, by mode
     const { data, error } = await q
     if (error) return   // offline or table missing: just no exchange rows
     const rows = (data || []) as unknown as ExchangeRow[]
@@ -281,7 +284,8 @@ export function useInvoices() {
     const q = search.toLowerCase()
     return (
       inv.invoice_no.toLowerCase().includes(q) ||
-      inv.customers?.name?.toLowerCase().includes(q)
+      inv.customers?.name?.toLowerCase().includes(q) ||
+      (inv.customers?.phone || '').includes(q)
     )
   })
 
@@ -289,7 +293,7 @@ export function useInvoices() {
     if (!search) return true
     const q = search.toLowerCase()
     return x.exchange_no.toLowerCase().includes(q) || (x.original_invoice_no || '').toLowerCase().includes(q) ||
-      (x.customers?.name || '').toLowerCase().includes(q)
+      (x.customers?.name || '').toLowerCase().includes(q) || (x.customers?.phone || '').includes(q)
   })
 
   // Bills and exchanges in ONE list, by the time each was made (newest first).
