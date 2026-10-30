@@ -3,6 +3,7 @@ import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import { exportToCSV } from '../utils/exportCSV'
 import { useCashPosition } from '../hooks/useCashPosition'
+import { OldDuesModal } from '../components/accounts/OldDuesModal'
 import { tenderOf } from '../hooks/useInvoices'
 import { CustomDates } from '../components/shared/CustomDates'
 import { normName } from '../utils/hsn'
@@ -148,7 +149,10 @@ export default function ReportsPage() {
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [wh, setWh] = useState({ cash: 0, bank: 0, received: 0, due: 0, bills: 0 })   // wholesale money in this period
-  const [exch, setExch] = useState({ cash: 0, card: 0, upi: 0, refunds: 0, count: 0 })   // exchanges made in this period
+  const [exch, setExch] = useState({ cash: 0, card: 0, upi: 0, refunds: 0, topUp: 0, revDelta: 0, costDelta: 0, count: 0 })   // exchanges made in this period
+  const [exchBySales, setExchBySales] = useState<{ id: string; name: string; role: string; amount: number }[]>([])   // exchange top-ups credited to the salesman who made them
+  const [period, setPeriod] = useState<{ from: string; to: string } | null>(null)   // the dates the cards above cover
+  const [showDues, setShowDues] = useState(false)
   const [dues, setDues] = useState<{ total: number; cash: number; count: number }>({ total: 0, cash: 0, count: 0 })   // old pending amounts paid in this period
   const [loading, setLoading] = useState(true)
 
@@ -168,6 +172,7 @@ export default function ReportsPage() {
     const fetch = async () => {
       setLoading(true)
       const { from, to } = getRange(range, customFrom, customTo)
+      setPeriod({ from, to })
       // extract date parts for expense_date range
       const ist = (d: string) => {
         const dt = new Date(d)
@@ -201,7 +206,8 @@ export default function ReportsPage() {
         // Old pending amounts are money received on the day they were PAID, not on the day of the bill.
         supabase.from('customer_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to),
         supabase.from('exchange_bills')
-          .select('balance_type, balance_amount, cash_amount, card_amount, upi_amount, refund_mode')
+          .select('balance_type, balance_amount, cash_amount, card_amount, upi_amount, refund_mode, return_amount, new_sale_amount, ' +
+            'exchange_return_items(qty, products(cost_price)), exchange_new_items(qty, products(cost_price))')
           .gte('created_at', from).lte('created_at', to),
         supabase.from('wholesale_sales').select('cash_amount, upi_amount, cheque_amount, credit_amount').gte('created_at', from).lte('created_at', to),
         supabase.from('wholesale_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to)
@@ -219,9 +225,29 @@ export default function ReportsPage() {
         cash: sum(r => r.balance_type === 'customer_pays' ? Number(r.cash_amount) || 0 : 0),
         card: sum(r => r.balance_type === 'customer_pays' ? Number(r.card_amount) || 0 : 0),
         upi: sum(r => r.balance_type === 'customer_pays' ? Number(r.upi_amount) || 0 : 0),
+        topUp: sum(r => r.balance_type === 'customer_pays' ? Number(r.balance_amount) || 0 : 0),   // the extra paid (or left pending) on exchanges
         refunds: sum(r => r.balance_type === 'store_credit' && (r.refund_mode === 'cash' || r.refund_mode === 'upi') ? Number(r.balance_amount) || 0 : 0),
+        // Profit effect of exchanges: what the customer's bill changed by, less what the pieces cost.
+        // Pieces handed over cost more stock out; pieces taken back put their cost back.
+        revDelta: sum(r => (Number(r.new_sale_amount) || 0) - (Number(r.return_amount) || 0)),
+        costDelta: sum(r => {
+          const c = (rows: any[]) => (rows || []).reduce((t: number, i: any) => t + (Number(i.products?.cost_price) || 0) * (Number(i.qty) || 0), 0)
+          return c(r.exchange_new_items) - c(r.exchange_return_items)
+        }),
         count: xs.length,
       })
+      // Credit for exchanges goes to whoever made them (empty until EXCHANGE_SALESMAN.sql has been run).
+      try {
+        const { data: sx, error: sxe } = await supabase.from('exchange_bills').select('salesman_id, balance_amount')
+          .eq('balance_type', 'customer_pays').not('salesman_id', 'is', null).gte('created_at', from).lte('created_at', to)
+        if (!sxe && sx?.length) {
+          const { data: us } = await supabase.from('users').select('id, name, role').in('id', [...new Set(sx.map((r: any) => r.salesman_id))])
+          const info = new Map((us || []).map((u: any) => [u.id, u]))
+          const sum = new Map<string, number>()
+          sx.forEach((r: any) => sum.set(r.salesman_id, (sum.get(r.salesman_id) || 0) + (Number(r.balance_amount) || 0)))
+          if (current) setExchBySales([...sum].map(([id, amount]) => ({ id, amount, name: (info.get(id) as any)?.name || 'Unknown', role: (info.get(id) as any)?.role || '' })))
+        } else if (current) setExchBySales([])
+      } catch { if (current) setExchBySales([]) }
       const wsr = ws.error ? [] : ws.data || []   // empty until WHOLESALE_PAYMENTS.sql has been run
       const wpr = wp.error ? [] : wp.data || []
       const wsum = (rows: any[], f: (r: any) => number) => rows.reduce((a, r) => a + f(r), 0)
@@ -298,6 +324,11 @@ export default function ReportsPage() {
       map[key].revenue += s.net_amount || 0
       map[key].sales.push(s)
     })
+    // The extra money on exchanges counts for the salesman who made the exchange.
+    exchBySales.forEach(x => {
+      if (!map[x.id]) map[x.id] = { id: x.id, name: x.name, role: x.role, bills: 0, revenue: 0, sales: [] }
+      map[x.id].revenue += x.amount
+    })
     return Object.values(map)
       .sort((a: any, b: any) => b.revenue - a.revenue)
   })()
@@ -325,9 +356,12 @@ export default function ReportsPage() {
     const c = i.products?.cost_price
     return c ? s + c * (i.qty || 0) : s
   }, 0)
-  const grossProfit = totalRevenue - totalCost
-  const margin = totalRevenue > 0
-    ? (grossProfit / totalRevenue) * 100 : 0
+  // Sales plus the effect of exchanges made in the period (see revDelta / costDelta).
+  const profitRevenue = totalRevenue + exch.revDelta
+  const profitCost = totalCost + exch.costDelta
+  const grossProfit = profitRevenue - profitCost
+  const margin = profitRevenue > 0
+    ? (grossProfit / profitRevenue) * 100 : 0
 
   // Expenses by category for P&L
   const expenseCatTotals: Record<string, number> = {}
@@ -336,7 +370,7 @@ export default function ReportsPage() {
   })
   const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0)
   const netProfit = grossProfit - totalExpenses
-  const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
+  const netMargin = profitRevenue > 0 ? (netProfit / profitRevenue) * 100 : 0
 
   const plByProduct = (() => {
     const map: Record<string, any> = {}
@@ -511,13 +545,16 @@ export default function ReportsPage() {
                     'repeat(4,1fr)',
                   gap: '12px'
                 }}>
+                  {/* Sales plus the extra customers paid on exchanges. Profit and margin also include the exchange effect (see profitRevenue). */}
                   {statCard('Total Revenue',
-                    '₹' + totalRevenue
+                    '₹' + (totalRevenue + exch.topUp)
                       .toLocaleString('en-IN'),
-                    sales.length + ' orders')}
-                  {statCard('Old Dues Collected',
-                    '₹' + dues.total.toLocaleString('en-IN'),
-                    dues.count ? `₹${dues.cash.toLocaleString('en-IN')} cash · ${dues.count} payment${dues.count > 1 ? 's' : ''}` : 'paid in this period', '#16a34a')}
+                    sales.length + ' orders' + (exch.topUp > 0 ? ` + ₹${exch.topUp.toLocaleString('en-IN')} from exchanges` : ''))}
+                  <div style={{ cursor: 'pointer' }} title="Click to see who paid" onClick={() => setShowDues(true)}>
+                    {statCard('Old Dues Collected',
+                      '₹' + dues.total.toLocaleString('en-IN'),
+                      (dues.count ? `₹${dues.cash.toLocaleString('en-IN')} cash · ${dues.count} payment${dues.count > 1 ? 's' : ''}` : 'paid in this period') + ' · tap for details', '#16a34a')}
+                  </div>
                   {statCard('Wholesale Money',
                     '₹' + (wh.cash + wh.bank).toLocaleString('en-IN'),
                     wh.bills || wh.received ? `₹${wh.cash.toLocaleString('en-IN')} cash · ₹${wh.received.toLocaleString('en-IN')} received later · ₹${wh.due.toLocaleString('en-IN')} left due` : 'no wholesale money in this period', '#0ea5e9')}
@@ -1072,10 +1109,10 @@ export default function ReportsPage() {
                   gap: '12px'
                 }}>
                   {statCard('Total Revenue',
-                    '₹' + Math.round(totalRevenue)
+                    '₹' + Math.round(profitRevenue)
                       .toLocaleString('en-IN'))}
                   {statCard('Cost of Goods',
-                    '₹' + Math.round(totalCost)
+                    '₹' + Math.round(profitCost)
                       .toLocaleString('en-IN'),
                     undefined, '#ef4444')}
                   {statCard('Gross Profit',
@@ -1105,11 +1142,11 @@ export default function ReportsPage() {
                     {/* Revenue */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}>
                       <span style={{ color: '#64748b' }}>Revenue</span>
-                      <span style={{ fontFamily: 'DM Mono', fontWeight: 600, color: '#1a0a2e' }}>₹{Math.round(totalRevenue).toLocaleString('en-IN')}</span>
+                      <span style={{ fontFamily: 'DM Mono', fontWeight: 600, color: '#1a0a2e' }}>₹{Math.round(profitRevenue).toLocaleString('en-IN')}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '2px solid #e2e8f0', fontSize: '13px' }}>
                       <span style={{ color: '#64748b' }}>Cost of Goods Sold</span>
-                      <span style={{ fontFamily: 'DM Mono', color: '#ef4444' }}>−₹{Math.round(totalCost).toLocaleString('en-IN')}</span>
+                      <span style={{ fontFamily: 'DM Mono', color: '#ef4444' }}>−₹{Math.round(profitCost).toLocaleString('en-IN')}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9', fontSize: '14px', fontWeight: 600 }}>
                       <span style={{ color: '#1a0a2e' }}>Gross Profit</span>
@@ -1904,6 +1941,10 @@ export default function ReportsPage() {
         <SalesmanDetailModal salesmanName={openStaff.name} salesmanId={openStaff.id} salesmanRole={openStaff.role}
           dateRange={range === 'week' ? 'week' : range === 'month' ? 'month' : range === 'today' ? 'today' : 'all'}
           onClose={() => setOpenStaff(null)} />
+      )}
+      {showDues && period && (
+        <OldDuesModal from={period.from} to={new Date(new Date(period.to).getTime() + 1).toISOString()}
+          title="this period" onClose={() => setShowDues(false)} />
       )}
     </Layout>
   )

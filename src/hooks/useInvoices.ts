@@ -70,6 +70,8 @@ export interface ExchangeRow {
   id: string; exchange_no: string; original_invoice_no: string | null; original_sale_id?: string | null; created_at: string
   /** Salesman of the original bill (exchanges have no salesman of their own yet). */
   salesman_name?: string | null
+  /** True when salesman_name is who MADE the exchange (not just the original bill's salesman). */
+  salesman_made_it?: boolean
   return_amount: number; new_sale_amount: number; balance_amount: number
   balance_type: 'nil' | 'customer_pays' | 'store_credit'
   cash_amount: number; card_amount: number; upi_amount: number; credit_amount: number
@@ -246,6 +248,15 @@ export function useInvoices() {
         const { data: bills } = await supabase.from('sales').select('id, users(name)').in('id', ids)
         const by = new Map((bills || []).map((b: any) => [b.id, b.users?.name || null]))
         rows.forEach(r => { r.salesman_name = (r.original_sale_id && by.get(r.original_sale_id)) || null })
+      }
+      // The salesman who made the exchange (EXCHANGE_SALESMAN.sql); older exchanges keep the bill's salesman.
+      const { data: own, error: ownErr } = await supabase.from('exchange_bills').select('id, salesman_id').in('id', rows.map(r => r.id))
+      if (!ownErr && own?.some((o: any) => o.salesman_id)) {
+        const uids = [...new Set(own.map((o: any) => o.salesman_id).filter(Boolean))] as string[]
+        const { data: us } = await supabase.from('users').select('id, name').in('id', uids)
+        const names = new Map((us || []).map((u: any) => [u.id, u.name]))
+        const byEx = new Map(own.map((o: any) => [o.id, o.salesman_id]))
+        rows.forEach(r => { const n = names.get(byEx.get(r.id) as string); if (n) { r.salesman_name = n; r.salesman_made_it = true } })
       }
     } catch { /* leave the salesman blank */ }
     setExchanges(rows)

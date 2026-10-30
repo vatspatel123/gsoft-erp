@@ -8,6 +8,7 @@ import { sendWhatsApp } from '../utils/whatsapp'
 import { getSettings } from '../utils/settings'
 import { Wallet, TrendingUp, TrendingDown, Ticket, Download, MessageCircle, Check, ArrowRight } from 'lucide-react'
 import { fmtDate, fmtDayMonth } from '../utils/date'
+import { OldDuesModal } from '../components/accounts/OldDuesModal'
 
 const card: React.CSSProperties = {
   background: 'white', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '20px', marginBottom: '16px'
@@ -39,6 +40,7 @@ export function AccountingPage() {
   const navigate = useNavigate()
   const a = useAccounts()
   const [tab, setTab] = useState<Tab>('payables')
+  const [duesDay, setDuesDay] = useState<string | null>(null)   // day whose old dues breakdown is open
   const [payFor, setPayFor] = useState<
     | { kind: 'payable'; row: PayableRow; label: string; outstanding: number; paidSoFar: number }
     | { kind: 'receivable'; row: ReceivableRow; label: string; outstanding: number; paidSoFar: number }
@@ -327,7 +329,9 @@ export function AccountingPage() {
                       <div style={{ textAlign: 'right', color: d.cashIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.cashIn)}</div>
                       <div style={{ textAlign: 'right', color: d.upiIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.upiIn)}</div>
                       <div style={{ textAlign: 'right', color: d.cardIn > 0 ? '#16a34a' : '#cbd5e1' }}>{INR(d.cardIn)}</div>
-                      <div style={{ textAlign: 'right', color: d.duesIn > 0 ? '#16a34a' : '#cbd5e1' }}>
+                      <div style={{ textAlign: 'right', color: d.duesIn > 0 ? '#16a34a' : '#cbd5e1', cursor: d.duesIn > 0 ? 'pointer' : 'default', textDecoration: d.duesIn > 0 ? 'underline dotted' : 'none' }}
+                        title={d.duesIn > 0 ? 'Click to see who paid' : undefined}
+                        onClick={() => d.duesIn > 0 && setDuesDay(d.date)}>
                         {INR(d.duesIn)}
                         {d.duesIn > 0 && <div style={{ fontSize: '10px', color: '#94a3b8' }}>{INR(d.duesCash)} cash</div>}
                       </div>
@@ -437,6 +441,11 @@ export function AccountingPage() {
             </div>
           </div>
         )
+      })()}
+      {duesDay && (() => {
+        const start = new Date(`${duesDay}T00:00:00.000Z`)
+        return <OldDuesModal from={start.toISOString()} to={new Date(start.getTime() + 86400000).toISOString()}
+          title={fmtDayMonth(new Date(duesDay))} onClose={() => setDuesDay(null)} />
       })()}
     </Layout>
   )

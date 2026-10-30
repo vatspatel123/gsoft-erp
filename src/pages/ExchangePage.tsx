@@ -4,7 +4,7 @@ import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 import { printExchangeBill, sendExchangeWhatsApp } from '../utils/printBill'
-import { getPendingSales } from '../utils/offlineCache'
+import { getPendingSales, getCachedSalesmen, saveSalesmenToCache } from '../utils/offlineCache'
 import { useCreditNotes, type CreditNote } from '../hooks/useCreditNotes'
 import { ArrowLeftRight, Search, X, Check, ChevronRight, RotateCcw, CreditCard } from 'lucide-react'
 import { appliedTenders, type Tenders } from '../utils/tenders'
@@ -87,6 +87,11 @@ export function ExchangePage() {
   const [phoneInput, setPhoneInput] = useState('')
   const [barcodeInput, setBarcodeInput] = useState('')
   const [phoneResults, setPhoneResults] = useState<any[]>([])
+  // Who is making this exchange: the extra money and revenue are credited to them, not to whoever sold the original bill.
+  const [salesmen, setSalesmen] = useState<any[]>([])
+  const [salesmanId, setSalesmanId] = useState('')
+  const [barcodeResults, setBarcodeResults] = useState<any[]>([])   // every bill that sold the scanned product
+  const [barcodeInfo, setBarcodeInfo] = useState('')                  // what the last barcode search found, shown under the box
   const [originalInvoice, setOriginalInvoice] = useState<any>(null)
   const [loadingInvoice, setLoadingInvoice] = useState(false)
   const [step, setStep] = useState(1)
@@ -122,6 +127,21 @@ export function ExchangePage() {
   // History tab
   const [history, setHistory] = useState<any[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  useEffect(() => {   // the staff list, the same way the POS gets it
+    ;(async () => {
+      let fetched: any[] = []
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase.from('users').select('id, name, role, is_active').order('name')
+          if (!error && data?.length) { fetched = data; saveSalesmenToCache(data) }
+        } catch { /* use the saved list */ }
+      }
+      const map = new Map<string, any>()
+      for (const x of [...(getCachedSalesmen() || []), ...fetched]) if (x.is_active !== false) map.set(x.id, x)
+      setSalesmen(Array.from(map.values()))
+    })()
+  }, [])
 
   // Auto-load invoice from URL param
   useEffect(() => {
@@ -304,6 +324,7 @@ export function ExchangePage() {
       }
       // The number on the label can be the barcode, SKU, batch or product code, and a few
       // products can share it: look at all of them, not just one exact barcode.
+      setBarcodeResults([]); setBarcodeInfo('')
       const code = barcode.trim().replace(/[",()%*]/g, '')
       const { data: prods } = await supabase
         .from('products').select('id')
@@ -315,10 +336,12 @@ export function ExchangePage() {
         supabase.from('sale_items').select('sale_id, sales(created_at)').or(cond).limit(1000)
       let lines = await findLines([ids.length ? `product_id.in.(${ids.join(',')})` : '', `barcode.eq.${code}`].filter(Boolean).join(','))
       if (lines.error && ids.length) lines = await findLines(`product_id.in.(${ids.join(',')})`)   // no barcode column on lines
-      if (lines.error) { toast.error('Search failed: ' + lines.error.message); setLoadingInvoice(false); return }
-      const items = ((lines.data || []) as any[])
+      if (lines.error) { setBarcodeInfo('Search failed: ' + lines.error.message); toast.error('Search failed: ' + lines.error.message); setLoadingInvoice(false); return }
+      const newestFirst = ((lines.data || []) as any[])
         .sort((x, y) => String(y.sales?.created_at || '').localeCompare(String(x.sales?.created_at || '')))
-        .slice(0, 1)
+      const saleIds = [...new Set(newestFirst.map(l => l.sale_id))].slice(0, 15)
+      const items = saleIds.length ? [{ sale_id: saleIds[0] }] : []
+      setBarcodeInfo(`"${code}": ${ids.length} product${ids.length === 1 ? '' : 's'} with this code · ${newestFirst.length} sold line${newestFirst.length === 1 ? '' : 's'} · ${saleIds.length} bill${saleIds.length === 1 ? '' : 's'}`)
       // A piece that was GIVEN in an exchange has no bill of its own: find that exchange.
       const { data: given } = ids.length
         ? await supabase.from('exchange_new_items').select('exchange_id').in('product_id', ids).order('created_at', { ascending: false }).limit(1)
@@ -330,6 +353,18 @@ export function ExchangePage() {
       if (items.length === 0) {
         toast.error(ids.length ? 'No bill found for this product' : 'Product not found for this barcode')
         setLoadingInvoice(false); return
+      }
+      // Sold on several bills: show them all, so the customer's own bill can be picked (the newest is not always it).
+      if (saleIds.length > 1) {
+        const { data: bills } = await supabase
+          .from('sales')
+          .select('*, customers(*), users(*), sale_items(*, products(*))')
+          .in('id', saleIds).order('created_at', { ascending: false })
+        if (bills && bills.length > 1) {
+          setBarcodeResults(bills); setSearchTab('barcode'); setBarcodeInput(code)
+          toast(`${bills.length} bills sold this product — pick the customer's bill`, { icon: '👆' })
+          setLoadingInvoice(false); return
+        }
       }
       const { data } = await supabase
         .from('sales')
@@ -346,6 +381,7 @@ export function ExchangePage() {
     finally { setLoadingInvoice(false) }
   }
 
+  const selectBarcodeInvoice = (invoice: any) => { setBarcodeResults([]); selectPhoneInvoice(invoice) }
   const selectPhoneInvoice = (invoice: any) => {
     setOriginalInvoice(invoice)
     initItemSelections(invoice)
@@ -394,11 +430,23 @@ export function ExchangePage() {
       const { data } = await supabase
         .from('products')
         .select('*')
-        .or(`name.ilike.%${q}%,sku.ilike.%${q}%,design_no.ilike.%${q}%`)
+        .or(`name.ilike.%${q}%,sku.ilike.%${q}%,design_no.ilike.%${q}%,barcode.ilike.%${q}%,batch_no.ilike.%${q}%`)
         .eq('is_active', true)
         .limit(8)
       setReplResults(data || [])
     } catch { } finally { setReplLoading(false) }
+  }
+
+  // Scanner / Enter in the replacement box: a code that matches exactly one product is added straight away.
+  const addReplacementByEnter = async () => {
+    const code = replSearch.trim().replace(/[",()%*]/g, '')
+    if (!code) return
+    const { data } = await supabase.from('products').select('*').eq('is_active', true)
+      .or(['barcode', 'sku', 'batch_no', 'pcode'].map(f => `${f}.eq.${code}`).join(',')).limit(2)
+    if (data && data.length === 1) { addNewItem(data[0]); setTimeout(() => replInputRef.current?.focus(), 50); return }
+    if (data && data.length > 1) { setReplResults(data); toast('More than one product has this code — pick one', { icon: '👆' }); return }
+    if (replResults.length === 1) { addNewItem(replResults[0]); setTimeout(() => replInputRef.current?.focus(), 50); return }
+    toast.error('No product found for this code')
   }
 
   const addNewItem = (product: any) => {
@@ -474,6 +522,7 @@ export function ExchangePage() {
       return
     }
     if (!navigator.onLine) { toast.error('Exchange requires internet connection'); return }
+    if (salesmen.length > 0 && !salesmanId) { toast.error('Select the salesman who is making this exchange (Step 3, top)'); return }
     setProcessing(true)
     try {
       // EXE-0082 for bill INV-0082 (EXE-0082-2 for a second exchange on it); old-style bills keep EXC-date-number.
@@ -484,9 +533,7 @@ export function ExchangePage() {
       // Try to create exchange record in DB
       let exchangeId: string | null = null
       try {
-        const { data: exchange, error: excErr } = await supabase
-          .from('exchange_bills')
-          .insert({
+        const excRow = {
             exchange_no: exchangeNo,
             original_sale_id: originalInvoice.id,
             original_invoice_no: originalInvoice.invoice_no,
@@ -507,8 +554,16 @@ export function ExchangePage() {
             notes: exchangeNotes || null,
             status: 'completed',
             refund_mode: balance < 0 ? creditOption : null
-          })
+          }
+        let { data: exchange, error: excErr } = await supabase
+          .from('exchange_bills')
+          .insert(salesmanId ? { ...excRow, salesman_id: salesmanId } : excRow)
           .select().single()
+        // EXCHANGE_SALESMAN.sql not run yet: save the exchange without the salesman rather than lose it.
+        if (excErr && salesmanId && /salesman_id/.test(excErr.message || '')) {
+          toast('Exchange saved, but the salesman was not recorded — run EXCHANGE_SALESMAN.sql in Supabase', { icon: '⚠️', duration: 7000 })
+          ;({ data: exchange, error: excErr } = await supabase.from('exchange_bills').insert(excRow).select().single())
+        }
 
         if (excErr) throw excErr
         exchangeId = exchange?.id || null
@@ -615,7 +670,7 @@ export function ExchangePage() {
 
   const resetAll = () => {
     setOriginalInvoice(null); setStep(1); setInvoiceInput(''); setPhoneInput('')
-    setBarcodeInput(''); setPhoneResults([]); setReturnItems([]); setNewItems([])
+    setBarcodeInput(''); setPhoneResults([]); setReturnItems([]); setNewItems([]); setSalesmanId('')
     setReplSearch(''); setReplResults([]); setExchangeNotes('')
     setShowSuccessModal(false); setExchangeComplete(null)
     setSelectedItems({}); setReturnQtys({}); setReturnReasons({})
@@ -894,6 +949,21 @@ export function ExchangePage() {
                         </button>
                       </div>
                       <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>Scan the barcode on the returned item to find the original invoice</div>
+                      {barcodeInfo && <div style={{ fontSize: '11px', color: '#7c3aed', marginTop: '6px', fontFamily: 'DM Mono, monospace' }}>{barcodeInfo}</div>}
+                      {barcodeResults.map(inv => (
+                        <div key={inv.id} onClick={() => selectBarcodeInvoice(inv)}
+                          style={{ padding: '12px', border: '1px solid #f3e8ff', borderRadius: '10px', cursor: 'pointer', marginTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#fdf8ff')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#9333ea', fontSize: '13px', fontFamily: 'DM Mono, monospace' }}>{inv.invoice_no}</div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              {fmtDate(new Date(inv.created_at))} · {inv.customers ? `${inv.customers.name} · ${inv.customers.phone}` : 'Walk-in'} · ₹{inv.net_amount}
+                            </div>
+                          </div>
+                          <ChevronRight size={14} color="#9333ea" />
+                        </div>
+                      ))}
                     </div>
                   )}
 
@@ -1034,6 +1104,16 @@ export function ExchangePage() {
                     <button onClick={() => setStep(2)} style={{ ...btnOutline, padding: '6px 14px', fontSize: '12px' }}>← Back</button>
                   </div>
 
+                  {/* Who is making this exchange */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '14px', border: `1px solid ${salesmanId || salesmen.length === 0 ? '#f3e8ff' : '#f59e0b'}`, borderRadius: '10px', background: '#fdf8ff' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Salesman *</div>
+                    <select value={salesmanId} onChange={e => setSalesmanId(e.target.value)}
+                      style={{ flex: 1, border: '1px solid #f3e8ff', borderRadius: '8px', padding: '7px 12px', fontSize: '13px', fontFamily: 'DM Sans, sans-serif', color: '#1a0a2e', background: 'white', outline: 'none', cursor: 'pointer' }}>
+                      <option value="">— Select who is making this exchange —</option>
+                      {salesmen.map((x: any) => <option key={x.id} value={x.id}>{x.name}{x.role ? ` — ${x.role}` : ''}</option>)}
+                    </select>
+                  </div>
+
                   {/* Search replacement */}
                   <div style={{ position: 'relative', marginBottom: '14px' }}>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -1044,7 +1124,8 @@ export function ExchangePage() {
                           style={{ ...inputStyle, paddingLeft: '36px' }}
                           value={replSearch}
                           onChange={e => { setReplSearch(e.target.value); searchReplacement(e.target.value) }}
-                          placeholder="Search replacement product..."
+                          data-enter="own" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addReplacementByEnter() } }}
+                          placeholder="Search replacement product, or scan its barcode..."
                         />
                       </div>
                     </div>

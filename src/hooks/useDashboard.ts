@@ -208,6 +208,8 @@ export function useDashboard() {
       let dbSales: any[] = []
       let dbProducts: any[] = []
       let dbAllTimeSales: any[] = []
+      let dbExchangeIn: any[] = []   // exchanges where the customer paid the difference
+      let dbExchBySalesman: { id: string; name: string; role: string; amount: number }[] = []   // ...credited to who made them
 
       if (navigator.onLine) {
         try {
@@ -244,6 +246,24 @@ export function useDashboard() {
             .select('*')
             .eq('is_active', true)
           if (products) dbProducts = products
+
+          // The extra money a customer pays on an exchange is revenue on the day it is made.
+          const { data: exch, error: exchErr } = await supabase
+            .from('exchange_bills')
+            .select('created_at, balance_amount')
+            .eq('balance_type', 'customer_pays')
+          if (!exchErr && exch) dbExchangeIn = exch
+          try {   // empty until EXCHANGE_SALESMAN.sql has been run
+            const { data: sx, error: sxe } = await supabase.from('exchange_bills').select('salesman_id, balance_amount')
+              .eq('balance_type', 'customer_pays').not('salesman_id', 'is', null)
+            if (!sxe && sx?.length) {
+              const { data: us } = await supabase.from('users').select('id, name, role').in('id', [...new Set(sx.map((r: any) => r.salesman_id))])
+              const info = new Map((us || []).map((u: any) => [u.id, u]))
+              const sum = new Map<string, number>()
+              sx.forEach((r: any) => sum.set(r.salesman_id, (sum.get(r.salesman_id) || 0) + (Number(r.balance_amount) || 0)))
+              dbExchBySalesman = [...sum].map(([id, amount]) => ({ id, amount, name: (info.get(id) as any)?.name || 'Cashier', role: (info.get(id) as any)?.role || 'Salesman' }))
+            }
+          } catch { /* leave the salesman credit out */ }
         } catch (dbErr) {
           console.warn('Dashboard DB query warning, using local cache:', dbErr)
         }
@@ -288,11 +308,18 @@ export function useDashboard() {
       })
       const activeSales = rangeSales.length > 0 ? rangeSales : allSalesList
 
+      const exchangeBetween = (a: string, b: string) => dbExchangeIn
+        .filter((x: any) => { const t = new Date(x.created_at).getTime(); return t >= new Date(a).getTime() && t <= new Date(b).getTime() })
+        .reduce((sum: number, x: any) => sum + Number(x.balance_amount || 0), 0)
+      const exchangeAll = dbExchangeIn.reduce((sum: number, x: any) => sum + Number(x.balance_amount || 0), 0)
+
+      // Same period rule as the sales (when nothing was sold in the range the figure shows everything).
       const revenue = activeSales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+        + (rangeSales.length > 0 ? exchangeBetween(from, to) : exchangeAll)
       const uniqueCustomers = new Set(activeSales.map(s => s.customer_id).filter(Boolean)).size
 
       // All-time totals
-      const allTimeRevenue = allSalesList.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+      const allTimeRevenue = allSalesList.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) + exchangeAll
       const allTimeOrders = allSalesList.length
       const allTimeCustomers = new Set(allSalesList.map(s => s.customer_id).filter(Boolean)).size
 
@@ -302,7 +329,7 @@ export function useDashboard() {
         const t = new Date(s.created_at).getTime()
         return t >= new Date(yesterdayFrom).getTime() && t <= new Date(yesterdayTo).getTime()
       })
-      const yesterdayRevenue = yesterdaySales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
+      const yesterdayRevenue = yesterdaySales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) + exchangeBetween(yesterdayFrom, yesterdayTo)
       const yesterdayOrders = yesterdaySales.length
 
       // Merge cached products for low stock calculations
@@ -328,6 +355,12 @@ export function useDashboard() {
         const date = getISTDateLabel(s.created_at)
         if (!grouped[date]) grouped[date] = 0
         grouped[date] += Number(s.net_amount || 0)
+      })
+      dbExchangeIn.forEach((x: any) => {
+        const t = new Date(x.created_at).getTime()
+        if (t < new Date(weekFrom).getTime() || t > new Date(weekTo).getTime()) return
+        const date = getISTDateLabel(x.created_at)
+        grouped[date] = (grouped[date] || 0) + Number(x.balance_amount || 0)
       })
       const weeklyRevenue = Object.entries(grouped).map(([date, amount]) => ({ date, name: date, amount }))
 
@@ -356,6 +389,10 @@ export function useDashboard() {
         if (!salesmanMap[key]) salesmanMap[key] = { id, name, role: s.users?.role || 'Salesman', sales: 0, revenue: 0 }
         salesmanMap[key].sales++
         salesmanMap[key].revenue += Number(s.net_amount || 0)
+      })
+      dbExchBySalesman.forEach(x => {   // exchange top-ups count for the salesman who made the exchange
+        if (!salesmanMap[x.id]) salesmanMap[x.id] = { id: x.id, name: x.name, role: x.role, sales: 0, revenue: 0 }
+        salesmanMap[x.id].revenue += x.amount
       })
       const salesmanData = Object.values(salesmanMap).sort((a: any, b: any) => b.revenue - a.revenue).slice(0, 5)
 

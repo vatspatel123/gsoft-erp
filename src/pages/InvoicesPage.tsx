@@ -451,7 +451,7 @@ export function InvoicesPage() {
                       <td>{x.customers?.name || 'Walk-in'}</td>
                       <td>Bill {x.original_invoice_no || '—'}: ₹{Number(x.return_amount).toFixed(0)} back, ₹{Number(x.new_sale_amount).toFixed(0)} given</td>
                       <td>
-                        <div className="salesman-cell" title="Salesman of the bill that was exchanged">
+                        <div className="salesman-cell" title={x.salesman_made_it ? 'Salesman who made this exchange' : 'Salesman of the bill that was exchanged'}>
                           {x.salesman_name
                             ? (<><div className="salesman-avatar">{getInitials(x.salesman_name)}</div><span className="salesman-name">{x.salesman_name}</span></>)
                             : <span className="salesman-name" style={{ color: '#94a3b8' }}>—</span>}
