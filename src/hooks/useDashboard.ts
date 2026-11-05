@@ -207,7 +207,6 @@ export function useDashboard() {
 
       let dbSales: any[] = []
       let dbProducts: any[] = []
-      let dbAllTimeSales: any[] = []
       let dbExchangeIn: any[] = []   // exchanges where the customer paid the difference
       let dbExchBySalesman: { id: string; name: string; role: string; amount: number }[] = []   // ...credited to who made them
 
@@ -236,14 +235,9 @@ export function useDashboard() {
 
           if (sales) dbSales = sales
 
-          const { data: allSales } = await supabase
-            .from('sales')
-            .select('net_amount, customer_id, created_at')
-          if (allSales) dbAllTimeSales = allSales
-
           const { data: products } = await supabase
             .from('products')
-            .select('*')
+            .select('id, name, stock_qty, low_stock_alert, is_active')   // only what the low-stock list shows
             .eq('is_active', true)
           if (products) dbProducts = products
 
@@ -306,17 +300,16 @@ export function useDashboard() {
         const sTime = new Date(s.created_at).getTime()
         return sTime >= new Date(from).getTime() && sTime <= new Date(to).getTime()
       })
-      const activeSales = rangeSales.length > 0 ? rangeSales : allSalesList
 
       const exchangeBetween = (a: string, b: string) => dbExchangeIn
         .filter((x: any) => { const t = new Date(x.created_at).getTime(); return t >= new Date(a).getTime() && t <= new Date(b).getTime() })
         .reduce((sum: number, x: any) => sum + Number(x.balance_amount || 0), 0)
       const exchangeAll = dbExchangeIn.reduce((sum: number, x: any) => sum + Number(x.balance_amount || 0), 0)
 
-      // Same period rule as the sales (when nothing was sold in the range the figure shows everything).
-      const revenue = activeSales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0)
-        + (rangeSales.length > 0 ? exchangeBetween(from, to) : exchangeAll)
-      const uniqueCustomers = new Set(activeSales.map(s => s.customer_id).filter(Boolean)).size
+      // Only the chosen period: a day with no bills shows ₹0 (the card then shows the all-time figure
+      // beside it). It used to fall back to ALL sales here, so an empty day showed the total of every day.
+      const revenue = rangeSales.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) + exchangeBetween(from, to)
+      const uniqueCustomers = new Set(rangeSales.map(s => s.customer_id).filter(Boolean)).size
 
       // All-time totals
       const allTimeRevenue = allSalesList.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) + exchangeAll
@@ -400,7 +393,7 @@ export function useDashboard() {
         todayRevenue: revenue,
         allTimeRevenue,
         yesterdayRevenue,
-        todayOrders: activeSales.length,
+        todayOrders: rangeSales.length,
         allTimeOrders,
         yesterdayOrders,
         lowStockCount,
@@ -434,7 +427,8 @@ export function useDashboard() {
   // Fetch when date range changes
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 60000);
+    // Every 5 minutes, and only while the window is showing (it was every minute, even in the background).
+    const interval = setInterval(() => { if (!document.hidden) fetchDashboardData() }, 5 * 60000);
     return () => clearInterval(interval);
   }, [dateRange, customFrom, customTo]);
 

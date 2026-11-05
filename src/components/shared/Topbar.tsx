@@ -57,9 +57,9 @@ export function Topbar({ onToggleSidebar, sidebarHidden }: { onToggleSidebar?: (
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '0 20px',
-      borderBottom: '1px solid #f3e8ff',
-      boxShadow: '0 1px 4px rgba(147,51,234,0.06)',
-      fontFamily: "'DM Sans', sans-serif"
+      borderBottom: '1px solid #e5e5ea',
+      fontFamily: "'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif",
+      whiteSpace: 'nowrap'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 500, fontSize: '15px', color: '#1a0a2e' }}>
         {onToggleSidebar && (
@@ -139,7 +139,7 @@ export function Topbar({ onToggleSidebar, sidebarHidden }: { onToggleSidebar?: (
         }}>
           Counter 1
         </div>
-        <div style={{ fontSize: '12px', fontFamily: "'DM Mono', monospace", color: '#94a3b8' }}>
+        <div style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums', color: '#6b6b7b' }}>
           {time.toLocaleTimeString()}
         </div>
       </div>

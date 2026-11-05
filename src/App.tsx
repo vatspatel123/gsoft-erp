@@ -74,6 +74,12 @@ function AppContent() {
     return () => { clearTimeout(first); clearInterval(every) }
   }, [!!session])
 
+  // Direct WhatsApp sending is off unless the shop switched it on (see utils/whatsapp.ts). If this PC
+  // still has a linked session from before, close it so nothing keeps sending in the background.
+  useEffect(() => {
+    if (getSettings().waDirectSend !== true) void (window as any).electronAPI?.whatsapp?.logout?.()?.catch?.(() => {})
+  }, [])
+
   // Auth state listener
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

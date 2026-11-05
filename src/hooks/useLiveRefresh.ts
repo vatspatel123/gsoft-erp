@@ -13,14 +13,18 @@ export function useLiveRefresh(tables: string[], refresh: () => void) {
   const key = tables.join(',')
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let dirty = false   // a change arrived while the window was hidden: reload once it is shown again
+    const fire = () => { if (document.hidden) { dirty = true; return } dirty = false; latest.current() }
+    const onVisible = () => { if (!document.hidden && dirty) { dirty = false; latest.current() } }
+    document.addEventListener('visibilitychange', onVisible)
     const channel = supabase.channel(`live:${key}:${Math.random().toString(36).slice(2)}`)
     for (const table of key.split(',')) {
       channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
         clearTimeout(timer)
-        timer = setTimeout(() => latest.current(), 800)
+        timer = setTimeout(fire, 2500)   // a bill changes several products: one reload for all of them, not one each
       })
     }
     channel.subscribe()
-    return () => { clearTimeout(timer); void supabase.removeChannel(channel) }
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); void supabase.removeChannel(channel) }
   }, [key])
 }

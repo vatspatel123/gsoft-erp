@@ -27,6 +27,7 @@ declare global {
         logout: () => Promise<{ ok: boolean }>
         onStatus: (cb: (s: WhatsAppState) => void) => () => void
       }
+      graphics?: { get: () => Promise<{ useGpu: boolean }>; set: (useGpu: boolean) => Promise<{ ok: boolean; reason?: string }>; relaunch: () => Promise<void> }
       journal?: { add: (entry: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }> }
       backup?: {
         write: (payload: { tables: Record<string, unknown[]>; meta: Record<string, unknown> })

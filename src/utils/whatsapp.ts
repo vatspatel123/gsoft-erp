@@ -13,7 +13,18 @@ import type { WhatsAppState } from '../types'
 // without the env var silently hid the whole WhatsApp screen, with no way for the
 // shop to switch relays without a rebuild. The setting wins; the build-time env
 // var is only a default for fresh installs.
+// Sending straight from the app uses an UNOFFICIAL WhatsApp connection (a linked session driven by
+// software). WhatsApp restricts numbers that do this ("tools that don't follow our terms to send
+// automated or bulk messages"), so it is OFF unless the shop deliberately switches it on in
+// Settings -> WhatsApp. Off = every WhatsApp button opens the chat with the message ready (wa.me)
+// and a person presses Send, which is allowed.
+// Gap between the PDF and the invoice message of one bill.
+const PAIR_GAP_MS = 3000
+
+export const directSendOn = (): boolean => getSettings().waDirectSend === true
+
 const relayUrl = (): string => {
+  if (!directSendOn()) return ''
   const fromSettings = getSettings().waServerUrl
   const fallback = import.meta.env.VITE_WA_SERVER_URL as string | undefined
   return String(fromSettings ?? fallback ?? '').trim().replace(/\/$/, '')
@@ -32,7 +43,7 @@ export const waLink = (phone: string, text?: string): string =>
  * session lives in the app itself, so no separate service has to be installed
  * and the QR appears on the shop's own PC.
  */
-const desktop = () => window.electronAPI?.whatsapp
+const desktop = () => (directSendOn() ? window.electronAPI?.whatsapp : undefined)
 
 export const isRelayConfigured = () => !!desktop() || !!relayUrl()
 
@@ -123,10 +134,19 @@ export async function sendWhatsAppDocument(
         html: opts.html, widthMm: billPrintWidthMm(),
       })
       if (!pdf?.ok || !pdf.base64) throw new Error(pdf?.error || 'Could not build the PDF')
+      // Two messages, as customers expect: the PDF first, then the invoice details as text.
       const res = await d.sendDocument({
-        phone, pdfBase64: pdf.base64, fileName: opts.fileName, caption,
+        phone, pdfBase64: pdf.base64, fileName: opts.fileName, caption: '',
       })
-      if (res.ok) { toast.success('Bill PDF sent on WhatsApp ✅'); return 'sent' }
+      if (res.ok) {
+        if (caption) {
+          await new Promise(r => setTimeout(r, PAIR_GAP_MS))
+          const txt = await d.send(phone, caption)
+          if (!txt.ok) toast.error(`The PDF was sent, but the invoice message was not: ${txt.error || 'failed'}`, { duration: 7000 })
+        }
+        toast.success('Bill sent on WhatsApp ✅')
+        return 'sent'
+      }
       desktopFailed(res.error)
     } catch (e: any) {
       desktopFailed(e?.message)

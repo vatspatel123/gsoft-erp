@@ -43,6 +43,8 @@ export interface AppSettings {
   labelDarkness: number      // 0-15
   labelSpeed: number         // inches per second
   waServerUrl: string        // address of the WhatsApp relay ('' = never send directly)
+  waAutoBill: boolean        // with direct sending on: send the bill to the customer automatically after each sale. Off by default
+  waDirectSend: boolean      // send from the app through a linked WhatsApp session (unofficial: WhatsApp can restrict the number). Off by default
   googleReviewUrl: string    // appended to the WhatsApp bill message ('' = omit)
   instagramUrl: string       // appended to the WhatsApp bill message ('' = omit)
   showGSTIN: boolean
@@ -108,6 +110,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   labelDarkness: 8,
   labelSpeed: 4,
   waServerUrl: 'http://localhost:8099',
+  waDirectSend: false,
+  waAutoBill: false,
   googleReviewUrl: '',
   instagramUrl: '',
   showGSTIN: true,
@@ -144,7 +148,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
  * follows the login onto any computer.
  */
 const MACHINE_KEYS = [
-  'billPrinter', 'barcodePrinter', 'onlineLabelPrinter', 'waServerUrl',
+  'billPrinter', 'barcodePrinter', 'onlineLabelPrinter', 'waServerUrl', 'waDirectSend', 'waAutoBill',
   'printWidthMm', 'a4Printer',
   'rawLabels', 'labelWidthMm', 'labelHeightMm', 'labelColumns', 'labelColumnGapMm',
   'labelRowGapMm', 'labelOffsetXmm', 'labelOffsetYmm', 'labelDarkness', 'labelSpeed',

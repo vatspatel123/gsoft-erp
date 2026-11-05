@@ -14,7 +14,7 @@ import { printBarcodeLabels } from '../utils/printLabels'
 import { printPurchaseA4 } from '../utils/printA4Purchase'
 import { getCachedSalesmen, saveSalesmenToCache } from '../utils/offlineCache'
 import type { WhatsAppState } from '../types'
-import { waStatus, waConnect, waLogout, sendWhatsApp, isRelayConfigured } from '../utils/whatsapp'
+import { waStatus, waConnect, waLogout, sendWhatsApp, isRelayConfigured, directSendOn } from '../utils/whatsapp'
 import toast from 'react-hot-toast'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -164,6 +164,30 @@ function LoginPasswordCard() {
       <Field label="New password"><input type="password" value={next} onChange={e => setNext(e.target.value)} style={inputStyle} /></Field>
       <Field label="New password again"><input type="password" value={again} onChange={e => setAgain(e.target.value)} style={inputStyle} /></Field>
       <SaveBtn onClick={change} loading={saving} />
+    </Card>
+  )
+}
+
+// Desktop app only: draw the screens with the graphics card instead of the processor. Smoother on a
+// slow PC. Off by default because on some PCs it turned printed bills black; test-print after switching.
+function PerformanceCard() {
+  const api = window.electronAPI?.graphics
+  const [gpu, setGpu] = useState<boolean>(false)
+  useEffect(() => { void api?.get().then(r => setGpu(!!r.useGpu)).catch(() => {}) }, [])
+  if (!api) return null
+  const change = async (on: boolean) => {
+    if (on && !window.confirm('Use the graphics card?\n\nAfter the restart, print ONE bill and ONE barcode label to check them. If a print comes out black, come back here and switch this off.')) return
+    const r = await api.set(on)
+    if (!r.ok) { toast.error(r.reason || 'Could not save this setting'); return }
+    setGpu(on)
+    if (window.confirm('The setting is saved. The app has to restart to use it. Restart now?')) await api.relaunch()
+    else toast('It takes effect the next time the app starts')
+  }
+  return (
+    <Card>
+      <SectionTitle sub="If the software feels slow or choppy on this computer">Performance</SectionTitle>
+      <Toggle value={gpu} onChange={change} label="Use the graphics card (smoother)"
+        sub="Makes scrolling and screens lighter on an older PC. Switch off again if printed bills or labels look wrong." />
     </Card>
   )
 }
@@ -1308,6 +1332,8 @@ function DataBackupTab() {
         </button>
       </Card>
 
+      <PerformanceCard />
+
       <Card style={{ border: '1px solid #fecaca' }}>
         <SectionTitle sub="These actions are irreversible — proceed with caution">⚠️ Danger Zone</SectionTitle>
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '16px', marginBottom: '12px' }}>
@@ -1441,6 +1467,8 @@ const APP_VERSION: string = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSI
 function WhatsAppTab() {
   const [state, setState] = useState<WhatsAppState>({ status: 'disconnected' })
   const [serverUrl, setServerUrl] = useState(() => getSettings().waServerUrl || '')
+  const [direct, setDirect] = useState(() => directSendOn())
+  const [autoBill, setAutoBill] = useState(() => getSettings().waAutoBill === true)
 
   // A page served over https cannot reach http://localhost — Chrome blocks
   // public-to-private requests. Say so plainly rather than letting the shop
@@ -1486,10 +1514,40 @@ function WhatsAppTab() {
     connected: 'Connected', connecting: 'Connecting…', qr: 'Scan the QR code', disconnected: 'Not connected'
   }[status]
 
+  const switchDirect = (on: boolean) => {
+    if (on && !window.confirm('WhatsApp can RESTRICT a number that sends messages through software (it happened to this shop). Only switch this on if you accept that risk, and never for many customers at once.\n\nSwitch on?')) return
+    saveSettings({ waDirectSend: on })
+    if (!on) void (window as any).electronAPI?.whatsapp?.logout?.()?.catch?.(() => {})   // unlink the session from this PC
+    setDirect(on)
+    toast.success(on ? 'Direct sending is on' : 'Direct sending is off')
+  }
+
+  if (!direct) return (
+    <Card>
+      <SectionTitle sub="How bills and messages go out on WhatsApp">WhatsApp</SectionTitle>
+      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px', fontSize: '13px', color: '#166534', lineHeight: 1.6, marginBottom: '16px' }}>
+        <b>Safe mode is on.</b> Pressing a WhatsApp button opens the chat with the message already typed.
+        You press <b>Send</b> yourself. This follows WhatsApp's rules, so the shop's number is not put at risk.
+        (A bill PDF cannot be attached this way; the message carries the bill details.)
+      </div>
+      <Toggle value={false} onChange={switchDirect} label="Send straight from the app (not recommended)"
+        sub="Uses an unofficial WhatsApp connection. WhatsApp can restrict the number — it has already happened once." />
+    </Card>
+  )
+
   return (
     <>
       <Card>
         <SectionTitle sub="Link the shop's WhatsApp once — messages then send in the background">WhatsApp</SectionTitle>
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 14px', fontSize: '12px', color: '#991b1b', lineHeight: 1.6, marginBottom: '14px' }}>
+          <b>Warning:</b> direct sending uses an unofficial connection. WhatsApp can restrict or ban the number
+          ("tools that don't follow our terms to send automated or bulk messages"), and it has already happened once.
+          Use a <b>separate number</b> for bills, not the main shop number. The app only sends the bill of the customer
+          on it (PDF first, then the invoice message), at most 30 messages an hour and 200 a day.
+        </div>
+        <Toggle value={true} onChange={switchDirect} label="Send straight from the app" sub="Switch off to go back to safe mode (opens WhatsApp, you press Send)." />
+        <Toggle value={autoBill} onChange={(on) => { saveSettings({ waAutoBill: on }); setAutoBill(on); toast.success(on ? 'Bills will be sent automatically after each sale' : 'Automatic sending is off') }}
+          label="Send the bill automatically after each sale" sub="Only to the customer on that bill, and only when this PC is linked to WhatsApp below. Off = use the WhatsApp button on the bill." />
 
         <Field
           label="WhatsApp Server Address"

@@ -1,9 +1,9 @@
 import { Check } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { printBill, buildBillHTML, buildBillMessage } from '../../utils/printBill';
 import toast from 'react-hot-toast';
 import { getSettings } from '../../utils/settings';
-import { sendWhatsAppDocument } from '../../utils/whatsapp';
+import { sendWhatsAppDocument, directSendOn } from '../../utils/whatsapp';
 import { fmtDate, fmtDateTime } from '../../utils/date'
 
 interface BillModalProps {
@@ -35,6 +35,17 @@ export function BillModal({ saleData, onClose, onNewSale }: BillModalProps) {
     if (how !== 'failed') setSent(true)
     if (how === 'browser') toast.success('WhatsApp opened! ✅')
   }
+
+  // Automatic sending (Settings -> WhatsApp, off by default): the bill of THIS sale goes to the customer
+  // on it, once, as soon as the sale is complete. Never for a backdated bill.
+  const autoDone = useRef(false)
+  useEffect(() => {
+    if (autoDone.current) return
+    autoDone.current = true
+    if (directSendOn() && getSettings().waAutoBill === true && saleData?.customer?.phone && !saleData?.backdated) {
+      void handleWhatsApp()
+    }
+  }, [])
 
   return (
     <div className="bill-modal-overlay" onClick={onClose}>

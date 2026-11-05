@@ -903,3 +903,5 @@
 .invoices-page .invoices-table td .date-time { white-space: nowrap; }
 .invoices-page .actions-cell { flex-wrap: wrap; gap: 4px; max-width: 132px; }
 .invoices-page .action-btn { width: 28px; height: 28px; font-size: 14px; }
+
+.invoices-page .invoices-table { min-width: 980px; }

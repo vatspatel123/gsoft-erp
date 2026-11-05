@@ -5,11 +5,11 @@
 }
 
 :root {
-  --bg-page:        #fdf8ff;
+  --bg-page:        #f6f6f8;
   --bg-card:        #ffffff;
   --bg-sidebar:     #2d1b4e;
   --bg-sidebar-hover: #3d2464;
-  --border:         #f3e8ff;
+  --border:         #e5e5ea;
   --border-mid:     #e9d5ff;
 
   --purple:         #9333ea;

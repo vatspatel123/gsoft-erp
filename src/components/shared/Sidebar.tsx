@@ -82,12 +82,13 @@ export function Sidebar() {
   return (
     <aside style={{
       width: '240px',
-      backgroundColor: 'var(--bg-sidebar)',
-      color: 'var(--text-sidebar)',
+      backgroundColor: '#ffffff',
+      color: '#3f3f4e',
+      borderRight: '1px solid #e5e5ea',
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
-      fontFamily: "'DM Sans', sans-serif",
+      fontFamily: "'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif",
       overflowY: 'auto'
     }}>
       <div style={{ 
@@ -95,12 +96,12 @@ export function Sidebar() {
         display: 'flex',
         alignItems: 'center',
         gap: '12px',
-        borderBottom: '1px solid rgba(255,255,255,0.05)' 
+        borderBottom: '1px solid #e5e5ea' 
       }}>
         <div style={{
           width: '32px',
           height: '32px',
-          backgroundColor: '#c084fc',
+          backgroundColor: '#9333ea',
           borderRadius: '10px',
           display: 'flex',
           alignItems: 'center',
@@ -112,8 +113,8 @@ export function Sidebar() {
           R
         </div>
         <div>
-          <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600, lineHeight: 1 }}>Retail ERP</div>
-          <div style={{ color: '#c4b5d4', fontSize: '10px', marginTop: '4px', lineHeight: 1 }}>General Edition</div>
+          <div style={{ color: '#1c1c28', fontSize: '14px', fontWeight: 600, lineHeight: 1 }}>Retail ERP</div>
+          <div style={{ color: '#6b6b7b', fontSize: '11px', marginTop: '4px', lineHeight: 1 }}>General Edition</div>
         </div>
       </div>
       
@@ -123,7 +124,7 @@ export function Sidebar() {
             <div style={{ 
               fontSize: '9px', 
               fontWeight: 600, 
-              color: '#9b7db8', 
+              color: '#6b6b7b', 
               textTransform: 'uppercase', 
               letterSpacing: '0.1em',
               padding: '12px 12px 4px',
@@ -141,21 +142,20 @@ export function Sidebar() {
                   padding: '0 12px',
                   height: '40px',
                   textDecoration: 'none',
-                  color: isActive ? '#ffffff' : '#c4b5d4',
-                  backgroundColor: isActive ? '#c084fc' : 'transparent',
-                  fontWeight: isActive ? 500 : 400,
+                  color: isActive ? '#6b21a8' : '#3f3f4e',
+                  backgroundColor: isActive ? '#f5f3ff' : 'transparent',
+                  fontWeight: isActive ? 600 : 400,
                   borderRadius: '8px',
                   gap: '9px',
                   marginBottom: '4px',
-                  fontSize: '13px',
-                  transition: 'background-color 0.15s, color 0.15s'
+                  fontSize: '13px'
                 })}
               >
                 <link.icon style={{ width: '16px', height: '16px', strokeWidth: 2, stroke: 'currentColor' }} />
                 <span style={{ flex: 1 }}>{link.label}</span>
                 
                 {link.shortcut && !link.badge && (
-                  <span style={{ fontSize: '10px', color: 'rgba(196,181,212,0.5)', fontFamily: "'DM Mono', monospace" }}>
+                  <span style={{ fontSize: '10px', color: '#8a8a99' }}>
                     {link.shortcut}
                   </span>
                 )}
@@ -177,17 +177,16 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div style={{ padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+      <div style={{ padding: '8px 12px', borderTop: '1px solid #e5e5ea' }}>
         <NavLink
           to="/settings"
           style={({ isActive }) => ({
             display: 'flex', alignItems: 'center', padding: '0 12px',
             height: '40px', textDecoration: 'none',
-            color: isActive ? '#ffffff' : '#c4b5d4',
-            backgroundColor: isActive ? '#c084fc' : 'transparent',
-            fontWeight: isActive ? 500 : 400,
-            borderRadius: '8px', gap: '9px', fontSize: '13px',
-            transition: 'background-color 0.15s, color 0.15s'
+            color: isActive ? '#6b21a8' : '#3f3f4e',
+            backgroundColor: isActive ? '#f5f3ff' : 'transparent',
+            fontWeight: isActive ? 600 : 400,
+            borderRadius: '8px', gap: '9px', fontSize: '13px'
           })}
         >
           <Settings style={{ width: '16px', height: '16px', strokeWidth: 2, stroke: 'currentColor' }} />
@@ -207,11 +206,10 @@ export function Sidebar() {
           style={{
             display: 'flex', alignItems: 'center', padding: '0 12px', marginTop: '4px',
             height: '40px', textDecoration: 'none', border: 'none', width: '100%',
-            color: '#c4b5d4', backgroundColor: 'transparent', cursor: 'pointer',
-            fontWeight: 400, borderRadius: '8px', gap: '9px', fontSize: '13px',
-            transition: 'background-color 0.15s, color 0.15s'
+            color: '#3f3f4e', backgroundColor: 'transparent', cursor: 'pointer',
+            fontWeight: 400, borderRadius: '8px', gap: '9px', fontSize: '13px'
           }}
-          onMouseOver={e => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)' }}
+          onMouseOver={e => { e.currentTarget.style.backgroundColor = '#f6f6f8' }}
           onMouseOut={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
         >
           <svg style={{ width: '16px', height: '16px', strokeWidth: 2, stroke: 'currentColor', fill: 'none' }} viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>

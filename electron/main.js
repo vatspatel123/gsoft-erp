@@ -30,7 +30,13 @@ app.commandLine.appendSwitch('lang', 'en-GB')
 // black strip) or crash the GPU process (the app "restarts"). Software drawing
 // is what Electron documents for reliable offscreen capture; an ERP screen of
 // forms and tables doesn't need the GPU.
-app.disableHardwareAcceleration()
+// Software drawing is the safe default. A shop can switch the graphics card on in
+// Settings -> Data & Backup -> Performance (it is read here, before the app starts):
+// smoother on a slow PC, but test-print one bill and one label afterwards, and switch it
+// back off if a print comes out black.
+const gfxFile = () => path.join(app.getPath('userData'), 'graphics.json')
+const gpuWanted = () => { try { return JSON.parse(require('fs').readFileSync(gfxFile(), 'utf8')).useGpu === true } catch { return false } }
+if (!gpuWanted()) app.disableHardwareAcceleration()
 
 // What went wrong, kept on the PC, so a crash can be diagnosed afterwards:
 // %APPDATA%/Retail ERP/erp-crash.log
@@ -171,6 +177,13 @@ ipcMain.handle('update:check', async () => {
     return { ok: false, reason: (e && e.message) || 'Could not reach the update server' }
   }
 })
+
+ipcMain.handle('graphics:get', () => ({ useGpu: gpuWanted() }))
+ipcMain.handle('graphics:set', (_e, useGpu) => {
+  try { require('fs').writeFileSync(gfxFile(), JSON.stringify({ useGpu: !!useGpu })); return { ok: true } }
+  catch (e) { return { ok: false, reason: (e && e.message) || 'Could not save' } }
+})
+ipcMain.handle('app:relaunch', () => { app.relaunch(); app.exit(0) })
 
 // WhatsApp runs inside this app, so the shop needs no separate service.
 // Lazy-required so a failure to load Baileys breaks WhatsApp only, not startup.

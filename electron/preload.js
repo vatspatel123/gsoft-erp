@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
 
+  graphics: {
+    get: () => ipcRenderer.invoke('graphics:get'),
+    set: (useGpu) => ipcRenderer.invoke('graphics:set', useGpu),
+    relaunch: () => ipcRenderer.invoke('app:relaunch'),
+  },
+
   // WhatsApp, running inside this app (no separate service needed)
   whatsapp: {
     connect: (opts) => ipcRenderer.invoke('whatsapp:connect', opts),

@@ -136,7 +136,30 @@ async function ready(ms = 20000) {
   return false
 }
 
+// Limits on direct sending: this is for the bill of the customer standing at the counter, not for
+// bulk messages. A bill is two messages (PDF, then text) a few seconds apart; at most 30 messages an
+// hour and 200 a day (the day's count is kept in a small file so a restart does not reset it).
+const sentAt = []
+const dayFile = () => path.join(require('electron').app.getPath('userData'), 'wa-day-count.json')
+function dayCount() {
+  const today = new Date().toISOString().slice(0, 10)
+  try { const d = JSON.parse(fs.readFileSync(dayFile(), 'utf8')); if (d.day === today) return { day: today, n: d.n || 0 } } catch {}
+  return { day: today, n: 0 }
+}
+function tooFast() {
+  const now = Date.now()
+  while (sentAt.length && now - sentAt[0] > 3600000) sentAt.shift()
+  const d = dayCount()
+  if (d.n >= 200) return 'WhatsApp daily limit reached (200 messages). It resets tomorrow; use the normal WhatsApp button meanwhile.'
+  if (sentAt.length >= 30) return 'Too many WhatsApp messages this hour. Try again in a while, or use the normal WhatsApp button.'
+  if (sentAt.length && now - sentAt[sentAt.length - 1] < 2500) return 'Wait a moment between WhatsApp messages.'
+  sentAt.push(now)
+  try { fs.writeFileSync(dayFile(), JSON.stringify({ day: d.day, n: d.n + 1 })) } catch {}
+  return null
+}
+
 async function sendMessage(phone, text) {
+  const slow = tooFast(); if (slow) return { ok: false, error: slow }
   if (!(await ready())) return { ok: false, error: 'WhatsApp is not linked yet' }
   const jid = toJid(phone)
   if (!jid) return { ok: false, error: 'Invalid phone number' }
@@ -151,6 +174,7 @@ async function sendMessage(phone, text) {
 }
 
 async function sendDocument(phone, { pdfBase64, fileName, caption }) {
+  const slow = tooFast(); if (slow) return { ok: false, error: slow }
   if (!(await ready())) return { ok: false, error: 'WhatsApp is not linked yet' }
   const jid = toJid(phone)
   if (!jid) return { ok: false, error: 'Invalid phone number' }

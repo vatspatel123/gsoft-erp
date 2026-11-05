@@ -1,0 +1,43 @@
+/*
+ * The light look, for every screen (same layout, same data, same steps; only how it is drawn).
+ * Flat surfaces with thin neutral lines instead of shadows, blur and slides: on a PC that draws
+ * with the processor those effects are the costly part. Colours are mapped from the old
+ * purple-tinted ones. To go back to the old look, remove this file's import in main.tsx.
+ */
+
+/* 1. Nothing floats, blurs or slides. (Spinners use animation, not transition: untouched.) */
+*, *::before, *::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: none !important;
+}
+
+/* 2. One font that every Windows PC already has: nothing to download or lay out. */
+body, body * {
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif !important;
+}
+body, input, td, th, button { font-variant-numeric: tabular-nums; }
+
+/* 3. Lines and tints: purple-tinted -> neutral. (Inline colours show up as rgb() in the page.) */
+[style*="rgb(243, 232, 255)"] { border-color: #e5e5ea !important; }
+[style*="rgb(233, 213, 255)"] { border-color: #d8d8e0 !important; }
+[style*="rgb(253, 248, 255)"] { background-color: #fafafc !important; }
+
+/* 4. Calmer corners: big rounded cards -> 10px. (Pills and small chips keep their shape.) */
+[style*="border-radius: 16px"], [style*="border-radius: 18px"], [style*="border-radius: 24px"] {
+  border-radius: 10px !important;
+}
+
+/* 5. Table headers: plain grey text instead of purple capitals. */
+table th {
+  color: #6b6b7b !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600 !important;
+}
+table tbody tr:hover { background-color: #faf9fd; }
+
+/* 6. Without shadows, floating panels need a line to stand apart. */
+.modal-content, .bill-modal-card, [role="dialog"] { border: 1px solid #e5e5ea !important; }

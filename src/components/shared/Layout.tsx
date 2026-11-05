@@ -48,12 +48,10 @@ export function Layout({ children }: { children: ReactNode }) {
             color: 'white',
             border: 'none',
             cursor: 'pointer',
-            boxShadow: '0 4px 16px rgba(147,51,234,0.4)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '24px',
-            transition: 'transform 0.15s'
+            fontSize: '24px'
           }}
         >
           🛒

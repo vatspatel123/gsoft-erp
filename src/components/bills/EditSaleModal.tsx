@@ -6,6 +6,7 @@ import { editSale, saleTotals, saleLineTotal, money, type SaleLine } from '../..
 import { S } from './billEditStyles'
 import { sortProducts } from '../../utils/productOrder'
 import { printBarcodeLabels } from '../../utils/printLabels'
+import { AddProductModal } from '../pos/AddProductModal'
 
 interface Props {
   saleId: string
@@ -148,46 +149,10 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
     setResults([]); setQuery('')
   }
 
-  // A piece that was never in the inventory: make the product here (with the next barcode in the
-  // shop's number series), put it on this bill, and offer its label.
-  const [newOpen, setNewOpen] = useState(false)
-  const [np, setNp] = useState({ name: '', design_no: '', size: '', colour: '', price: '', mrp: '', gst: '5', hsn: '' })
-  const [creating, setCreating] = useState(false)
+  // A piece that was never in the inventory: the same Add Product window as the POS (leave the barcode
+  // blank and it is made automatically). It goes into the inventory and onto this bill; its label can be printed.
+  const [showAdd, setShowAdd] = useState(false)
   const [madeProduct, setMadeProduct] = useState<any>(null)
-  const nextBarcode = async () => {
-    const { data } = await supabase.from('products').select('barcode').not('barcode', 'is', null)
-      .order('created_at', { ascending: false }).limit(1000)
-    const last = Math.max(0, ...(data || []).filter(r => /^\d{1,7}$/.test(String(r.barcode || '').trim())).map(r => Number(r.barcode)))
-    return last + 1
-  }
-  const createProduct = async () => {
-    const price = parseFloat(np.price)
-    if (!np.name.trim()) { toast.error('Enter the product name'); return }
-    if (!(price > 0)) { toast.error('Enter the selling price'); return }
-    setCreating(true)
-    try {
-      let code = await nextBarcode()
-      let row: any = null
-      for (let tries = 0; tries < 5 && !row; tries++, code++) {
-        const { data, error } = await supabase.from('products').insert({
-          name: np.name.trim(), sku: 'SKU-' + Date.now().toString().slice(-6) + tries, barcode: String(code),
-          unit_price: price, mrp: parseFloat(np.mrp) || price, gst_rate: parseFloat(np.gst) || 0,
-          design_no: np.design_no.trim() || null, size: np.size.trim() || null, colour: np.colour.trim() || null,
-          hsn_code: np.hsn.trim() || null,
-          stock_qty: 1,   // the piece is in the customer's hand: this bill takes it back to 0
-          low_stock_alert: 5, is_active: true, is_online: false, online_price: price,
-        }).select().single()
-        if (!error) row = data
-        else if (!/duplicate|unique/i.test(error.message)) { toast.error('Could not add the product: ' + error.message); return }
-      }
-      if (!row) { toast.error('Could not find a free barcode — try again'); return }
-      addProduct(row)
-      setMadeProduct(row)
-      setNewOpen(false)
-      setNp({ name: '', design_no: '', size: '', colour: '', price: '', mrp: '', gst: '5', hsn: '' })
-      toast.success(`${row.name} added to inventory — barcode ${row.barcode}`)
-    } finally { setCreating(false) }
-  }
 
   const payAllBy = (kind: 'cash' | 'card' | 'upi') =>
     setTenders({ cash: 0, card: 0, upi: 0, [kind]: totals.net } as any)
@@ -290,7 +255,7 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
               <input style={{ ...S.input, flex: 1 }} placeholder="Add item — scan barcode or type name / design no"
                 data-enter="own" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchProducts()} />
               <button style={S.btnOutline} onClick={searchProducts}><Search size={15} /> Find</button>
-              <button style={S.btnOutline} onClick={() => setNewOpen(o => !o)} title="A piece that is not in the inventory"><Plus size={15} /> New product</button>
+              <button style={S.btnOutline} onClick={() => setShowAdd(true)} title="A piece that is not in the inventory"><Plus size={15} /> New product</button>
             </div>
             {madeProduct && (
               <div style={S.note}>
@@ -298,24 +263,11 @@ export function EditSaleModal({ saleId, onClose, onSaved }: Props) {
                 <button style={{ ...S.btnOutline, padding: '3px 10px' }} onClick={() => printBarcodeLabels([madeProduct], 1)}>Print label</button>
               </div>
             )}
-            {newOpen && (
-              <div style={S.authBox}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>New product — barcode is made automatically</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
-                  <input style={S.input} placeholder="Name *" value={np.name} onChange={e => setNp({ ...np, name: e.target.value })} autoFocus />
-                  <input style={S.input} placeholder="Design no" value={np.design_no} onChange={e => setNp({ ...np, design_no: e.target.value })} />
-                  <input style={S.input} placeholder="Size" value={np.size} onChange={e => setNp({ ...np, size: e.target.value })} />
-                  <input style={S.input} placeholder="Colour" value={np.colour} onChange={e => setNp({ ...np, colour: e.target.value })} />
-                  <input style={S.input} type="number" placeholder="Selling price ₹ *" value={np.price} onChange={e => setNp({ ...np, price: e.target.value })} />
-                  <input style={S.input} type="number" placeholder="MRP ₹ (same if blank)" value={np.mrp} onChange={e => setNp({ ...np, mrp: e.target.value })} />
-                  <input style={S.input} type="number" placeholder="GST %" value={np.gst} onChange={e => setNp({ ...np, gst: e.target.value })} />
-                  <input style={S.input} placeholder="HSN (optional)" value={np.hsn} onChange={e => setNp({ ...np, hsn: e.target.value })} />
-                </div>
-                <div style={{ ...S.row, marginTop: 8 }}>
-                  <button style={S.btnPrimary} disabled={creating} onClick={createProduct}>{creating ? 'Adding…' : 'Add to inventory and this bill'}</button>
-                  <button style={S.btnOutline} onClick={() => setNewOpen(false)}>Cancel</button>
-                </div>
-              </div>
+            {showAdd && (
+              <AddProductModal
+                onClose={() => setShowAdd(false)}
+                onAdded={(p) => { addProduct(p); setMadeProduct(p); setShowAdd(false) }}
+              />
             )}
             {results.length > 0 && (
               <div style={S.results}>
