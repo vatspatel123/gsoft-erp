@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
 
+  startInfo: () => ipcRenderer.invoke('app:startInfo'),
   graphics: {
     get: () => ipcRenderer.invoke('graphics:get'),
     set: (useGpu) => ipcRenderer.invoke('graphics:set', useGpu),

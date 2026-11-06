@@ -27,6 +27,7 @@ declare global {
         logout: () => Promise<{ ok: boolean }>
         onStatus: (cb: (s: WhatsAppState) => void) => () => void
       }
+      startInfo?: () => Promise<{ pcSession: string | null; version: string }>
       graphics?: { get: () => Promise<{ useGpu: boolean }>; set: (useGpu: boolean) => Promise<{ ok: boolean; reason?: string }>; relaunch: () => Promise<void> }
       journal?: { add: (entry: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }> }
       backup?: {

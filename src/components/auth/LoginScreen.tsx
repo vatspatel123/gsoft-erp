@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import toast from 'react-hot-toast'
+import { markUnlocked } from '../../utils/startLock'
 
 // The shop signs in with one store email. It is remembered on this PC after the
 // first sign-in, so from then on only the password is typed.
@@ -17,9 +18,10 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = { display: 'block', fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' }
 const linkStyle: React.CSSProperties = { background: 'none', border: 'none', color: '#9333ea', fontSize: '13px', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }
 
-export function LoginScreen() {
-  const [email, setEmail] = useState(savedEmail)
-  const [editEmail, setEditEmail] = useState(!savedEmail())
+/** lockedEmail: already signed in, only the password is being confirmed (after a PC restart or an update). */
+export function LoginScreen({ lockedEmail, onUnlocked }: { lockedEmail?: string; onUnlocked?: () => void } = {}) {
+  const [email, setEmail] = useState(() => lockedEmail || savedEmail())
+  const [editEmail, setEditEmail] = useState(!lockedEmail && !savedEmail())
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   // Forgot password: 'send' asks for the code, 'reset' takes the code and the new password.
@@ -31,10 +33,14 @@ export function LoginScreen() {
     setLoading(true)
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     if (error) {
-      toast.error(error.message === 'Invalid login credentials' ? 'Wrong password' : error.message)
+      // No internet must not stop a shop that is already signed in from billing: let it in, ask next time.
+      if (lockedEmail && /fetch|network/i.test(error.message)) { toast('No internet: password not checked'); onUnlocked?.() }
+      else toast.error(error.message === 'Invalid login credentials' ? 'Wrong password' : error.message)
     } else {
       try { localStorage.setItem(EMAIL_KEY, email.trim()) } catch { /* only a convenience */ }
+      await markUnlocked()
       toast.success('Login successful!')
+      onUnlocked?.()
     }
     setLoading(false)
   }
@@ -60,7 +66,9 @@ export function LoginScreen() {
     setLoading(false)
     if (upErr) return toast.error(upErr.message)
     try { localStorage.setItem(EMAIL_KEY, email.trim()) } catch { /* only a convenience */ }
+    await markUnlocked()
     toast.success('Password changed. You are signed in.')
+    onUnlocked?.()
   }
 
   const emailField = editEmail ? (
@@ -72,7 +80,7 @@ export function LoginScreen() {
   ) : (
     <div style={{ fontSize: '13px', color: '#475569', textAlign: 'center' }}>
       Signing in as <b>{email}</b>{' '}
-      <button type="button" style={linkStyle} onClick={() => setEditEmail(true)}>Change</button>
+      {!lockedEmail && <button type="button" style={linkStyle} onClick={() => setEditEmail(true)}>Change</button>}
     </div>
   )
 

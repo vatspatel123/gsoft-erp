@@ -51,6 +51,16 @@ app.on('child-process-gone', (_e, d) => crashLog('child-process-gone', d))
 
 let mainWindow
 
+// Only one copy of the app at a time. A second copy cannot read this PC's saved data (login, email,
+// printers): it would open empty and ask for the email and password again. Reopening just shows the first.
+if (!app.requestSingleInstanceLock()) app.exit(0)
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -90,6 +100,10 @@ function createWindow() {
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     console.error('Load failed:', errorCode, errorDescription)
   })
+
+  // Closing the window closes the app. Hidden print windows used to keep it running invisibly after the
+  // first print, so reopening started a second copy (see above) and updates never installed on quit.
+  mainWindow.on('closed', () => { mainWindow = null; app.quit() })
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show()
@@ -183,6 +197,19 @@ ipcMain.handle('graphics:set', (_e, useGpu) => {
   try { require('fs').writeFileSync(gfxFile(), JSON.stringify({ useGpu: !!useGpu })); return { ok: true } }
   catch (e) { return { ok: false, reason: (e && e.message) || 'Could not save' } }
 })
+// Identifies this time the PC was switched on, for "ask the password only after a restart or an update".
+// Windows 10 Fast Startup keeps the uptime running through a shutdown, so on Windows use when the desktop
+// (explorer) started, which is new at every sign-in. null = not readable: the app then does not ask.
+ipcMain.handle('app:startInfo', () => new Promise((resolve) => {
+  const version = app.getVersion()
+  if (process.platform !== 'win32') {
+    return resolve({ version, pcSession: 'boot:' + Math.round((Date.now() - require('os').uptime() * 1000) / 600000) })
+  }
+  require('child_process').execFile('powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', '(Get-Process explorer | Sort-Object StartTime | Select-Object -First 1).StartTime.ToFileTimeUtc()'],
+    { timeout: 8000, windowsHide: true },
+    (err, out) => { const v = String(out || '').trim(); resolve({ version, pcSession: !err && /^\d+$/.test(v) ? 'desktop:' + v : null }) })
+}))
 ipcMain.handle('app:relaunch', () => { app.relaunch(); app.exit(0) })
 
 // WhatsApp runs inside this app, so the shop needs no separate service.

@@ -38,6 +38,7 @@ import { WebsiteSettingsPage } from './pages/WebsiteSettingsPage'
 import { FormatDesignerPage } from './pages/FormatDesignerPage'
 import type { Session } from '@supabase/supabase-js'
 import { LoginScreen, rememberLoginEmail } from './components/auth/LoginScreen'
+import { startNeedsPassword } from './utils/startLock'
 import { SubscriptionLockedScreen } from './components/auth/SubscriptionLockedScreen'
 import { lastInvoiceNo, rememberInvoiceNo, invoiceNoOf } from './utils/invoiceNo'
 // Inner component so useNavigate works (must be inside BrowserRouter)
@@ -48,6 +49,7 @@ function AppContent() {
   const [session, setSession] = useState<Session | null>(null)
   const [authInitialized, setAuthInitialized] = useState(false)
   const [storeStatus, setStoreStatus] = useState<string>('active')
+  const [locked, setLocked] = useState<boolean | null>(null)   // signed in, but the password is due (PC restart / update)
 
   // A printer choice that went missing (the app was closed by a crash before it
   // reached the disk, or Windows renamed the printer) is found again by model
@@ -79,6 +81,13 @@ function AppContent() {
   useEffect(() => {
     if (getSettings().waDirectSend !== true) void (window as any).electronAPI?.whatsapp?.logout?.()?.catch?.(() => {})
   }, [])
+
+  // Decided once per opening. Without internet the password cannot be checked, so billing is not blocked.
+  useEffect(() => {
+    if (!authInitialized || locked !== null) return
+    if (!session || !navigator.onLine) { setLocked(false); return }
+    void startNeedsPassword().then(setLocked, () => setLocked(false))
+  }, [authInitialized])
 
   // Auth state listener
   useEffect(() => {
@@ -319,7 +328,16 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyboard)
   }, [navigate])
 
-  if (!authInitialized || showSplash) return <SplashScreen />
+  if (!authInitialized || showSplash || locked === null) return <SplashScreen />
+
+  if (session && locked) {
+    return (
+      <>
+        <Toaster position="top-right" />
+        <LoginScreen lockedEmail={session.user?.email} onUnlocked={() => setLocked(false)} />
+      </>
+    )
+  }
   
   if (!session) {
     return (
