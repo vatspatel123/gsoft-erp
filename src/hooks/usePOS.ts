@@ -1,4 +1,4 @@
-import { resolveCustomerId } from '../utils/customerLookup'
+import { creditLeftFrom, resolveCustomerId } from '../utils/customerLookup'
 import { creditPendingOf } from '../utils/credit'
 import { journalBill } from '../utils/billJournal'
 import { appliedTenders } from '../utils/tenders'
@@ -382,6 +382,11 @@ export function usePOS(salesmanId: string | null = null) {
       .filter(a => a.applied > 0)
   })()
 
+  // What is left on the customer's credit notes once this bill has used its share (printed on the bill).
+  const creditLeftAfterBill = () => creditLeftFrom([...activeCreditNotes]
+    .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+    .map(n => ({ ...n, balance_amount: (Number(n.balance_amount) || 0) - (creditAllocations.find(a => a.note.id === n.id)?.applied || 0) })))
+
   const totalDiscount = couponDiscount + loyaltyDiscount + manualDiscountAmount + creditNoteDiscount
   // No + gstAmount: the tax is already inside subtotal.
   // Shipping is added BEFORE flooring at zero: store credit can cover the shipping too (see
@@ -627,6 +632,7 @@ export function usePOS(salesmanId: string | null = null) {
 
     if (!navigator.onLine) {
       const offlineSale = {
+        creditLeft: creditLeftAfterBill(),
         invoiceNo: localInvoiceNo(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
@@ -814,6 +820,7 @@ export function usePOS(salesmanId: string | null = null) {
       }
 
       const saleData = {
+        creditLeft: creditLeftAfterBill(),
         invoiceNo,
         saleId: sale.id,
         cart,
@@ -841,6 +848,7 @@ export function usePOS(salesmanId: string | null = null) {
     } catch (err: any) {
       console.warn('Database sale completion notice, saving sale locally:', err)
       const offlineSale = {
+        creditLeft: creditLeftAfterBill(),
         invoiceNo: localInvoiceNo(),
         cart, customer, subtotal,
         gstAmount, totalDiscount,
@@ -862,7 +870,7 @@ export function usePOS(salesmanId: string | null = null) {
     } finally {
       setIsSaving(false)
     }
-  }, [cart, customer, coupon, tenders, paid, derivedPaymentMode, creditRemainder, changeDue, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, creditToApply, creditAllocations, creditNoteDiscount, creditDueDays, creditDueDate])
+  }, [cart, customer, coupon, tenders, paid, derivedPaymentMode, creditRemainder, changeDue, loyaltyToRedeem, subtotal, totalDiscount, netAmount, gstAmount, salesmanId, creditToApply, creditAllocations, activeCreditNotes, creditNoteDiscount, creditDueDays, creditDueDate])
 
   const clearCart = useCallback(() => {
     setCart([])

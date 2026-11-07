@@ -3,7 +3,7 @@ import type { Customer, Coupon, PaymentMode } from '../../hooks/usePOS';
 import { type CustomerTier, getTierInfo } from '../../utils/customerTier';
 import type { CreditNote } from '../../hooks/useCreditNotes';
 import { useState, useEffect, useRef } from 'react';
-import { findCustomerByPhone } from '../../utils/customerLookup';
+import { findCustomerByPhone, withTimeout } from '../../utils/customerLookup';
 import { supabase } from '../../lib/supabase';
 import { saveCustomerToCache } from '../../utils/offlineCache';
 import toast from 'react-hot-toast';
@@ -68,6 +68,8 @@ interface OrderSummaryProps {
   cartLength: number;
 }
 
+const SAVE_LIMIT_MS = 10000
+
 export function OrderSummary(props: OrderSummaryProps) {
   const [customerSearch, setCustomerSearch] = useState('')
   const [collectOpen, setCollectOpen] = useState(false)          // collecting old dues
@@ -78,6 +80,8 @@ export function OrderSummary(props: OrderSummaryProps) {
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
   const [customerLoading, setCustomerLoading] = useState(false)
   const [showNewForm, setShowNewForm] = useState(false)
+  const [savingNew, setSavingNew] = useState(false)
+  const [numberBoxFocused, setNumberBoxFocused] = useState(false)
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newBirthday, setNewBirthday] = useState('')
@@ -172,11 +176,12 @@ export function OrderSummary(props: OrderSummaryProps) {
     }
     if (savingCustomer.current) return
     savingCustomer.current = true
-    try { await saveNewCustomer(phone) } finally { savingCustomer.current = false }
+    setSavingNew(true)
+    try { await saveNewCustomer(phone) } finally { savingCustomer.current = false; setSavingNew(false) }
   }
 
   const saveNewCustomer = async (phone: string) => {
-
+    let keptLocally = false
     const newCustomer = {
       id: crypto.randomUUID(),
       name: newName.trim() || 'Customer',
@@ -191,7 +196,8 @@ export function OrderSummary(props: OrderSummaryProps) {
 
     if (navigator.onLine) {
       try {
-        const { data, error } = await supabase
+        // A request with no answer used to leave this button dead with no message.
+        const { data, error } = await withTimeout(supabase
           .from('customers')
           .insert({
             id: newCustomer.id,
@@ -204,7 +210,7 @@ export function OrderSummary(props: OrderSummaryProps) {
             referral_code: newCustomer.referral_code
           })
           .select()
-          .single()
+          .single(), SAVE_LIMIT_MS)
 
         if (!error && data) {
           saveCustomerToCache(data)
@@ -218,7 +224,7 @@ export function OrderSummary(props: OrderSummaryProps) {
         // The server said no. If the phone is already a customer, that customer is who
         // we want. Anything else: say so. Carrying on with a customer the database does
         // not have made the bill fail later and vanish into the offline queue.
-        const existing = await findCustomerByPhone(phone)
+        const existing = await withTimeout(findCustomerByPhone(phone), SAVE_LIMIT_MS)
         if (existing) {
           saveCustomerToCache(existing)
           props.onCustomerFound(existing)
@@ -232,6 +238,8 @@ export function OrderSummary(props: OrderSummaryProps) {
         return
       } catch (err) {
         console.warn('DB customer save notice, using local customer:', err)
+        // Same id as the request above, so the bill finds this customer whether or not that request got through.
+        keptLocally = true
       }
     }
 
@@ -241,8 +249,12 @@ export function OrderSummary(props: OrderSummaryProps) {
     setCustomerSearch(newCustomer.name + ' — ' + newCustomer.phone)
     setShowCustomerDropdown(false)
     setShowNewForm(false)
-    toast.success('Customer saved! ✅')
+    if (keptLocally) toast('Internet is slow: customer kept on this PC. You can continue billing.', { icon: '⚠️', duration: 6000 })
+    else toast.success('Customer saved! ✅')
   }
+
+  // A search answer arriving after the cashier has moved on to the new customer form must not cover the form.
+  const listOpen = showCustomerDropdown && (!showNewForm || numberBoxFocused)
 
   const canComplete = props.cartLength > 0 && !props.isSaving && !!props.customer
 
@@ -350,8 +362,8 @@ export function OrderSummary(props: OrderSummaryProps) {
                       setShowNewForm(false)
                     }
                   }}
-                  onFocus={() => { if (customerResults.length > 0) setShowCustomerDropdown(true) }}
-                  onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
+                  onFocus={() => { setNumberBoxFocused(true); if (customerResults.length > 0) setShowCustomerDropdown(true) }}
+                  onBlur={() => { setNumberBoxFocused(false); setTimeout(() => setShowCustomerDropdown(false), 200) }}
                   onKeyDown={e => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
@@ -388,7 +400,7 @@ export function OrderSummary(props: OrderSummaryProps) {
               </div>
 
               {/* Results dropdown */}
-              {showCustomerDropdown && customerResults.length > 0 && (
+              {listOpen && customerResults.length > 0 && (
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
                   zIndex: 9999, background: 'white',
@@ -449,7 +461,7 @@ export function OrderSummary(props: OrderSummaryProps) {
               )}
 
               {/* No results dropdown */}
-              {showCustomerDropdown && customerResults.length === 0 && customerSearch.length >= 2 && !customerLoading && (
+              {listOpen && customerResults.length === 0 && customerSearch.length >= 2 && !customerLoading && (
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
                   zIndex: 9999, background: 'white',
@@ -505,10 +517,11 @@ export function OrderSummary(props: OrderSummaryProps) {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       onClick={handleSaveNewCustomer}
+                      disabled={savingNew}
                       className="btn-save-cust"
-                      style={{ margin: 0 }}
+                      style={{ margin: 0, opacity: savingNew ? 0.6 : 1, cursor: savingNew ? 'wait' : undefined }}
                     >
-                      Save & Continue
+                      {savingNew ? 'Saving…' : 'Save & Continue'}
                     </button>
                     <button
                       onClick={() => setShowNewForm(false)}

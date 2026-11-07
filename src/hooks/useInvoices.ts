@@ -121,6 +121,7 @@ export function useInvoices() {
 
     try {
       if (navigator.onLine) {
+        const build = () => {
         let query = supabase
           .from('sales')
           .select(
@@ -154,8 +155,25 @@ export function useInvoices() {
         if (salesmanFilter !== 'all') {
           query = query.eq('salesman_id', salesmanFilter)
         }
+        return query
+        }
 
-        const { data, error } = await query
+        // Opening the screen: the newest bills come first, so a bill just made shows at once.
+        // The whole month below still replaces the list; on a slow line it took long enough
+        // that the shop saw this PC's older copy without the new bill.
+        if (!fresh.current && dateRange === 'month' && paymentFilter === 'all' && salesmanFilter === 'all') {
+          build().limit(30).then(({ data }) => {
+            if (!data || mine !== latest.current || fresh.current) return
+            setInvoices(prev => {
+              const m = new Map(prev.map(i => [i.invoice_no, i]))
+              for (const i of data as Invoice[]) m.set(i.invoice_no, i)
+              return [...m.values()].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            })
+            setLoading(false); shown.current = true
+          }, () => { /* the full load below still runs */ })
+        }
+
+        const { data, error } = await build()
         if (!error && data) {
           fetchedInvoices = data as Invoice[]
         }
@@ -313,10 +331,13 @@ export function useInvoices() {
     ...filteredExchanges.map(x => ({ kind: 'exchange' as const, at: x.created_at, x })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime() || (a.kind === 'sale' ? -1 : 1))
 
-  const totalRevenue = invoices.reduce(
+  const billsRevenue = invoices.reduce(
     (sum, inv) => sum + (inv.net_amount || 0),
     0
   )
+  // The extra a customer pays on an exchange is revenue on the day of the exchange (same as Dashboard and Reports).
+  const topUps = exchanges.filter(x => x.balance_type === 'customer_pays')
+  const totalRevenue = billsRevenue + topUps.reduce((sum, x) => sum + (Number(x.balance_amount) || 0), 0)
 
   const totalGST = invoices.reduce(
     (sum, inv) => sum + (inv.gst_amount || 0),
@@ -324,7 +345,7 @@ export function useInvoices() {
   )
 
   const avgBillValue =
-    invoices.length > 0 ? totalRevenue / invoices.length : 0
+    invoices.length > 0 ? billsRevenue / invoices.length : 0
 
   // Money in by how it was actually paid. A ₹1,500 bill paid ₹1,300 UPI + ₹200
   // cash adds ₹200 to Cash and ₹1,300 to UPI — counting the whole bill under its
@@ -332,7 +353,11 @@ export function useInvoices() {
   // was recorded have no tender amounts; those still count by payment_mode.
   const paymentBreakdown = Object.fromEntries((['cash', 'card', 'upi', 'credit'] as const).map(mode => {
     const bills = invoices.filter(i => !i.is_return && tenderOf(i, mode) > 0)
-    return [mode, { count: bills.length, total: bills.reduce((s, i) => s + tenderOf(i, mode), 0) }]
+    const exch = topUps.filter(x => Number(x[`${mode}_amount`]) > 0)
+    return [mode, {
+      count: bills.length + exch.length,
+      total: bills.reduce((s, i) => s + tenderOf(i, mode), 0) + exch.reduce((s, x) => s + Number(x[`${mode}_amount`]), 0),
+    }]
   })) as Record<'cash' | 'card' | 'upi' | 'credit', { count: number; total: number }>
 
   const processRefund = async (invoice: Invoice) => {

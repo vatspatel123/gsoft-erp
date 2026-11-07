@@ -1,5 +1,36 @@
 import { supabase } from '../lib/supabase'
 
+/** Gives up waiting after ms. The request itself carries on; only the screen stops waiting for it. */
+export function withTimeout<T>(work: PromiseLike<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms)
+    work.then(v => { clearTimeout(timer); resolve(v) }, e => { clearTimeout(timer); reject(e) })
+  })
+}
+
+/** What a customer has left on their credit notes, as printed on the bill. */
+export type CreditLeft = { total: number; notes: { no: string; balance: number; expires_at?: string | null }[]; asOn?: string }
+
+export function creditLeftFrom(notes: { credit_note_no: string; balance_amount: unknown; expires_at?: string | null }[]): CreditLeft | undefined {
+  const left = notes
+    .map(n => ({ no: n.credit_note_no, balance: Number(n.balance_amount) || 0, expires_at: n.expires_at }))
+    .filter(n => n.balance > 0.004)
+  if (!left.length) return undefined
+  return { total: left.reduce((s, n) => s + n.balance, 0), notes: left }
+}
+
+/** The customer's credit balance today (for a reprint). Never holds up the bill: no answer in 3 seconds means no line. */
+export async function creditLeftFor(customerId?: string | null, phone?: string | null): Promise<CreditLeft | undefined> {
+  const who = [customerId && `customer_id.eq.${customerId}`, phone && `customer_phone.eq.${phone}`].filter(Boolean).join(',')
+  if (!who) return undefined
+  try {
+    const { data } = await withTimeout(supabase.from('credit_notes')
+      .select('credit_note_no, balance_amount, expires_at, created_at')
+      .or(who).eq('status', 'active').gt('balance_amount', 0).order('created_at'), 3000)
+    return creditLeftFrom((data || []).filter((n: any) => !n.expires_at || new Date(n.expires_at).getTime() > Date.now()))
+  } catch { return undefined }
+}
+
 const digits = (p: unknown) => String(p ?? '').replace(/\D/g, '').slice(-10)
 
 /** The customer already saved under this phone number, or null. */

@@ -149,7 +149,8 @@ export default function ReportsPage() {
   const [items, setItems] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [wh, setWh] = useState({ cash: 0, bank: 0, received: 0, due: 0, bills: 0 })   // wholesale money in this period
-  const [exch, setExch] = useState({ cash: 0, card: 0, upi: 0, refunds: 0, topUp: 0, revDelta: 0, costDelta: 0, count: 0 })   // exchanges made in this period
+  const [exch, setExch] = useState({ cash: 0, card: 0, upi: 0, credit: 0, refunds: 0, topUp: 0, revDelta: 0, costDelta: 0, count: 0,
+    modeCount: { cash: 0, card: 0, upi: 0, credit: 0 }, topUps: [] as { at: string; amount: number }[] })   // exchanges made in this period
   const [exchBySales, setExchBySales] = useState<{ id: string; name: string; role: string; amount: number }[]>([])   // exchange top-ups credited to the salesman who made them
   const [period, setPeriod] = useState<{ from: string; to: string } | null>(null)   // the dates the cards above cover
   const [showDues, setShowDues] = useState(false)
@@ -206,7 +207,7 @@ export default function ReportsPage() {
         // Old pending amounts are money received on the day they were PAID, not on the day of the bill.
         supabase.from('customer_payments').select('amount, tender').gte('paid_at', from).lte('paid_at', to),
         supabase.from('exchange_bills')
-          .select('balance_type, balance_amount, cash_amount, card_amount, upi_amount, refund_mode, return_amount, new_sale_amount, ' +
+          .select('created_at, credit_amount, balance_type, balance_amount, cash_amount, card_amount, upi_amount, refund_mode, return_amount, new_sale_amount, ' +
             'exchange_return_items(qty, products(cost_price)), exchange_new_items(qty, products(cost_price))')
           .gte('created_at', from).lte('created_at', to),
         supabase.from('wholesale_sales').select('cash_amount, upi_amount, cheque_amount, credit_amount').gte('created_at', from).lte('created_at', to),
@@ -221,10 +222,15 @@ export default function ReportsPage() {
       })
       const xs = x.error ? [] : x.data || []
       const sum = (f: (r: any) => number) => xs.reduce((a: number, r: any) => a + f(r), 0)
+      const paidIn = (xs as any[]).filter(r => r.balance_type === 'customer_pays')
+      const withMode = (mode: string) => paidIn.filter(r => Number(r[`${mode}_amount`]) > 0).length
       setExch({
         cash: sum(r => r.balance_type === 'customer_pays' ? Number(r.cash_amount) || 0 : 0),
         card: sum(r => r.balance_type === 'customer_pays' ? Number(r.card_amount) || 0 : 0),
         upi: sum(r => r.balance_type === 'customer_pays' ? Number(r.upi_amount) || 0 : 0),
+        credit: sum(r => r.balance_type === 'customer_pays' ? Number(r.credit_amount) || 0 : 0),
+        modeCount: { cash: withMode('cash'), card: withMode('card'), upi: withMode('upi'), credit: withMode('credit') },
+        topUps: paidIn.map(r => ({ at: r.created_at, amount: Number(r.balance_amount) || 0 })),
         topUp: sum(r => r.balance_type === 'customer_pays' ? Number(r.balance_amount) || 0 : 0),   // the extra paid (or left pending) on exchanges
         refunds: sum(r => r.balance_type === 'store_credit' && (r.refund_mode === 'cash' || r.refund_mode === 'upi') ? Number(r.balance_amount) || 0 : 0),
         // Profit effect of exchanges: what the customer's bill changed by, less what the pieces cost.
@@ -281,7 +287,9 @@ export default function ReportsPage() {
     .map(mode => ({
       mode,
       sales: sales.filter(s => tenderOf(s, mode) > 0),
-      revenue: sales.reduce((t, x) => t + tenderOf(x, mode), 0)
+      // Includes what customers paid extra on exchanges in this period.
+      revenue: sales.reduce((t, x) => t + tenderOf(x, mode), 0) + exch[mode],
+      bills: sales.filter(s => tenderOf(s, mode) > 0).length + exch.modeCount[mode],
     }))
 
   // One row per real product name: TOP / top and 3 pc / 3pc are the same product, so they
@@ -411,16 +419,18 @@ export default function ReportsPage() {
       const ist = new Date(
         d.getTime() + IST_OFFSET)
       const label = fmtDayMonth(ist)
-      const total = sales.filter(s => {
+      const sameDay = (at: string) => {
         const sd = new Date(
-          new Date(s.created_at).getTime() +
+          new Date(at).getTime() +
           IST_OFFSET)
         return sd.getUTCDate() ===
           ist.getUTCDate() &&
           sd.getUTCMonth() ===
           ist.getUTCMonth()
-      }).reduce((s, x) =>
+      }
+      const total = sales.filter(s => sameDay(s.created_at)).reduce((s, x) =>
         s + (x.net_amount || 0), 0)
+        + exch.topUps.filter(t => sameDay(t.at)).reduce((s, t) => s + t.amount, 0)
       arr.push({ date: label, amount: total })
     }
     return arr
@@ -611,7 +621,7 @@ export default function ReportsPage() {
                           marginTop: '4px',
                           textTransform: 'capitalize'
                         }}>
-                          {p.mode} · {p.sales.length} bills
+                          {p.mode} · {p.bills} bills
                         </div>
                         <div style={{
                           fontSize: '10px',
@@ -619,10 +629,10 @@ export default function ReportsPage() {
                           marginTop: '2px',
                           fontWeight: '500'
                         }}>
-                          {totalRevenue > 0
+                          {totalRevenue + exch.topUp > 0
                             ? Math.round(
                                 p.revenue /
-                                totalRevenue * 100
+                                (totalRevenue + exch.topUp) * 100
                               ) + '%'
                             : '0%'}
                         </div>
@@ -1748,7 +1758,7 @@ export default function ReportsPage() {
                           color: '#94a3b8',
                           marginTop: '4px'
                         }}>
-                          {p.sales.length} bills
+                          {p.bills} bills
                         </div>
                       </div>
                     ))}

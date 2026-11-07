@@ -167,6 +167,11 @@ export function buildBillMessage(saleData: any, settingsOverride?: Partial<AppSe
     s.shopName || 'Retail ERP',
   )
 
+  const creditLeft = saleData.creditLeft
+  if (creditLeft?.total > 0) {
+    lines.splice(lines.length - 3, 0, '', `Credit note balance${creditLeft.asOn ? ` as on ${creditLeft.asOn}` : ''}: Rs. ${Number(creditLeft.total).toFixed(2)}`)
+  }
+
   if (s.googleReviewUrl) lines.push('', 'Review us on Google', s.googleReviewUrl)
   if (s.instagramUrl) lines.push('', 'Follow us on Instagram', s.instagramUrl)
 
@@ -386,6 +391,14 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
       <div>Due: ${saleData.creditDueDate
         ? fmtDate(new Date(saleData.creditDueDate))
         : `${saleData.creditDueDays || 5} days`}</div>
+    </div>
+  ` : ''}
+
+  ${saleData.creditLeft?.total > 0 ? `
+    <div class="credit">
+      <div><b>CREDIT NOTE BALANCE: ₹${money(saleData.creditLeft.total)}</b></div>
+      ${saleData.creditLeft.asOn ? `<div>as on ${esc(saleData.creditLeft.asOn)}</div>` : ''}
+      ${saleData.creditLeft.notes.map((n: any) => `<div>${esc(n.no)}${saleData.creditLeft.notes.length > 1 ? ` · ₹${money(n.balance)}` : ''}${n.expires_at ? ` · Valid until ${fmtDate(new Date(n.expires_at))}` : ''}</div>`).join('')}
     </div>
   ` : ''}
 

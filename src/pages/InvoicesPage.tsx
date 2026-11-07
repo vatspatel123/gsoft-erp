@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { Layout } from '../components/shared/Layout'
 import { useInvoices, type Invoice } from '../hooks/useInvoices'
 import { printBill, buildBillHTML, buildBillMessage } from '../utils/printBill'
+import { creditLeftFor } from '../utils/customerLookup'
 import { exportToCSV } from '../utils/exportCSV'
 import {
   ShoppingBag,
@@ -123,7 +124,13 @@ export function InvoicesPage() {
     date: invoice.created_at,
   })
 
-  const handleReprint = (invoice: Invoice) => printBill(saleDataFrom(invoice))
+  // Reprints show the credit balance as it stands today: old bills don't store what it was then.
+  const saleDataWithCredit = async (invoice: Invoice) => {
+    const creditLeft = await creditLeftFor(invoice.customer_id, invoice.customers?.phone)
+    return { ...saleDataFrom(invoice), ...(creditLeft ? { creditLeft: { ...creditLeft, asOn: fmtDate(new Date()) } } : {}) }
+  }
+
+  const handleReprint = async (invoice: Invoice) => printBill(await saleDataWithCredit(invoice))
 
   const handleResendWhatsApp = async (invoice: Invoice) => {
     const phone = invoice.customers?.phone
@@ -131,7 +138,7 @@ export function InvoicesPage() {
       toast.error('Customer phone number not available')
       return
     }
-    const saleData = saleDataFrom(invoice)
+    const saleData = await saleDataWithCredit(invoice)
     const how = await sendWhatsAppDocument(phone, {
       html: buildBillHTML(saleData),
       caption: buildBillMessage(saleData),
@@ -378,7 +385,7 @@ export function InvoicesPage() {
         </div>
 
         {/* Payment Summary */}
-        {invoices.length > 0 && (
+        {(invoices.length > 0 || exchanges.length > 0) && (
           <div className="payment-summary">
             {Object.entries(paymentBreakdown).map(([mode, { count, total }]) => {
               if (count === 0) return null
