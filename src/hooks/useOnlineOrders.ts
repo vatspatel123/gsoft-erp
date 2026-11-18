@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, cloud } from '../lib/supabase'
 import type { OnlineOrder, OnlineOrderStatus, OnlineOrderItem } from '../types/ecommerce'
 import toast from 'react-hot-toast'
 import { sendWhatsApp } from '../utils/whatsapp'
@@ -22,7 +22,7 @@ export function useOnlineOrders() {
     setLoading(true)
     try {
       if (navigator.onLine) {
-        const { data, error } = await supabase
+        const { data, error } = await cloud
           .from('online_orders')
           .select('*')
           .order('created_at', { ascending: false })
@@ -47,7 +47,7 @@ export function useOnlineOrders() {
 
     if (!navigator.onLine) return
     try {
-      const channel = supabase
+      const channel = cloud
         .channel('online_orders_realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'online_orders' }, payload => {
           if (payload.eventType === 'INSERT') {
@@ -72,7 +72,7 @@ export function useOnlineOrders() {
         .subscribe()
 
       return () => {
-        supabase.removeChannel(channel)
+        cloud.removeChannel(channel)
       }
     } catch (e) {
       console.warn('Realtime channel notice:', e)
@@ -86,7 +86,7 @@ export function useOnlineOrders() {
 
     if (navigator.onLine) {
       try {
-        await supabase
+        await cloud
           .from('online_orders')
           .update({ order_status: newStatus })
           .eq('id', orderId)
@@ -109,7 +109,7 @@ export function useOnlineOrders() {
 
     if (navigator.onLine) {
       try {
-        await supabase
+        await cloud
           .from('online_orders')
           .update({
             tracking_courier: courier,
@@ -155,7 +155,7 @@ export function useOnlineOrders() {
 
     if (navigator.onLine) {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await cloud
           .from('online_orders')
           .insert(newOrder)
           .select()

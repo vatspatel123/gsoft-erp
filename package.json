@@ -1,7 +1,7 @@
 {
   "name": "gsoft-erp",
   "private": true,
-  "version": "1.0.46",
+  "version": "1.0.47",
   "author": "GSoft Ahmedabad",
   "description": "Retail ERP Fashion Edition",
   "main": "electron/main.js",
@@ -15,7 +15,7 @@
     "relay": "node --env-file=.env.local server/index.js",
     "typecheck": "tsc -b --force",
     "start": "concurrently -n relay,app -c magenta,cyan \"npm:relay\" \"npm:dev\"",
-    "release": "npm run build && electron-builder --win --x64 --publish always"
+    "release": "node scripts/fetch-localdb-bin.mjs && npm run build && electron-builder --win --x64 --publish always"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.3",
@@ -24,6 +24,7 @@
     "jsbarcode": "^3.12.3",
     "lucide-react": "^0.577.0",
     "papaparse": "^5.5.3",
+    "pg": "^8.23.1",
     "pino": "^10.3.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
@@ -101,6 +102,12 @@
       "releaseType": "release"
     },
     "asar": true,
+    "extraResources": [
+      {
+        "from": "localdb-bin/win",
+        "to": "localdb"
+      }
+    ],
     "portable": {
       "artifactName": "RetailERP-Portable-${version}.${ext}"
     }

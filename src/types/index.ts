@@ -30,6 +30,14 @@ declare global {
       startInfo?: () => Promise<{ pcSession: string | null; version: string }>
       graphics?: { get: () => Promise<{ useGpu: boolean }>; set: (useGpu: boolean) => Promise<{ ok: boolean; reason?: string }>; relaunch: () => Promise<void> }
       journal?: { add: (entry: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }> }
+      localDb?: {
+        config: () => { url: string; anonKey: string } | null
+        status: () => Promise<{ available: boolean; enabled: boolean; running: boolean; since: string | null; lastSync: string | null; lastSyncError: string | null; pending: number | null; syncing: boolean }>
+        sync: () => Promise<{ ok: boolean; sent?: number; error?: string }>
+        setup: (password: string) => Promise<{ ok: boolean; error?: string }>
+        disable: () => Promise<{ ok: boolean; error?: string }>
+        onProgress: (cb: (msg: string) => void) => () => void
+      }
       backup?: {
         write: (payload: { tables: Record<string, unknown[]>; meta: Record<string, unknown> })
           => Promise<{ ok: boolean; name?: string; path?: string; size?: number; reason?: string }>

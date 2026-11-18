@@ -1196,6 +1196,81 @@ function PcBackupCard() {
   )
 }
 
+// Desktop app only: run the shop database on this PC (fast, works without internet) with a copy
+// sent to the cloud a few times a day. Off until switched on here.
+function LocalDbCard() {
+  const api = window.electronAPI?.localDb
+  const [st, setSt] = useState<Awaited<ReturnType<NonNullable<typeof api>['status']>> | null>(null)
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const refresh = () => { api?.status().then(setSt).catch(() => {}) }
+  useEffect(() => { refresh(); const t = setInterval(refresh, 30000); return () => clearInterval(t) }, [])
+  if (!api || !st?.available) return null
+  const btn = (primary: boolean, off?: boolean): React.CSSProperties => ({ padding: '9px 18px', borderRadius: '10px', fontSize: '13px', fontFamily: "'DM Sans', sans-serif",
+    cursor: off ? 'default' : 'pointer', opacity: off ? 0.6 : 1, ...(primary ? { background: '#9333ea', color: 'white', border: 'none' } : { background: 'white', color: '#9333ea', border: '1px solid #e9d5ff' }) })
+  const restart = () => setTimeout(() => window.electronAPI?.graphics?.relaunch(), 1500)
+
+  const switchOn = async () => {
+    if (!pw) { toast.error('Type the cloud database password'); return }
+    if (getPendingSales().length) {
+      await (window as any).syncPendingSales?.()
+      if (getPendingSales().length) { toast.error(`${getPendingSales().length} bill(s) are still waiting to reach the cloud. Connect to the internet and try again.`, { duration: 8000 }); return }
+    }
+    if (!window.confirm('Copy the shop data to this PC and run it from here?\n\nThe cloud copy is only read, not changed. If anything does not match, nothing is switched on.\nThe app restarts when it is done.')) return
+    const off = api.onProgress(m => setBusy(m))
+    setBusy('Starting…')
+    const r = await api.setup(pw)
+    off(); setBusy(null); setPw('')
+    if (!r.ok) { toast.error(`Not switched on: ${r.error}`, { duration: 12000 }); refresh(); return }
+    toast.success('Done. The app restarts now and runs from this PC.', { duration: 4000 })
+    restart()
+  }
+  const backupNow = async () => {
+    setBusy('Backing up to the cloud…')
+    const r = await api.sync()
+    setBusy(null); refresh()
+    if (r.ok) toast.success(r.sent ? `Backed up ${r.sent} change(s) to the cloud` : 'The cloud is already up to date')
+    else toast.error(`Backup not done: ${r.error}`, { duration: 9000 })
+  }
+  const switchOff = async () => {
+    if (!window.confirm('Go back to running from the cloud?\n\nEverything is backed up to the cloud first. The app restarts when it is done.')) return
+    setBusy('Backing up to the cloud…')
+    const r = await api.disable()
+    setBusy(null)
+    if (!r.ok) { toast.error(r.error || 'Not switched', { duration: 10000 }); refresh(); return }
+    toast.success('Back on the cloud. The app restarts now.')
+    restart()
+  }
+
+  return (
+    <Card>
+      <SectionTitle sub="Faster, and billing works without internet. A copy goes to the cloud about 3 times a day and when the app closes.">Shop database on this PC</SectionTitle>
+      {st.enabled ? <>
+        <div style={{ fontSize: '13px', color: '#1a0a2e', marginBottom: '4px' }}>
+          <b style={{ color: '#16a34a' }}>On</b>{st.since ? <> · running on this PC since {fmtDateTime(new Date(st.since))}</> : null}
+        </div>
+        <div style={{ fontSize: '13px', color: '#1a0a2e', marginBottom: '4px' }}>
+          Last cloud backup: <b>{st.lastSync ? fmtDateTime(new Date(st.lastSync)) : 'not yet'}</b>
+          {st.pending != null && <> · {st.pending ? `${st.pending} change(s) waiting` : 'nothing waiting'}</>}
+        </div>
+        {st.lastSyncError && <div style={{ fontSize: '12px', color: '#dc2626', marginBottom: '4px' }}>Last try failed: {st.lastSyncError}</div>}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+          <button onClick={backupNow} disabled={!!busy} style={btn(true, !!busy)}>{busy || 'Back up to cloud now'}</button>
+          <button onClick={switchOff} disabled={!!busy} style={btn(false, !!busy)}>Switch back to cloud</button>
+        </div>
+      </> : <>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '10px' }}>Off: the app uses the cloud database (as now).</div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Cloud database password" autoComplete="off" data-enter="own"
+            onKeyDown={e => { if (e.key === 'Enter' && !busy) { e.preventDefault(); void switchOn() } }}
+            style={{ padding: '9px 12px', borderRadius: '10px', border: '1px solid #e9d5ff', fontSize: '13px', minWidth: '220px' }} />
+          <button onClick={switchOn} disabled={!!busy} style={btn(true, !!busy)}>{busy || 'Switch on'}</button>
+        </div>
+      </>}
+    </Card>
+  )
+}
+
 function DataBackupTab() {
   const [dbStatus, setDbStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
   const [dangerText, setDangerText] = useState('')
@@ -1292,6 +1367,7 @@ function DataBackupTab() {
   return (
     <>
       <PcBackupCard />
+      <LocalDbCard />
       <Card>
         <SectionTitle sub="Download your data as CSV files">Export Data</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

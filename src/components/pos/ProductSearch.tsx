@@ -210,6 +210,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
   const search = async (q: string) => {
     if (!q || q.trim().length === 0) { setResults([]); setShow(false); return }
     const searchStr = q.trim().toLowerCase()
+    const seq = ++searchSeq.current
     setLoading(true)
     // This PC's matches straight away; the server's answer below fills in the rest.
     const quick = sortProducts(searchCachedProducts(searchStr, 50), searchStr)
@@ -243,6 +244,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
       for (const p of fetched) map.set(p.id, p)
 
       const merged = sortProducts(Array.from(map.values()), searchStr)
+      if (seq !== searchSeq.current) return   // a scan or newer search came after this one
       setResults(merged)
       setShow(merged.length > 0)
     } catch (e) {
@@ -252,26 +254,45 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
     }
   }
 
+  // A scanner types the whole code in a few milliseconds. If its Enter is lost (or the
+  // scanner sends none), the code is still added once the burst stops.
+  const burstStart = useRef(0)
+  const burstTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchSeq = useRef(0)   // a search answer that arrives after a scan must not reopen the list
+
+  const submitScan = (raw: string) => {
+    const val = raw.trim()
+    if (burstTimer.current) { clearTimeout(burstTimer.current); burstTimer.current = null }
+    if (!val) return
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    searchSeq.current++
+    setQuery('')
+    setResults([])
+    setShow(false)
+    handleBarcodeSearch(val)
+  }
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setQuery(val)
     // Debounce manual typing
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     debounceTimer.current = setTimeout(() => search(val), 300)
+
+    const now = performance.now()
+    if (val.length <= 1) burstStart.current = now
+    if (burstTimer.current) { clearTimeout(burstTimer.current); burstTimer.current = null }
+    // ponytail: 6+ characters at under 30 ms each is a scanner, never a person typing.
+    if (val.length >= 6 && (now - burstStart.current) / (val.length - 1) < 30) {
+      burstTimer.current = setTimeout(() => submitScan(inputRef.current?.value ?? val), 150)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      const val = query.trim()
-      console.log('Enter pressed, value:', val)
-      if (!val) return
-      // Clear debounce — scanner wins
-      if (debounceTimer.current) clearTimeout(debounceTimer.current)
-      setQuery('')
-      setResults([])
-      setShow(false)
-      handleBarcodeSearch(val)
+      // The box's own text, not the last saved state: a fast scanner's Enter can arrive first.
+      submitScan(e.currentTarget.value)
       return
     }
     // Arrow keys to navigate dropdown (optional quality-of-life)

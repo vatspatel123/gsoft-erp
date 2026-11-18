@@ -36,3 +36,6 @@ backups/
 
 # Sales collateral — commercial positioning, not for a public repo
 sales/
+
+# Windows database programs for local mode (downloaded by scripts/fetch-localdb-bin.mjs)
+localdb-bin/

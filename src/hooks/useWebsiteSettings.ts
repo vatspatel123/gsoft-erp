@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { cloud } from '../lib/supabase'
 import type { WebsiteSettings } from '../types/ecommerce'
 import toast from 'react-hot-toast'
 
@@ -45,7 +45,7 @@ export function useWebsiteSettings() {
     setLoading(true)
     try {
       if (navigator.onLine) {
-        const { data, error } = await supabase
+        const { data, error } = await cloud
           .from('website_settings')
           .select('*')
           .limit(1)
@@ -78,19 +78,19 @@ export function useWebsiteSettings() {
     try {
       if (navigator.onLine) {
         // Upsert to Supabase
-        const { data: existing } = await supabase
+        const { data: existing } = await cloud
           .from('website_settings')
           .select('id')
           .limit(1)
           .maybeSingle()
 
         if (existing?.id) {
-          await supabase
+          await cloud
             .from('website_settings')
             .update(updated)
             .eq('id', existing.id)
         } else {
-          await supabase
+          await cloud
             .from('website_settings')
             .insert(updated)
         }

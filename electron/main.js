@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, protocol, net } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, protocol, net, dialog } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const { pathToFileURL } = require('url')
@@ -132,7 +132,7 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(distPath).toString())
   })
 
-  createWindow()
+  bootLocalDb().then(createWindow)
 
   // If this PC has paired before, bring WhatsApp back without another QR scan.
   setTimeout(() => {
@@ -178,8 +178,49 @@ const tell = (channel) => {
 autoUpdater.on('update-available', () => tell('update-available'))
 autoUpdater.on('update-downloaded', () => tell('update-downloaded'))
 
-ipcMain.on('restart-app', () => {
+ipcMain.on('restart-app', async () => {
+  await localdb.stop().catch(() => {})   // the update can't replace the database files while they run
   autoUpdater.quitAndInstall()
+})
+
+// ---------- Local mode (shop database on this PC). Off unless switched on in Settings. ----------
+const localdb = require('./localdb')
+
+async function bootLocalDb() {
+  for (;;) {
+    try { await localdb.boot(); return } catch (e) {
+      crashLog('localdb-boot', { message: e && e.message })
+      const { response } = await dialog.showMessageBox({
+        type: 'error', title: 'Retail ERP', buttons: ['Try again', 'Close'], defaultId: 0, cancelId: 1,
+        message: "The shop database on this PC didn't start.",
+        detail: String((e && e.message) || e) + '\n\nYour data is safe on this PC. Try again, or restart the computer.',
+      })
+      if (response !== 0) { app.exit(0); return new Promise(() => {}) }
+    }
+  }
+}
+
+// On close: one last backup to the cloud (short wait), then stop the database cleanly.
+let closing = false
+app.on('before-quit', (e) => {
+  if (closing || !localdb.rendererConfig()) return
+  e.preventDefault()
+  closing = true
+  const backup = Promise.race([localdb.sync(), new Promise(r => setTimeout(r, 15000))])
+  backup.catch(() => {}).then(() => localdb.stop()).catch(() => {}).then(() => app.quit())
+})
+
+ipcMain.on('localdb:config', (e) => { e.returnValue = localdb.rendererConfig() })
+ipcMain.handle('localdb:status', () => localdb.status())
+ipcMain.handle('localdb:sync', () => localdb.sync())
+ipcMain.handle('localdb:setup', async (e, password) => {
+  try {
+    await localdb.setup(password, (msg) => { if (!e.sender.isDestroyed()) e.sender.send('localdb:progress', msg) })
+    return { ok: true }
+  } catch (err) { return { ok: false, error: String((err && err.message) || err) } }
+})
+ipcMain.handle('localdb:disable', async () => {
+  try { await localdb.disable(); return { ok: true } } catch (err) { return { ok: false, error: String((err && err.message) || err) } }
 })
 
 ipcMain.handle('update:check', async () => {

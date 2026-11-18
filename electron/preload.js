@@ -31,6 +31,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Local mode: the shop database on this PC. config() is null in cloud mode.
+  localDb: {
+    config: () => ipcRenderer.sendSync('localdb:config'),
+    status: () => ipcRenderer.invoke('localdb:status'),
+    sync: () => ipcRenderer.invoke('localdb:sync'),
+    setup: (password) => ipcRenderer.invoke('localdb:setup', password),
+    disable: () => ipcRenderer.invoke('localdb:disable'),
+    onProgress: (cb) => {
+      const h = (_e, m) => cb(m)
+      ipcRenderer.on('localdb:progress', h)
+      return () => ipcRenderer.removeListener('localdb:progress', h)
+    },
+  },
+
   // Every completed bill, written to a file on this PC that the app cannot empty.
   journal: { add: (entry) => ipcRenderer.invoke('journal:add', entry) },
 
