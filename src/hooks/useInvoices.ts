@@ -20,6 +20,8 @@ export interface Invoice {
   card_amount?: number
   upi_amount?: number
   credit_amount?: number
+  /** Paid by credit note (CREDIT_NOTE_AS_PAYMENT.sql). */
+  credit_note_amount?: number
   credit_paid?: number
   credit_status?: string
   note?: string | null
@@ -199,6 +201,7 @@ export function useInvoices() {
       payment_mode: p.paymentMode || p.payment_mode || 'cash',
       // How it was paid, so unsent bills are counted by their real split like the others.
       cash_amount: p.tenders?.cash, card_amount: p.tenders?.card, upi_amount: p.tenders?.upi, credit_amount: p.creditRemainder,
+      credit_note_amount: p.cnAsPayment ? p.creditNotePaid || 0 : 0,
       note: p.note, alteration_qty: p.alterationQty, shipping_amount: p.shipping,
       is_return: false,
       created_at: p.createdAt || p.date || new Date().toISOString(),
@@ -351,14 +354,14 @@ export function useInvoices() {
   // cash adds ₹200 to Cash and ₹1,300 to UPI — counting the whole bill under its
   // single payment_mode put all ₹1,500 in one place. Bills saved before the split
   // was recorded have no tender amounts; those still count by payment_mode.
-  const paymentBreakdown = Object.fromEntries((['cash', 'card', 'upi', 'credit'] as const).map(mode => {
+  const paymentBreakdown = Object.fromEntries((['cash', 'card', 'upi', 'credit', 'credit_note'] as const).map(mode => {
     const bills = invoices.filter(i => !i.is_return && tenderOf(i, mode) > 0)
-    const exch = topUps.filter(x => Number(x[`${mode}_amount`]) > 0)
+    const exch = mode === 'credit_note' ? [] : topUps.filter(x => Number(x[`${mode}_amount`]) > 0)
     return [mode, {
       count: bills.length + exch.length,
-      total: bills.reduce((s, i) => s + tenderOf(i, mode), 0) + exch.reduce((s, x) => s + Number(x[`${mode}_amount`]), 0),
+      total: bills.reduce((s, i) => s + tenderOf(i, mode), 0) + exch.reduce((s, x) => s + Number((x as any)[`${mode}_amount`]), 0),
     }]
-  })) as Record<'cash' | 'card' | 'upi' | 'credit', { count: number; total: number }>
+  })) as Record<'cash' | 'card' | 'upi' | 'credit' | 'credit_note', { count: number; total: number }>
 
   const processRefund = async (invoice: Invoice) => {
     try {
@@ -418,8 +421,8 @@ export function useInvoices() {
 }
 
 // Money in by how it was actually paid (see paymentBreakdown). Also used by Reports.
-export function tenderOf(i: any, mode: 'cash' | 'card' | 'upi' | 'credit'): number {
-  const t = { cash: i.cash_amount, card: i.card_amount, upi: i.upi_amount, credit: i.credit_amount }
+export function tenderOf(i: any, mode: 'cash' | 'card' | 'upi' | 'credit' | 'credit_note'): number {
+  const t = { cash: i.cash_amount, card: i.card_amount, upi: i.upi_amount, credit: i.credit_amount, credit_note: i.credit_note_amount }
   const recorded = Object.values(t).some(v => Number(v) > 0)
   return recorded ? Number(t[mode]) || 0 : (i.payment_mode === mode ? Number(i.net_amount) || 0 : 0)
 }

@@ -113,6 +113,7 @@ export function InvoicesPage() {
       upi: invoice.upi_amount || 0,
     },
     creditRemainder: invoice.credit_amount || 0,
+    creditNotePaid: Number(invoice.credit_note_amount) || 0,
     creditDueDate: invoice.credit_due_date,
     creditDueDays: invoice.credit_due_days,
     salesmanName: invoice.users?.name,
@@ -391,7 +392,7 @@ export function InvoicesPage() {
               return (
                 <div key={mode} className="payment-item">
                   <span className={`payment-badge ${getPaymentModeColor(mode)}`}>
-                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    {mode === 'credit_note' ? 'Credit note' : mode.charAt(0).toUpperCase() + mode.slice(1)}
                   </span>
                   <div>
                     <div className="payment-amount">₹{total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>

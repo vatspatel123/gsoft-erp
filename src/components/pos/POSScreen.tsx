@@ -137,6 +137,7 @@ export default function POSScreen() {
       pos.loadBill({
         items, discount: Number(sale.discount_amount) || 0, shipping: Number(sale.shipping_amount) || 0,
         tenders: { cash: Number(sale.cash_amount) || 0, card: Number(sale.card_amount) || 0, upi: Number(sale.upi_amount) || 0 },
+        creditNote: Number(sale.credit_note_amount) || 0,
       })
       setBillNote(sale.note || '')
       setAlterationQty(Number(sale.alteration_qty) || 0)
@@ -157,7 +158,7 @@ export default function POSScreen() {
     const pay = billEditPayload({
       cart: pos.cart, origQty: editOf.origQty,
       discount: pos.manualDiscountAmount, shipping: pos.shipping,
-      tenders: pos.tenders, screenPending: pos.creditRemainder,
+      tenders: pos.tenders, screenPending: pos.creditRemainder, creditNote: pos.creditNotePaid,
       note: billNote, alteration: alterationQty,
       customerId: pos.customer?.id || '', origCustomerId: editOf.customerId,
       salesmanId: selectedSalesman?.id || '', origSalesmanId: editOf.salesmanId,
@@ -443,6 +444,7 @@ export default function POSScreen() {
         <div className="pos-right">
           <OrderSummary key={billKey} 
             {...pos}
+            netAmount={pos.amountToPay}
             {...(editOf ? { editing: true, activeCreditNotes: [], availableCredit: 0, maxApplicableCredit: 0, creditNoteDiscount: 0, maxRedeemable: 0, loyaltyToRedeem: 0, customerDues: [], isSaving: savingEdit } : {})}
             cartLength={pos.cart.length}
             completeSale={handleCompleteSale}

@@ -61,7 +61,8 @@ export interface BillEdit {
 export const saleLineTotal = (l: Pick<SaleLine, 'unit_price' | 'qty' | 'discount_pct'>) =>
   Math.round(l.unit_price * l.qty * (1 - (l.discount_pct || 0) / 100) * 100) / 100
 
-export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash: number; card: number; upi: number }, shipping = 0) {
+/** creditNote: what a credit note paid on the bill (CREDIT_NOTE_AS_PAYMENT.sql); it counts as paid. */
+export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash: number; card: number; upi: number }, shipping = 0, creditNote = 0) {
   const subtotal = lines.reduce((s, l) => s + saleLineTotal(l), 0)
   const gst = lines.reduce((s, l) => {
     const t = saleLineTotal(l), r = (l.gst_rate || 0) / 100
@@ -71,10 +72,12 @@ export function saleTotals(lines: SaleLine[], discount: number, tenders: { cash:
   const ship = Math.max(0, Number(shipping) || 0)   // charged on top, no GST (see edit_sale)
   const net = Math.round((subtotal - disc + ship) * 100) / 100
   const handed = (tenders.cash || 0) + (tenders.card || 0) + (tenders.upi || 0)
-  const kept = appliedTenders(tenders, net)
+  const cn = Math.max(0, Number(creditNote) || 0)
+  const due = Math.max(0, net - cn)
+  const kept = appliedTenders(tenders, due)
   const paid = kept.cash + kept.card + kept.upi
-  const udhar = Math.max(0, Math.round((net - paid) * 100) / 100)
-  const change = Math.max(0, Math.round((handed - net) * 100) / 100)
+  const udhar = Math.max(0, Math.round((due - paid) * 100) / 100)
+  const change = Math.max(0, Math.round((handed - due) * 100) / 100)
   return { subtotal, gst, discount: disc, shipping: ship, net, paid, udhar, change, kept }
 }
 
@@ -102,6 +105,8 @@ export function billEditPayload(a: {
   tenders: { cash: number; card: number; upi: number }
   /** What the billing screen itself shows as still to be paid. */
   screenPending: number
+  /** Paid by credit note when the bill was made (kept as it was). */
+  creditNote?: number
   note: string; alteration: number
   customerId: string; origCustomerId: string
   salesmanId: string; origSalesmanId: string
@@ -111,7 +116,7 @@ export function billEditPayload(a: {
     gst_rate: Number(i.product.gst_rate) || 0, orig_qty: a.origQty[i.product.id] || 0, stock_qty: 0,
   }))
   const discount = Math.round((a.discount || 0) * 100) / 100
-  const t = saleTotals(lines, discount, a.tenders, a.shipping)
+  const t = saleTotals(lines, discount, a.tenders, a.shipping, a.creditNote || 0)
   // The screen adds item amounts unrounded, the database rounds each line. When the screen says "fully paid"
   // but the database finds a few paise left, put those paise on the biggest payment so the bill does not
   // turn into a pending one over a rounding difference.

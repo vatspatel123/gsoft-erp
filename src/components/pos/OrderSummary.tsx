@@ -23,6 +23,8 @@ interface OrderSummaryProps {
   creditToApply?: number;
   setCreditToApply?: (amount: number) => void;
   creditNoteDiscount?: number;
+  /** Paid by credit note on this bill (a payment, shown under the discount). netAmount is what is left to pay. */
+  creditNotePaid?: number;
   availableCredit?: number;
   maxApplicableCredit?: number;
   manualDiscount?: number;
@@ -874,6 +876,12 @@ export function OrderSummary(props: OrderSummaryProps) {
           <div className="tot-row discount-row">
             <span>Discount</span>
             <span style={{ fontFamily: "'DM Mono', monospace" }}>-₹{props.totalDiscount.toFixed(2)}</span>
+          </div>
+        )}
+        {Number(props.creditNotePaid || 0) > 0 && (
+          <div className="tot-row discount-row">
+            <span>Paid by credit note</span>
+            <span style={{ fontFamily: "'DM Mono', monospace" }}>-₹{Number(props.creditNotePaid).toFixed(2)}</span>
           </div>
         )}
         <div className="tot-row net-row">

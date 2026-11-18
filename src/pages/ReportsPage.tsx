@@ -283,14 +283,17 @@ export default function ReportsPage() {
     ? totalRevenue / sales.length : 0
 
   // By the bill's actual split: ₹1,100 cash + ₹2,450 pending counts in both.
-  const payBreakdown = (['cash','card','upi','credit'] as const)
+  const payBreakdown = (['cash','card','upi','credit','credit_note'] as const)
     .map(mode => ({
       mode,
+      label: mode === 'credit_note' ? 'credit note' : mode,
       sales: sales.filter(s => tenderOf(s, mode) > 0),
       // Includes what customers paid extra on exchanges in this period.
-      revenue: sales.reduce((t, x) => t + tenderOf(x, mode), 0) + exch[mode],
-      bills: sales.filter(s => tenderOf(s, mode) > 0).length + exch.modeCount[mode],
+      revenue: sales.reduce((t, x) => t + tenderOf(x, mode), 0) + (mode === 'credit_note' ? 0 : exch[mode]),
+      bills: sales.filter(s => tenderOf(s, mode) > 0).length + (mode === 'credit_note' ? 0 : exch.modeCount[mode]),
     }))
+    // The credit note tile only appears when a credit note paid something in the period.
+    .filter(p => p.mode !== 'credit_note' || p.revenue > 0)
 
   // One row per real product name: TOP / top and 3 pc / 3pc are the same product, so they
   // are counted together (the spelling used on most pieces is the one shown).
@@ -438,11 +441,11 @@ export default function ReportsPage() {
 
   const modeColor: Record<string,string> = {
     cash: '#64748b', card: '#2563eb',
-    upi: '#16a34a', credit: '#f97316'
+    upi: '#16a34a', credit: '#f97316', credit_note: '#9333ea'
   }
   const modeBg: Record<string,string> = {
     cash: '#f1f5f9', card: '#eff6ff',
-    upi: '#f0fdf4', credit: '#fff7ed'
+    upi: '#f0fdf4', credit: '#fff7ed', credit_note: '#faf5ff'
   }
   const medalEmoji = ['🥇','🥈','🥉']
 
@@ -621,7 +624,7 @@ export default function ReportsPage() {
                           marginTop: '4px',
                           textTransform: 'capitalize'
                         }}>
-                          {p.mode} · {p.bills} bills
+                          {p.label} · {p.bills} bills
                         </div>
                         <div style={{
                           fontSize: '10px',
@@ -1740,7 +1743,7 @@ export default function ReportsPage() {
                           fontWeight: '500',
                           marginBottom: '6px'
                         }}>
-                          {p.mode}
+                          {p.label}
                           {p.mode === 'credit'
                             && ' ⚠'}
                         </div>

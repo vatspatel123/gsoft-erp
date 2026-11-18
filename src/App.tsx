@@ -238,6 +238,8 @@ function AppContent() {
               card_amount: sale.tenders?.card || 0,
               upi_amount: sale.tenders?.upi || 0,
               credit_amount: sale.creditRemainder || 0,
+              // Bills queued by this version: the credit note is a payment. Older queued bills have it in the discount.
+              ...(sale.cnAsPayment && sale.creditNotePaid > 0 ? { credit_note_amount: sale.creditNotePaid } : {}),
               shipping_amount: Math.max(0, Number(sale.shipping) || 0),
               ...(sale.backdated && sale.date ? { created_at: sale.date } : {}),
               note: sale.note || null,

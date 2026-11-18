@@ -168,6 +168,8 @@ export function buildBillMessage(saleData: any, settingsOverride?: Partial<AppSe
   )
 
   const creditLeft = saleData.creditLeft
+  const cnPaid = Number(saleData.creditNotePaid) || 0
+  if (cnPaid > 0) lines.splice(lines.length - 3, 0, '', `Paid by credit note: Rs. ${cnPaid.toFixed(2)}`)
   if (creditLeft?.total > 0) {
     lines.splice(lines.length - 3, 0, '', `Credit note balance${creditLeft.asOn ? ` as on ${creditLeft.asOn}` : ''}: Rs. ${Number(creditLeft.total).toFixed(2)}`)
   }
@@ -254,6 +256,8 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   if (d.showPayment) {
     const t = tenders || {}
     const entries: [string, number][] = [
+      // Only on bills a credit note paid: every other bill prints exactly as before.
+      ...(Number(saleData.creditNotePaid) > 0 ? [['Credit note', Number(saleData.creditNotePaid)] as [string, number]] : []),
       ['Cash', Number(t.cash || 0)],
       ['UPI', Number(t.upi || 0)],
       ['Card', Number(t.card || 0)],
@@ -375,6 +379,7 @@ export function buildBillHTML(saleData: any, settingsOverride?: Partial<AppSetti
   ${d.showRound && Math.abs(roundOff) >= 0.01 ? `<div class="adj"><span>Round off</span><span>${roundOff > 0 ? '+' : ''}${money(roundOff)}</span></div>` : ''}
 
   <div class="net" style="font-size:${d.netSize}px"><span>${esc(d.netLabel)}</span><span>${money(netAmount)}</span></div>
+  ${!d.showPayment && Number(saleData.creditNotePaid) > 0 ? `<div class="adj"><span>Paid by credit note</span><span>${money(saleData.creditNotePaid)}</span></div>` : ''}
 
   ${d.showSalesman && salesmanName ? `<div class="who">${esc(salesmanName)}</div>` : ''}
   ${d.showTerms && terms ? `<div class="terms">${terms}</div>` : ''}

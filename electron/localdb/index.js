@@ -82,9 +82,26 @@ function waitHttp(url, ms) {
     tryOnce()
   })
 }
+// Database changes shipped with an update (the same SQL the owner runs in the cloud), applied
+// once on this PC's copy. File names sort in date order.
+async function migrate(local) {
+  await local.query('create table if not exists local_sync.migrations (name text primary key, at timestamptz not null default now())')
+  const dir = path.join(__dirname, 'migrations')
+  for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) {
+    if ((await local.query('select 1 from local_sync.migrations where name = $1', [f])).rowCount) continue
+    await local.query('begin')
+    try {
+      await local.query(fs.readFileSync(path.join(dir, f), 'utf8'))
+      await local.query('insert into local_sync.migrations (name) values ($1)', [f])
+      await local.query('commit')
+    } catch (e) { await local.query('rollback').catch(() => {}); throw new Error(`Update ${f} could not be applied: ${e.message}`) }
+  }
+}
+
 async function startServices() {
   const cfg = readCfg()
   await startPg()
+  await withPg(localPg(), migrate)
   if (!rest) {
     const conf = path.join(root(), 'postgrest.conf')
     fs.writeFileSync(conf, [
@@ -137,9 +154,10 @@ async function cloudTables(c) {
   const { rows } = await c.query(`select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by 1`)
   return [['auth', 'users'], ['auth', 'identities'], ...rows.map(r => ['public', r.table_name])]
 }
-/** Same rows, same values: count + a fingerprint of every row's text. */
-async function fingerprint(c, schema, table) {
-  const { rows } = await c.query(`select count(*)::int n, md5(coalesce(string_agg(t::text, '|' order by t::text), '')) h from ${q(schema)}.${q(table)} t`)
+/** Same rows, same values: count + a fingerprint of every row's text (over the columns both sides have). */
+async function fingerprint(c, schema, table, cols) {
+  const row = `row(${cols.map(x => 't.' + q(x)).join(',')})::text`
+  const { rows } = await c.query(`select count(*)::int n, md5(coalesce(string_agg(${row}, '|' order by ${row}), '')) h from ${q(schema)}.${q(table)} t`)
   return rows[0]
 }
 
@@ -167,6 +185,7 @@ async function setup(password, progress = () => {}) {
     await withPg(localPg('postgres'), c => c.query('create database shop'))
     await withPg(localPg(), async (local) => {
       await local.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'))
+      await migrate(local)
       await local.query(`alter role authenticator password '${pgPassword}'`)
 
       await withPg(cloudPg(password), async (cloud) => {
@@ -176,7 +195,8 @@ async function setup(password, progress = () => {}) {
         let i = 0
         for (const [schema, table] of tables) {
           progress(`Copying ${table} (${++i}/${tables.length})…`)
-          const cols = await columns(local, schema, table)
+          const cloudCols = new Set(await columns(cloud, schema, table))
+          const cols = (await columns(local, schema, table)).filter(c => cloudCols.has(c))
           const { rows } = await cloud.query(`select coalesce(json_agg(t), '[]')::text j from ${q(schema)}.${q(table)} t`)
           const list = cols.map(q).join(',')
           await local.query('begin; set local session_replication_role = replica')
@@ -186,7 +206,9 @@ async function setup(password, progress = () => {}) {
         progress('Checking every table against the cloud…')
         const wrong = []
         for (const [schema, table] of tables) {
-          const [a, b] = [await fingerprint(cloud, schema, table), await fingerprint(local, schema, table)]
+          const cloudCols = new Set(await columns(cloud, schema, table))
+          const cols = (await columns(local, schema, table)).filter(c => cloudCols.has(c))
+          const [a, b] = [await fingerprint(cloud, schema, table, cols), await fingerprint(local, schema, table, cols)]
           if (a.n !== b.n || a.h !== b.h) wrong.push(`${table} (cloud ${a.n}, this PC ${b.n})`)
         }
         await cloud.query('rollback')
