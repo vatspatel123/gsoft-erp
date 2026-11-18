@@ -14,9 +14,13 @@ import { findCustomerByPhone } from '../../utils/customerLookup';
 import { journalBill } from '../../utils/billJournal';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import { editSale, billEditPayload, money } from '../../utils/billEdits';
+import { S } from '../bills/billEditStyles';
 import '../../styles/pos.css';
 
 export default function POSScreen() {
+  const navigate = useNavigate();
   const [salesmen, setSalesmen] = useState<any[]>([]);
   const [selectedSalesman, setSelectedSalesman] = useState<any>(null);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -88,6 +92,92 @@ export default function POSScreen() {
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesmenLoaded])
+  // Invoices -> Edit: this same screen, filled with a saved bill. "Save Changes" runs the database's own
+  // edit (stock moves by the difference, the old version goes to the bill's history). Nothing else about
+  // making a bill changes: everything below only switches on while editOf is set.
+  const [editOf, setEditOf] = useState<null | {
+    id: string; invoiceNo: string; customerId: string; salesmanId: string; origQty: Record<string, number>
+  }>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [editReason, setEditReason] = useState('');
+  const [editPw, setEditPw] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  useEffect(() => {
+    if (!salesmenLoaded) return
+    let id: string | null = null
+    try { id = sessionStorage.getItem('pos_edit'); if (id) sessionStorage.removeItem('pos_edit') } catch { /* nothing to open */ }
+    if (!id) return
+    void (async () => {
+      const { data: sale, error } = await supabase.from('sales')
+        .select('*, customers(*), users(name), sale_items(product_id, qty, unit_price, discount_pct)')
+        .eq('id', id).single()
+      if (error || !sale) { toast.error('Could not open this bill for editing'); return }
+      if (sale.is_return) { toast.error('A return cannot be edited'); return }
+      const ids = (sale.sale_items || []).map((i: any) => i.product_id).filter(Boolean)
+      const { data: prods } = ids.length ? await supabase.from('products').select('*, categories(name)').in('id', ids) : { data: [] as any[] }
+      const byId = new Map((prods || []).map((p: any) => [p.id, p]))
+      if ((sale.sale_items || []).some((i: any) => !byId.get(i.product_id))) { toast.error('An item on this bill is no longer in the product list'); return }
+      // The bill's own pieces are already off the shelf: they count as available to this bill.
+      const origQty: Record<string, number> = {}
+      for (const i of sale.sale_items || []) origQty[i.product_id] = (origQty[i.product_id] || 0) + Number(i.qty)
+      const items = (sale.sale_items || []).map((i: any) => {
+        const p: any = byId.get(i.product_id)
+        const qty = Number(i.qty), rate = Number(i.unit_price), d = Number(i.discount_pct) || 0
+        return { product: { ...p, stock_qty: (Number(p.stock_qty) || 0) + (origQty[i.product_id] || 0) }, qty, unit_price: rate, discount_pct: d, line_total: rate * qty * (1 - d / 100) }
+      })
+      const sid = sale.salesman_id || ''
+      let sm = salesmen.find(x => x.id === sid) || null
+      if (sid && !sm) {   // a salesman who is no longer active is still the bill's salesman
+        sm = { id: sid, name: sale.users?.name || 'Salesman', role: 'staff', is_active: true }
+        setSalesmen(prev => [...prev, sm])
+      }
+      setSelectedSalesman(sm)
+      pos.selectCustomer(sale.customers || null)
+      pos.loadBill({
+        items, discount: Number(sale.discount_amount) || 0, shipping: Number(sale.shipping_amount) || 0,
+        tenders: { cash: Number(sale.cash_amount) || 0, card: Number(sale.card_amount) || 0, upi: Number(sale.upi_amount) || 0 },
+      })
+      setBillNote(sale.note || '')
+      setAlterationQty(Number(sale.alteration_qty) || 0)
+      setEditOf({ id: sale.id, invoiceNo: sale.invoice_no, customerId: sale.customer_id || '', salesmanId: sid, origQty })
+      toast(`Editing ${sale.invoice_no}: change what is needed, then press Save Changes`, { icon: '✏️', duration: 6000 })
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesmenLoaded])
+
+  const leaveEdit = (message?: string) => {
+    if (message) toast.success(message)
+    setEditOf(null); setSaveOpen(false); setEditReason(''); setEditPw('')
+    navigate('/invoices')
+  }
+
+  const saveEdit = async () => {
+    if (!editOf) return
+    const pay = billEditPayload({
+      cart: pos.cart, origQty: editOf.origQty,
+      discount: pos.manualDiscountAmount, shipping: pos.shipping,
+      tenders: pos.tenders, screenPending: pos.creditRemainder,
+      note: billNote, alteration: alterationQty,
+      customerId: pos.customer?.id || '', origCustomerId: editOf.customerId,
+      salesmanId: selectedSalesman?.id || '', origSalesmanId: editOf.salesmanId,
+    })
+    if (!pos.cart.length) { toast.error('A bill needs at least one item'); return }
+    if (editReason.trim().length < 3) { toast.error('Please write why this bill is being edited'); return }
+    if (pay.salesmanChanged && !editPw) { toast.error('Changing the salesman needs the admin password'); return }
+    setSavingEdit(true)
+    const res = await editSale(editOf.id, pay.changes, pay.lines, editReason.trim(),
+      pay.salesmanChanged ? { login: '', password: editPw } : undefined)
+    setSavingEdit(false)
+    if (!res.ok) { toast.error(res.error, { duration: 6000 }); return }
+    leaveEdit(`Bill ${editOf.invoiceNo} updated${res.udhar > 0 ? ` · pending ${money(res.udhar)}` : ''}`)
+  }
+
+  // While editing, a piece the bill already holds is not counted against the shelf twice.
+  const selectProduct = (p: any) => {
+    if (!editOf) return pos.addToCart(p)
+    return pos.addToCart({ ...p, stock_qty: (Number(p.stock_qty) || 0) + (editOf.origQty[p.id] || 0) })
+  }
   const [showModal, setShowModal] = useState(false);
   const [completedSaleData, setCompletedSaleData] = useState<any>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -106,6 +196,7 @@ export default function POSScreen() {
   };
 
   const handleCompleteSale = async () => {
+    if (editOf) { setSaveOpen(true); return }
     if (!selectedSalesman) {
       toast.error('⚠️ Please select a salesperson before completing the sale', { duration: 3000 });
       return;
@@ -144,6 +235,16 @@ export default function POSScreen() {
     <Layout>
       <div className="pos-screen">
         <div className="pos-left">
+          {editOf && (
+            <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '12px', padding: '10px 14px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ color: '#6b21a8', fontWeight: 700, fontSize: '13px' }}>✏️ Editing bill {editOf.invoiceNo}</span>
+              <span style={{ color: '#7c3aed', fontSize: '12px' }}>Change what is needed, then press Save Changes. Stock and the pending amount follow the difference; the old version is kept in the bill's history.</span>
+              <button onClick={() => { startFresh(); leaveEdit() }}
+                style={{ marginLeft: 'auto', background: 'white', color: '#7c3aed', border: '1px solid #d8b4fe', borderRadius: '8px', padding: '5px 12px', fontSize: '12px', cursor: 'pointer' }}>
+                Cancel (bill stays as it was)
+              </button>
+            </div>
+          )}
           {rebillOf && (
             <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '12px', padding: '10px 14px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <span style={{ color: '#6b21a8', fontWeight: 700, fontSize: '13px' }}>✏️ Re-making unsent bill {rebillOf.invoiceNo}</span>
@@ -249,7 +350,7 @@ export default function POSScreen() {
               {/* Search bar — takes all space */}
               <div style={{ flex: 1 }}>
                 <ProductSearch key={billKey}
-                  onSelect={pos.addToCart}
+                  onSelect={selectProduct}
                   onOpenAddProduct={handleOpenAddProduct}
                 />
               </div>
@@ -313,6 +414,7 @@ export default function POSScreen() {
             onUpdateQty={pos.updateQty}
             onUpdateDiscount={pos.updateDiscount}
             onRemove={pos.removeFromCart}
+            onUpdatePrice={editOf ? pos.setUnitPrice : undefined}
           />
 
           {/* Bill note */}
@@ -341,6 +443,7 @@ export default function POSScreen() {
         <div className="pos-right">
           <OrderSummary key={billKey} 
             {...pos}
+            {...(editOf ? { editing: true, activeCreditNotes: [], availableCredit: 0, maxApplicableCredit: 0, creditNoteDiscount: 0, maxRedeemable: 0, loyaltyToRedeem: 0, customerDues: [], isSaving: savingEdit } : {})}
             cartLength={pos.cart.length}
             completeSale={handleCompleteSale}
             alterationQty={alterationQty}
@@ -368,8 +471,35 @@ export default function POSScreen() {
           <AddProductModal
             barcode={addProductBarcode}
             onClose={() => { setShowAddModal(false); setAddProductBarcode('') }}
-            onAdded={product => pos.addToCart(product, true)}
+            onAdded={product => editOf ? selectProduct(product) : pos.addToCart(product, true)}
           />
+        )}
+
+        {saveOpen && editOf && (
+          <div style={S.overlay} onClick={() => !savingEdit && setSaveOpen(false)}>
+            <div style={{ ...S.card, maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+              <div style={S.head}>
+                <div>
+                  <div style={S.title}>Save changes to {editOf.invoiceNo}</div>
+                  <div style={S.sub}>New total ₹{pos.netAmount.toFixed(2)}{pos.creditRemainder > 0 ? ` · pending ₹${pos.creditRemainder.toFixed(2)}` : ''}</div>
+                </div>
+              </div>
+              <div style={S.body}>
+                <div style={S.section}>Why is this bill being edited?</div>
+                <input style={{ ...S.input, width: '100%' }} autoFocus data-enter="own" value={editReason} placeholder="e.g. wrong size billed"
+                  onChange={e => setEditReason(e.target.value)} onKeyDown={e => e.key === 'Enter' && !savingEdit && saveEdit()} />
+                {(selectedSalesman?.id || '') !== editOf.salesmanId && (<>
+                  <div style={{ ...S.section, marginTop: 10 }}>Admin password (the salesman was changed)</div>
+                  <input style={{ ...S.input, width: '100%' }} type="password" data-enter="own" value={editPw}
+                    onChange={e => setEditPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && !savingEdit && saveEdit()} />
+                </>)}
+                <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+                  <button style={S.btnOutline} disabled={savingEdit} onClick={() => setSaveOpen(false)}>Back</button>
+                  <button style={S.btnPrimary} disabled={savingEdit} onClick={saveEdit}>{savingEdit ? 'Saving…' : 'Save Changes'}</button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {pos.oldLotAlert && (

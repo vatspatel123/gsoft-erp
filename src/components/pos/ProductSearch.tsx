@@ -2,7 +2,11 @@ import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import toast from 'react-hot-toast'
 import { sortProducts } from '../../utils/productOrder'
-import { saveProductsToCache, searchCachedProducts, isCacheValid, getCachedProducts } from '../../utils/offlineCache'
+import { saveProductsToCache, searchCachedProducts, isCacheValid, getCachedProducts, refreshProductsInCache } from '../../utils/offlineCache'
+import { withTimeout } from '../../utils/customerLookup'
+
+// A slow line must not hold the counter: after this long, this PC's own copy answers.
+const SERVER_WAIT_MS = 5000
 import { useOnlineStatus } from '../../hooks/useOnlineStatus'
 import { colourToCSS as colourCSS } from '../../utils/design'
 
@@ -77,6 +81,27 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
     const searchLower = searchCode.toLowerCase()
     console.log('=== SEARCH / SCAN INPUT ===', searchCode)
 
+    const scanned = (match: any) => {
+      console.log('SUCCESS - selecting product:', match.name)
+      handleSelect(match)
+      setScanFlash('success')
+      setTimeout(() => setScanFlash(''), 500)
+      playBeep(true)
+      toast.success(`${match.name} scanned!`)
+    }
+
+    // This PC's copy first. It is updated the moment a product or its stock changes (live feed, and
+    // right after a purchase or edit is saved), so a piece just added is billable without waiting
+    // for the internet. Only a single, active, in-stock exact match is taken here; anything else
+    // (two pieces sharing a design no, out of stock here, not in the copy) asks the server as before.
+    const local = (getCachedProducts() || []).filter((p: any) =>
+      [p.barcode, p.sku, p.design_no, p.batch_no, p.pcode].some(v => v != null && String(v).trim().toLowerCase() === searchLower))
+    if (local.length === 1 && local[0].is_active !== false && Number(local[0].stock_qty) > 0) {
+      scanned(local[0])
+      void refreshProductsInCache([local[0].id])   // keep the copy exact for the next scan
+      return
+    }
+
     setLoading(true)
     try {
       let candidateList: any[] = []
@@ -87,19 +112,19 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
           // Ask only for what was scanned. This used to download every product
           // (over 1 MB) on each scan, which is what made scanning slow.
           const safe = searchCode.replace(/[,()*%"\\]/g, '')
-          const exact = await supabase.from('products').select('*, categories(name)')
+          const exact = await withTimeout(supabase.from('products').select('*, categories(name)')
             .or(['barcode', 'sku', 'design_no', 'batch_no', 'pcode'].map(f => `${f}.ilike."${safe}"`).join(','))
-            .limit(50)
+            .limit(50), SERVER_WAIT_MS)
           if (exact.data?.length) {
             candidateList = exact.data
           } else {
             // No code matched: the same name / design / category search as before.
-            const { data: cats } = await supabase.from('categories').select('id').ilike('name', `%${safe}%`)
+            const { data: cats } = await withTimeout(supabase.from('categories').select('id').ilike('name', `%${safe}%`), SERVER_WAIT_MS)
             const catIds = (cats || []).map(c => c.id)
-            const { data } = await supabase.from('products').select('*, categories(name)')
+            const { data } = await withTimeout(supabase.from('products').select('*, categories(name)')
               .or(`name.ilike."%${safe}%",sku.ilike."%${safe}%",design_no.ilike."%${safe}%"` +
                   (catIds.length ? `,category_id.in.(${catIds.join(',')})` : ''))
-              .limit(200)
+              .limit(200), SERVER_WAIT_MS)
             if (data && data.length > 0) candidateList = data
           }
           serverAnswered = !exact.error
@@ -145,12 +170,7 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
       }
 
       if (match) {
-        console.log('SUCCESS - selecting product:', match.name)
-        handleSelect(match)
-        setScanFlash('success')
-        setTimeout(() => setScanFlash(''), 500)
-        playBeep(true)
-        toast.success(`${match.name} scanned!`)
+        scanned(match)
         return
       }
 
@@ -191,20 +211,23 @@ export function ProductSearch({ onSelect, onOpenAddProduct }: Props) {
     if (!q || q.trim().length === 0) { setResults([]); setShow(false); return }
     const searchStr = q.trim().toLowerCase()
     setLoading(true)
+    // This PC's matches straight away; the server's answer below fills in the rest.
+    const quick = sortProducts(searchCachedProducts(searchStr, 50), searchStr)
+    if (quick.length) { setResults(quick); setShow(true) }
     try {
       let fetched: Product[] = []
       if (navigator.onLine) {
         try {
           // Typing a category ("kurtis", "3 pc") lists that category's pieces too.
-          const { data: cats } = await supabase.from('categories').select('id').ilike('name', `%${searchStr}%`)
+          const { data: cats } = await withTimeout(supabase.from('categories').select('id').ilike('name', `%${searchStr}%`), SERVER_WAIT_MS)
           const catIds = (cats || []).map(c => c.id)
-          const { data, error } = await supabase
+          const { data, error } = await withTimeout(supabase
             .from('products')
             .select('*, categories(name)')
             .or(`name.ilike.%${searchStr}%,sku.ilike.%${searchStr}%,design_no.ilike.%${searchStr}%,batch_no.ilike.%${searchStr}%,barcode.ilike.%${searchStr}%,pcode.ilike.%${searchStr}%` +
               (catIds.length ? `,category_id.in.(${catIds.join(',')})` : ''))
             .eq('is_active', true)
-            .limit(catIds.length ? 50 : 12)
+            .limit(catIds.length ? 50 : 12), SERVER_WAIT_MS)
           if (!error && data) {
             fetched = data
             saveProductsToCache(data)

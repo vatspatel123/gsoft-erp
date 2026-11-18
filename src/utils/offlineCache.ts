@@ -1,3 +1,6 @@
+import { supabase } from '../lib/supabase'
+import { withTimeout } from './customerLookup'
+
 const CACHE_KEY = 'gsoft_products_cache'
 const CACHE_TTL_MS = 30 * 60 * 1000
 
@@ -66,6 +69,35 @@ export function getCachedProducts():
     const entry: CacheEntry = JSON.parse(raw)
     return entry.products || []
   } catch { return null }
+}
+
+/** Put fresh product rows into this PC's copy, keeping anything the copy knew that the row doesn't carry (such as the category name). */
+export function mergeProductsIntoCache(rows: any[]): void {
+  if (!rows?.length) return
+  const byId = new Map((getCachedProducts() || []).map(p => [p.id, p]))
+  saveProductsToCache(rows.map(r => ({ ...(byId.get(r.id) || {}), ...r })))
+}
+
+export function removeProductsFromCache(ids: string[]): void {
+  if (!ids?.length) return
+  const gone = new Set(ids)
+  saveProductsToCache((getCachedProducts() || []).filter(p => !gone.has(p.id)), { replace: true })
+}
+
+/**
+ * Fetch just these products (by id, or by barcode for ones made a moment ago) into this PC's copy,
+ * so the billing screen sees a new piece or a new stock figure at once. Never throws; gives up after 8 s.
+ */
+export async function refreshProductsInCache(ids: string[], barcodes: string[] = []): Promise<void> {
+  const idList = [...new Set(ids.filter(Boolean))]
+  const codes = [...new Set(barcodes.map(b => String(b).trim()).filter(Boolean))]
+  if (!idList.length && !codes.length) return
+  try {
+    const ask = [idList.length && `id.in.(${idList.join(',')})`, codes.length && `barcode.in.(${codes.map(c => `"${c.replace(/"/g, '')}"`).join(',')})`]
+      .filter(Boolean).join(',')
+    const { data } = await withTimeout(supabase.from('products').select('*, categories(name)').or(ask), 8000)
+    if (data?.length) mergeProductsIntoCache(data)
+  } catch { /* the live feed and the next full refresh still catch up */ }
 }
 
 export function searchCachedProducts(

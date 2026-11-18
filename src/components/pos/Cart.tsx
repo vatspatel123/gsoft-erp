@@ -6,9 +6,11 @@ interface CartProps {
   onUpdateQty: (id: string, qty: number) => void;
   onUpdateDiscount: (id: string, pct: number) => void;
   onRemove: (id: string) => void;
+  /** Only given when a saved bill is being edited: shows a Rate box under each item. */
+  onUpdatePrice?: (id: string, price: number) => void;
 }
 
-export function Cart({ items, onUpdateQty, onUpdateDiscount, onRemove }: CartProps) {
+export function Cart({ items, onUpdateQty, onUpdateDiscount, onRemove, onUpdatePrice }: CartProps) {
   if (items.length === 0) {
     return (
       <div className="cart-empty">
@@ -87,6 +89,14 @@ export function Cart({ items, onUpdateQty, onUpdateDiscount, onRemove }: CartPro
                 )}
               </div>
             </div>
+            {onUpdatePrice && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: '#6b21a8', fontWeight: 600 }}>
+                Rate ₹
+                <input type="number" min={0} step="0.01" value={item.unit_price}
+                  onChange={e => onUpdatePrice(item.product.id, parseFloat(e.target.value) || 0)}
+                  style={{ width: 110, border: '1px solid #e9d5ff', borderRadius: 8, padding: '4px 8px', fontFamily: 'DM Mono, monospace' }} />
+              </div>
+            )}
           </div>
         );
       })}

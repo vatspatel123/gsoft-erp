@@ -3,7 +3,7 @@ import { Toaster } from 'react-hot-toast'
 import { useEffect, useState } from 'react'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useNotifications } from './hooks/useNotifications'
-import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale, isHeld } from './utils/offlineCache'
+import { saveProductsToCache, saveSalesmenToCache, getPendingSales, clearPendingSale, isHeld, mergeProductsIntoCache, removeProductsFromCache } from './utils/offlineCache'
 import { pullShopSettings, getSettings, saveSettings } from './utils/settings'
 import { autoAssignPrinters, canSelectPrinters } from './utils/printHTML'
 import { backupIfDue } from './utils/backup'
@@ -185,6 +185,25 @@ function AppContent() {
       }
     }
     preCache()
+  }, [])
+
+  // This PC's copy of the products follows every change the moment it happens (a new piece, a purchase,
+  // a purchase edit, an exchange, a return), so the billing screen can scan from it without waiting for
+  // the internet. Every 30 minutes the whole list is fetched again in the background in case a change
+  // was missed (the live feed needs LIVE_UPDATES.sql, already in use for Invoices and Products).
+  useEffect(() => {
+    const feed = supabase.channel('products-copy')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (msg: any) => {
+        if (msg.eventType === 'DELETE') { if (msg.old?.id) removeProductsFromCache([msg.old.id]) }
+        else if (msg.new?.id) mergeProductsIntoCache([msg.new])
+      })
+      .subscribe()
+    const every = setInterval(async () => {
+      if (!navigator.onLine || document.hidden) return
+      const { data } = await supabase.from('products').select('*').eq('is_active', true)
+      if (data) saveProductsToCache(data, { replace: true })
+    }, 30 * 60_000)
+    return () => { clearInterval(every); void supabase.removeChannel(feed) }
   }, [])
 
   // Sync pending offline sales when back online

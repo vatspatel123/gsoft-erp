@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { appliedTenders } from './tenders'
+import { refreshProductsInCache } from './offlineCache'
 
 /**
  * Editing bills after they're made.
@@ -89,6 +90,47 @@ export function purchaseTotals(lines: PurchaseLine[], discount: number, freight:
   return { subtotal, gst, net, roundOff: Math.round((net - pre) * 100) / 100 }
 }
 
+/**
+ * What the billing screen sends when a saved bill is edited there (the same edit_sale call the old
+ * edit window made). The totals use the database's own arithmetic (saleTotals), so what is saved is
+ * exactly what the database works out.
+ */
+export function billEditPayload(a: {
+  cart: { product: { id: string; name: string; gst_rate?: number }; qty: number; unit_price: number; discount_pct: number }[]
+  origQty: Record<string, number>
+  discount: number; shipping: number
+  tenders: { cash: number; card: number; upi: number }
+  /** What the billing screen itself shows as still to be paid. */
+  screenPending: number
+  note: string; alteration: number
+  customerId: string; origCustomerId: string
+  salesmanId: string; origSalesmanId: string
+}) {
+  const lines: SaleLine[] = a.cart.map(i => ({
+    product_id: i.product.id, name: i.product.name, qty: i.qty, unit_price: i.unit_price, discount_pct: i.discount_pct,
+    gst_rate: Number(i.product.gst_rate) || 0, orig_qty: a.origQty[i.product.id] || 0, stock_qty: 0,
+  }))
+  const discount = Math.round((a.discount || 0) * 100) / 100
+  const t = saleTotals(lines, discount, a.tenders, a.shipping)
+  // The screen adds item amounts unrounded, the database rounds each line. When the screen says "fully paid"
+  // but the database finds a few paise left, put those paise on the biggest payment so the bill does not
+  // turn into a pending one over a rounding difference.
+  let kept = { ...t.kept }
+  if (a.screenPending <= 0.009 && t.udhar > 0 && t.udhar < 0.05) {
+    const big = (['cash', 'upi', 'card'] as const).reduce((m, k) => (kept[k] > kept[m] ? k : m), 'cash' as 'cash' | 'upi' | 'card')
+    kept = { ...kept, [big]: Math.round((kept[big] + t.udhar) * 100) / 100 }
+  }
+  const changes: Record<string, unknown> = {
+    discount_amount: discount,
+    cash_amount: kept.cash, card_amount: kept.card, upi_amount: kept.upi,
+    note: a.note.trim(), alteration_qty: a.alteration, shipping_amount: a.shipping,
+  }
+  if (a.customerId !== a.origCustomerId) changes.customer_id = a.customerId
+  const salesmanChanged = a.salesmanId !== a.origSalesmanId
+  if (salesmanChanged) changes.salesman_id = a.salesmanId
+  return { lines, changes, salesmanChanged, net: t.net }
+}
+
 /** Postgres error text, without the transport noise around it. */
 const clean = (e: any): string =>
   String(e?.message || e || 'Something went wrong').replace(/^.*?ERROR:\s*/i, '').trim()
@@ -109,6 +151,7 @@ export async function editSale(
     p_auth_password: auth?.password ?? null,
   })
   if (error) return { ok: false, error: clean(error) }
+  void refreshProductsInCache(lines.map(l => l.product_id))   // stock moved: the billing screen sees it at once
   return { ok: true, net: Number(data?.net_amount), udhar: Number(data?.udhar) }
 }
 
@@ -130,6 +173,7 @@ export async function editPurchase(
     p_reason: reason,
   })
   if (error) return { ok: false, error: clean(error) }
+  void refreshProductsInCache(lines.map(l => l.product_id), lines.filter(l => !l.product_id).map(l => String(l.barcode || '')))   // new pieces and new stock: the billing screen sees them at once
   return { ok: true, net: Number(data?.net_amount), roundOff: Number(data?.round_off) }
 }
 
@@ -176,6 +220,7 @@ export async function editWholesale(
     p_reason: reason,
   })
   if (error) return { ok: false, error: clean(error) }
+  void refreshProductsInCache(lines.map((l: any) => l.product_id))   // stock moved: the billing screen sees it at once
   return { ok: true, net: Number(data?.net_amount) }
 }
 

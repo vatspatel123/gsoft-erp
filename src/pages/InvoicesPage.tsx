@@ -26,7 +26,6 @@ import {
 import '../styles/invoices.css'
 import { sendWhatsApp, sendWhatsAppDocument } from '../utils/whatsapp'
 import toast from 'react-hot-toast'
-import { EditSaleModal } from '../components/bills/EditSaleModal'
 import { BillHistoryModal } from '../components/bills/BillHistoryModal'
 import { DeleteBillModal } from '../components/bills/DeleteBillModal'
 import { DeleteUnsentBillModal } from '../components/bills/DeleteUnsentBillModal'
@@ -61,7 +60,6 @@ export function InvoicesPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
   const [refundConfirm, setRefundConfirm] = useState<Invoice | null>(null)
   const [isRefunding, setIsRefunding] = useState(false)
-  const [editingSale, setEditingSale] = useState<string | null>(null)
   const [historySale, setHistorySale] = useState<{ id: string; no: string } | null>(null)
   const [deletingSale, setDeletingSale] = useState<{ id: string; no: string } | null>(null)
   // Bills saved offline have no database row yet, so there is nothing to edit.
@@ -635,7 +633,7 @@ export function InvoicesPage() {
                           {editable(invoice) && (
                             <button
                               className="action-btn primary"
-                              onClick={() => setEditingSale(invoice.id)}
+                              onClick={() => { try { sessionStorage.setItem('pos_edit', invoice.id) } catch { toast.error('Could not open the bill for editing'); return } navigate('/') }}
                               title="Edit bill"
                             >
                               <Pencil size={16} />
@@ -883,9 +881,6 @@ export function InvoicesPage() {
       {deletingUnsent && (
         <DeleteUnsentBillModal pendingId={deletingUnsent.pendingId} billNo={deletingUnsent.no}
           onClose={() => setDeletingUnsent(null)} onDeleted={() => fetchInvoices()} />
-      )}
-      {editingSale && (
-        <EditSaleModal saleId={editingSale} onClose={() => setEditingSale(null)} onSaved={() => fetchInvoices()} />
       )}
       {historySale && (
         <BillHistoryModal type="sale" billId={historySale.id} billNo={historySale.no} onClose={() => setHistorySale(null)} />

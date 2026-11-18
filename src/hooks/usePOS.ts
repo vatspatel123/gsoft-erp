@@ -398,6 +398,20 @@ export function usePOS(salesmanId: string | null = null) {
     setTenders(prev => ({ ...prev, [kind]: Math.max(0, amount || 0) }))
   }, [])
 
+  /** Edit mode only: put a saved bill on the screen exactly as it was billed (its own rates and discounts). */
+  const loadBill = useCallback((b: { items: CartItem[]; discount: number; shipping: number; tenders: { cash: number; card: number; upi: number } }) => {
+    setCart(b.items)
+    setManualDiscountMode('flat'); setManualDiscount(b.discount)
+    setShipping(b.shipping)
+    setFullBy(null); setTenders(b.tenders)
+  }, [setShipping])
+
+  /** Edit mode only: change one item's rate (a bill can have been made at a price other than today's). */
+  const setUnitPrice = useCallback((id: string, price: number) => {
+    const p = Math.max(0, Number(price) || 0)
+    setCart(c => c.map(i => i.product.id === id ? { ...i, unit_price: p, line_total: calcLineTotal(p, i.qty, i.discount_pct) } : i))
+  }, [])
+
   const tenderTotal = tenders.cash + tenders.card + tenders.upi
   // Sub-rupee slack so floating point never leaves a stray ₹0.001 as "udhar".
   const creditRemainder = Math.max(0, Math.round((netAmount - tenderTotal) * 100) / 100)
@@ -970,7 +984,7 @@ export function usePOS(salesmanId: string | null = null) {
     creditDueDate, setCreditDueDate,
     loyaltyToRedeem, setLoyaltyToRedeem, maxRedeemable,
     subtotal, gstAmount, couponDiscount, loyaltyDiscount, totalDiscount, netAmount,
-    completeSale, clearCart, isSaving, lastSale,
+    completeSale, clearCart, isSaving, lastSale, loadBill, setUnitPrice,
     oldLotAlert, confirmUseOlderLot, confirmKeepScannedLot, dismissOldLotAlert
   }
 }

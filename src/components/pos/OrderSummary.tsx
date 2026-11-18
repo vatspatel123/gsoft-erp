@@ -66,6 +66,8 @@ interface OrderSummaryProps {
   isSaving: boolean;
   clearCart: () => void;
   cartLength: number;
+  /** A saved bill is being edited: no loyalty / store credit / dues / backdating / due days; the big button saves the changes. */
+  editing?: boolean;
 }
 
 const SAVE_LIMIT_MS = 10000
@@ -256,7 +258,7 @@ export function OrderSummary(props: OrderSummaryProps) {
   // A search answer arriving after the cashier has moved on to the new customer form must not cover the form.
   const listOpen = showCustomerDropdown && (!showNewForm || numberBoxFocused)
 
-  const canComplete = props.cartLength > 0 && !props.isSaving && !!props.customer
+  const canComplete = props.cartLength > 0 && !props.isSaving && (!!props.customer || !!props.editing)
 
   return (
     <div className="order-summary">
@@ -540,7 +542,7 @@ export function OrderSummary(props: OrderSummaryProps) {
             left intact, so restoring this block is all that's needed to re-enable it. */}
 
         {/* Credit Control Section */}
-        {props.customer && (
+        {props.customer && !props.editing && (
           <div className="summary-section">
             <div className="section-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#9333ea' }}>
               <Ticket size={12} /> Credit Control
@@ -739,7 +741,7 @@ export function OrderSummary(props: OrderSummaryProps) {
           </div>
 
           {/* A bill forgotten earlier: tick, pick the day it really happened. */}
-          {(() => {
+          {!props.editing && (() => {
             const today = new Date().toLocaleDateString('en-CA')
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
@@ -787,7 +789,7 @@ export function OrderSummary(props: OrderSummaryProps) {
           </div>
 
           {/* Credit Sale (Pending / Pay Later) Due Date Terms */}
-          {remaining > 0 && (
+          {remaining > 0 && !props.editing && (
             <div style={{
               marginTop: '10px', background: '#faf5ff', border: '1px solid #e9d5ff',
               borderRadius: '10px', padding: '10px 12px'
@@ -943,12 +945,12 @@ export function OrderSummary(props: OrderSummaryProps) {
         >
           {props.isSaving ? 'Processing...' : (
             <span>
-              Complete Sale · <span style={{ fontFamily: "'DM Mono', monospace" }}>₹{props.netAmount.toFixed(2)}</span>
+              {props.editing ? 'Save Changes' : 'Complete Sale'} · <span style={{ fontFamily: "'DM Mono', monospace" }}>₹{props.netAmount.toFixed(2)}</span>
             </span>
           )}
         </button>
 
-        {!props.customer && props.cartLength > 0 && (
+        {!props.customer && props.cartLength > 0 && !props.editing && (
           <div style={{
             textAlign: 'center', fontSize: '11px', color: '#ef4444',
             marginTop: '6px', display: 'flex', alignItems: 'center',
@@ -958,9 +960,11 @@ export function OrderSummary(props: OrderSummaryProps) {
           </div>
         )}
 
-        <button className="btn-new-sale" onClick={props.clearCart}>
-          ↺ New Sale
-        </button>
+        {!props.editing && (
+          <button className="btn-new-sale" onClick={props.clearCart}>
+            ↺ New Sale
+          </button>
+        )}
       </div>
     </div>
   )
