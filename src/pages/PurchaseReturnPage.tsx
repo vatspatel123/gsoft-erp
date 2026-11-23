@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { getCachedProducts, refreshProductsInCache } from '../utils/offlineCache'
 import { Layout } from '../components/shared/Layout'
 import { supabase } from '../lib/supabase'
 import { printPurchaseReturn } from '../utils/printBill'
 import {
-  RotateCcw, Search, Plus, Trash2, Printer,
+  RotateCcw, Search, Plus, Trash2, Printer, Pencil,
   Building2, MessageCircle, ArrowLeft, PackageCheck, AlertCircle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -49,6 +50,7 @@ export function PurchaseReturnPage() {
 
   // History list
   const [history, setHistory] = useState<any[]>([])
+  const [editing, setEditing] = useState<any>(null)   // the saved return being edited, or null for a new one
   const [historyLoading, setHistoryLoading] = useState(false)
 
   useEffect(() => {
@@ -88,31 +90,93 @@ export function PurchaseReturnPage() {
     }
   }
 
-  const searchProducts = async (q: string) => {
-    if (!q.trim()) { setProductResults([]); return }
-    setProductLoading(true)
-    try {
-      if (navigator.onLine) {
-        const { data } = await supabase
-          .from('products')
-          .select('*')
-          .or(`name.ilike.%${q}%,barcode.ilike.%${q}%,sku.ilike.%${q}%,design_no.ilike.%${q}%`)
-          .eq('is_active', true)
-          .limit(8)
-        setProductResults(data || [])
-      } else {
-        const raw = localStorage.getItem('gsoft_products_cache')
-        const all = raw ? JSON.parse(raw).data || [] : []
-        const filtered = all.filter((p: any) =>
-          p.name?.toLowerCase().includes(q.toLowerCase()) || p.barcode?.includes(q) || p.sku?.includes(q)
-        ).slice(0, 8)
-        setProductResults(filtered)
-      }
-    } catch {
-      setProductResults([])
-    } finally {
-      setProductLoading(false)
+  // Every search gets a number; only the newest one may show its results. A scanner types the
+  // whole barcode in a few milliseconds, and an early search ("2", "24"…) used to come back last
+  // and cover the right result.
+  const searchSeq = useRef(0)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const findProducts = async (raw: string): Promise<any[]> => {
+    const q = raw.trim().replace(/[",()%*]/g, '')
+    if (!q) return []
+    const ql = q.toLowerCase()
+    const exactFields = ['barcode', 'sku', 'design_no', 'batch_no', 'pcode']
+    let rows: any[] = []
+    if (navigator.onLine) {
+      try {
+        const [exact, like] = await Promise.all([
+          supabase.from('products').select('*').eq('is_active', true)
+            .or(exactFields.map(f => `${f}.eq.${q}`).join(',')).limit(100),
+          supabase.from('products').select('*').eq('is_active', true)
+            .or(`name.ilike.%${q}%,barcode.ilike.%${q}%,sku.ilike.%${q}%,design_no.ilike.%${q}%`).limit(60),
+        ])
+        if (exact.error && like.error) throw exact.error
+        // pcode/batch_no may not exist on older databases: fall back to the basic exact fields.
+        let exactRows = exact.data || []
+        if (exact.error) {
+          const { data } = await supabase.from('products').select('*').eq('is_active', true)
+            .or(['barcode', 'sku', 'design_no'].map(f => `${f}.eq.${q}`).join(',')).limit(100)
+          exactRows = data || []
+        }
+        const seen = new Set<string>()
+        rows = [...exactRows, ...(like.data || [])].filter(p => !seen.has(p.id) && seen.add(p.id))
+      } catch { rows = [] }
     }
+    if (!rows.length) {
+      // No internet (or the server failed): use this PC's copy of the products.
+      const all = (getCachedProducts() || []) as any[]
+      rows = all.filter(p => p.is_active !== false && (
+        exactFields.some(f => String(p[f] ?? '').toLowerCase() === ql) ||
+        [p.name, p.barcode, p.sku, p.design_no].some(v => String(v ?? '').toLowerCase().includes(ql))))
+    }
+    // Best match first: exact barcode/SKU, then exact design no, then starts with, then contains.
+    // Within each, pieces in stock before stock 0, then by design and size.
+    const rank = (p: any) => {
+      const eq = (v: any) => String(v ?? '').toLowerCase() === ql
+      const sw = (v: any) => String(v ?? '').toLowerCase().startsWith(ql)
+      if (eq(p.barcode) || eq(p.sku) || eq(p.batch_no) || eq(p.pcode)) return 0
+      if (eq(p.design_no)) return 1
+      if (sw(p.barcode) || sw(p.design_no) || sw(p.sku)) return 2
+      return 3
+    }
+    return rows
+      .map(p => ({ p, r: rank(p) }))
+      .sort((a, b) => a.r - b.r
+        || (Number(b.p.stock_qty) > 0 ? 1 : 0) - (Number(a.p.stock_qty) > 0 ? 1 : 0)
+        || String(a.p.design_no ?? '').localeCompare(String(b.p.design_no ?? ''))
+        || String(a.p.size ?? '').localeCompare(String(b.p.size ?? ''), undefined, { numeric: true }))
+      .map(x => x.p)
+      .slice(0, 50)
+  }
+
+  const searchProducts = (q: string, delay = 250) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    const seq = ++searchSeq.current
+    if (!q.trim()) { setProductResults([]); setProductLoading(false); return }
+    searchTimer.current = setTimeout(async () => {
+      setProductLoading(true)
+      const rows = await findProducts(q)
+      if (seq !== searchSeq.current) return   // a newer search started: drop this old result
+      setProductResults(rows)
+      setProductLoading(false)
+    }, delay)
+  }
+
+  // Enter (a scanner sends it at the end): a single exact barcode match goes straight onto the return.
+  const handleSearchEnter = async () => {
+    const q = productSearch.trim()
+    if (!q) return
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    const seq = ++searchSeq.current
+    setProductLoading(true)
+    const rows = await findProducts(q)
+    if (seq !== searchSeq.current) return
+    setProductLoading(false)
+    const ql = q.toLowerCase()
+    const exact = rows.filter(p => ['barcode', 'sku', 'batch_no', 'pcode'].some(f => String(p[f] ?? '').toLowerCase() === ql))
+    if (exact.length === 1) { addProductToReturn(exact[0]); return }
+    setProductResults(rows)
+    if (!rows.length) toast.error('No product found for ' + q)
   }
 
   const addProductToReturn = (product: any) => {
@@ -125,8 +189,11 @@ export function PurchaseReturnPage() {
       }
       return [...prev, { product, qty: 1, unitCost: cost, lineTotal: cost }]
     })
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchSeq.current++   // any search still running must not reopen the list
     setProductSearch('')
     setProductResults([])
+    setProductLoading(false)
   }
 
   const updateItemQty = (productId: string, qty: number) => {
@@ -253,6 +320,107 @@ export function PurchaseReturnPage() {
     }
   }
 
+  // ── Edit a saved return ────────────────────────────────────────────────
+  // Opens the same form filled with the saved return. Saving changes the stock only by the
+  // difference: a piece taken off the return goes back into stock, an extra piece comes out.
+  const startEdit = async (ret: any) => {
+    if (!navigator.onLine) { toast.error('Editing a return needs the internet'); return }
+    const rows: any[] = ret.purchase_return_items || []
+    const ids = [...new Set(rows.map(r => r.product_id).filter(Boolean))]
+    const { data: prods, error } = ids.length
+      ? await supabase.from('products').select('*').in('id', ids)
+      : { data: [] as any[], error: null }
+    if (error) { toast.error('Could not load the products of this return'); return }
+    const byId = new Map((prods || []).map((p: any) => [p.id, p]))
+    setReturnItems(rows.map(r => ({
+      // A product deleted since the return keeps its line, but its stock can't change.
+      product: byId.get(r.product_id) || {
+        id: `gone-${r.id}`, _missing: true, name: r.product_name, sku: r.sku, barcode: r.barcode,
+        size: r.size, colour: r.colour, stock_qty: '—',
+      },
+      qty: Number(r.qty) || 0,
+      unitCost: Number(r.unit_cost) || 0,
+      lineTotal: Number(r.line_total) || 0,
+    })))
+    setSelectedSupplier(suppliers.find(s => s.id === ret.supplier_id)
+      || { id: ret.supplier_id, name: ret.supplier_name, phone: ret.supplier_phone })
+    setReturnReason(ret.reason || RETURN_REASONS[0])
+    setNotes(ret.notes || '')
+    setProductSearch(''); setProductResults([])
+    setEditing(ret)
+    setActiveTab('new')
+  }
+
+  const cancelEdit = () => {
+    setEditing(null)
+    setReturnItems([]); setNotes(''); setReturnReason(RETURN_REASONS[0]); setSelectedSupplier(null)
+    setActiveTab('history')
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editing) return
+    if (!navigator.onLine) { toast.error('Saving the edit needs the internet'); return }
+    if (!selectedSupplier) { toast.error('Please select a supplier'); return }
+    if (returnItems.length === 0) { toast.error('A return needs at least one product'); return }
+    setSaving(true)
+    try {
+      const oldRows: any[] = editing.purchase_return_items || []
+      const oldQty = new Map<string, number>()
+      for (const r of oldRows) if (r.product_id) oldQty.set(r.product_id, (oldQty.get(r.product_id) || 0) + Number(r.qty || 0))
+      const newQty = new Map<string, number>()
+      for (const i of returnItems) if (!i.product._missing) newQty.set(i.product.id, (newQty.get(i.product.id) || 0) + i.qty)
+
+      // 1. The return itself. New lines go in before the old ones are removed, so a failure never loses lines.
+      const { error: hErr } = await supabase.from('purchase_returns').update({
+        supplier_id: selectedSupplier.id, supplier_name: selectedSupplier.name, supplier_phone: selectedSupplier.phone,
+        total_amount: totalReturnAmount, reason: returnReason, notes: notes || null,
+      }).eq('id', editing.id)
+      if (hErr) throw hErr
+      const { error: iErr } = await supabase.from('purchase_return_items').insert(returnItems.map(i => ({
+        id: crypto.randomUUID(),
+        purchase_return_id: editing.id,
+        product_id: i.product._missing ? null : i.product.id,
+        product_name: i.product.name, sku: i.product.sku, barcode: i.product.barcode,
+        size: i.product.size, colour: i.product.colour,
+        qty: i.qty, unit_cost: i.unitCost, line_total: i.lineTotal,
+      })))
+      if (iErr) throw iErr
+      if (oldRows.length) {
+        const { error: dErr } = await supabase.from('purchase_return_items').delete().in('id', oldRows.map(r => r.id))
+        if (dErr) throw dErr
+      }
+
+      // 2. Stock: only the difference.
+      const failed: string[] = []
+      const changed: string[] = []
+      for (const id of new Set([...oldQty.keys(), ...newQty.keys()])) {
+        const delta = (newQty.get(id) || 0) - (oldQty.get(id) || 0)   // more returned = less stock
+        if (!delta) continue
+        try {
+          const { data: p, error } = await supabase.from('products').select('stock_qty, name').eq('id', id).single()
+          if (error || !p) throw error
+          const stock = Number(p.stock_qty) || 0
+          const { error: uErr } = await supabase.from('products')
+            .update({ stock_qty: delta > 0 ? Math.max(0, stock - delta) : stock - delta }).eq('id', id)
+          if (uErr) throw uErr
+          changed.push(id)
+        } catch {
+          failed.push(returnItems.find(i => i.product.id === id)?.product.name || oldRows.find(r => r.product_id === id)?.product_name || id)
+        }
+      }
+      if (changed.length) refreshProductsInCache(changed).catch(() => {})
+
+      if (failed.length) toast.error(`Return saved, but stock was not changed for: ${failed.join(', ')}. Check these in Inventory.`, { duration: 8000 })
+      else toast.success(`${editing.return_no} updated`)
+      cancelEdit()
+      fetchHistory()
+    } catch (err: any) {
+      toast.error('Could not save the changes: ' + (err?.message || 'unknown error') + '. Nothing in stock was changed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const sendSupplierWhatsApp = (ret: any) => {
     if (!ret.supplierPhone) {
       toast.error('Supplier phone number not available')
@@ -292,7 +460,10 @@ export function PurchaseReturnPage() {
           {/* Tab Selector */}
           <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '10px', padding: '4px' }}>
             <button
-              onClick={() => setActiveTab('new')}
+              onClick={() => {
+                if (editing) { setEditing(null); setReturnItems([]); setNotes(''); setReturnReason(RETURN_REASONS[0]); setSelectedSupplier(null) }
+                setActiveTab('new')
+              }}
               style={{
                 padding: '8px 16px', borderRadius: '8px', border: 'none',
                 background: activeTab === 'new' ? 'white' : 'transparent',
@@ -316,6 +487,15 @@ export function PurchaseReturnPage() {
           </div>
         </div>
 
+        {activeTab === 'new' && editing && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f3e8ff', border: '1px solid #c084fc', borderRadius: '12px', padding: '10px 16px', marginBottom: '16px', color: '#6b21a8', fontWeight: 700, fontSize: '14px' }}>
+            <span>Editing {editing.return_no} · stock changes only by the difference when you save</span>
+            <button onClick={cancelEdit} disabled={saving}
+              style={{ background: 'white', border: '1px solid #c084fc', color: '#6b21a8', borderRadius: '8px', padding: '6px 14px', fontWeight: 600, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        )}
         {activeTab === 'new' ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '24px' }}>
             {/* Left Column: Supplier & Items */}
@@ -392,8 +572,10 @@ export function PurchaseReturnPage() {
                 <div style={{ position: 'relative', marginBottom: '16px' }}>
                   <input
                     type="text"
-                    placeholder="Search by barcode, SKU, or product name..."
+                    placeholder="Scan barcode, or search by design no / name..."
                     value={productSearch}
+                    data-enter="own"
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSearchEnter() } }}
                     onChange={e => {
                       setProductSearch(e.target.value)
                       searchProducts(e.target.value)
@@ -533,7 +715,7 @@ export function PurchaseReturnPage() {
                 </div>
 
                 <button
-                  onClick={handleCompleteReturn}
+                  onClick={editing ? handleSaveEdit : handleCompleteReturn}
                   disabled={saving || returnItems.length === 0 || !selectedSupplier}
                   style={{
                     width: '100%', background: saving || returnItems.length === 0 || !selectedSupplier ? '#cbd5e1' : '#dc2626',
@@ -541,7 +723,7 @@ export function PurchaseReturnPage() {
                     fontSize: '14px', fontWeight: 700, cursor: saving || returnItems.length === 0 || !selectedSupplier ? 'not-allowed' : 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
                   }}>
-                  {saving ? 'Processing...' : 'Confirm Return & Deduct Stock'}
+                  {saving ? 'Processing...' : editing ? 'Save Changes' : 'Confirm Return & Deduct Stock'}
                 </button>
               </div>
             </div>
@@ -562,7 +744,7 @@ export function PurchaseReturnPage() {
                     <th style={{ padding: '12px 16px' }}>Supplier</th>
                     <th style={{ padding: '12px 16px' }}>Reason</th>
                     <th style={{ padding: '12px 16px', textAlign: 'right' }}>Total Amount</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', width: '140px' }}>Actions</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', width: '200px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -585,6 +767,10 @@ export function PurchaseReturnPage() {
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                          <button title="Edit this return" onClick={() => startEdit(ret)}
+                            style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Pencil size={13} /> Edit
+                          </button>
                           <button
                             onClick={() => printPurchaseReturn({
                               returnNo: ret.return_no,

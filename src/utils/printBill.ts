@@ -493,6 +493,76 @@ export function printCreditNote(noteData: {
   printHTML(html)
 }
 
+// ─── Payment Receipt (old pending amount paid back) ────────────────────────
+export interface PaymentReceiptData {
+  customerName: string
+  customerPhone?: string | null
+  lines: { no: string; amount: number }[]   // which bill(s) the money went to
+  total: number
+  tender: string
+  balanceLeft?: number | null               // what the customer still owes after this; unknown on reprints
+  paidAt: string
+}
+
+export function printPaymentReceipt(d: PaymentReceiptData) {
+  const s = getSettings()
+  const esc = (v: any) => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+  const at = new Date(d.paidAt)
+  const rs = (n: number) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const cleared = d.balanceLeft != null && d.balanceLeft <= 0.009
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Payment Receipt</title>
+      <style>
+        body { font-family: 'DM Sans', system-ui, sans-serif; padding: 16px; max-width: 320px; margin: 0 auto; color: #1e293b; }
+        .header { text-align: center; border-bottom: 2px dashed #16a34a; padding-bottom: 12px; margin-bottom: 12px; }
+        .shop-name { font-size: 18px; font-weight: 800; }
+        .title-badge { display: inline-block; background: #16a34a; color: white; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 700; margin: 8px 0; letter-spacing: 0.05em; }
+        .row { display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0; }
+        .amount-box { border: 2px solid #16a34a; border-radius: 12px; padding: 12px; text-align: center; margin: 14px 0; }
+        .amount { font-size: 24px; font-weight: 800; color: #16a34a; }
+        .footer { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 16px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+        @media print { @page { margin: 4mm; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="shop-name">${esc(s.shopName || 'Retail ERP')}</div>
+        ${s.shopPhone ? `<div style="font-size:11px;color:#64748b">📞 ${esc(s.shopPhone)}</div>` : ''}
+        <div class="title-badge">PAYMENT RECEIPT</div>
+        <div style="font-size:11px;color:#64748b">${fmtDate(at)} · ${at.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+      </div>
+      <div class="row"><span>Received from:</span><strong>${esc(d.customerName || 'Customer')}</strong></div>
+      ${d.customerPhone ? `<div class="row"><span>Phone:</span><span>${esc(d.customerPhone)}</span></div>` : ''}
+      <div style="margin-top:8px;font-size:11px;color:#64748b;font-weight:600">Against pending amount of:</div>
+      ${d.lines.map(l => `<div class="row"><span>${esc(l.no)}</span><span>${rs(l.amount)}</span></div>`).join('')}
+      <div class="amount-box">
+        <div style="font-size:11px;color:#15803d;font-weight:600">AMOUNT RECEIVED (${esc(String(d.tender || 'cash').toUpperCase())})</div>
+        <div class="amount">${rs(d.total)}</div>
+      </div>
+      ${d.balanceLeft != null ? (cleared
+        ? `<div style="text-align:center;font-weight:800;color:#16a34a;font-size:14px">✔ ALL DUES CLEARED</div>`
+        : `<div class="row" style="font-weight:700;color:#b45309"><span>Balance still pending:</span><span>${rs(d.balanceLeft)}</span></div>`) : ''}
+      <div class="footer">
+        <div>Thank you for your payment!</div>
+      </div>
+    </body>
+    </html>
+  `
+  printHTML(html)
+}
+
+export function paymentReceiptMessage(d: PaymentReceiptData): string {
+  const s = getSettings()
+  const rs = (n: number) => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })
+  return `Dear ${d.customerName || 'Customer'},\n\nWe have received ${rs(d.total)} (${String(d.tender || 'cash').toUpperCase()}) on ${fmtDate(new Date(d.paidAt))} against ${d.lines.map(l => l.no).join(', ')}.` +
+    (d.balanceLeft != null ? (d.balanceLeft <= 0.009 ? `\n\nAll your dues are now cleared.` : `\n\nBalance still pending: ${rs(d.balanceLeft)}.`) : '') +
+    `\n\nThank you — ${s.shopName || 'Team'}`
+}
+
 export function sendCreditNoteWhatsApp(noteData: {
   creditNoteNo: string
   customerName: string

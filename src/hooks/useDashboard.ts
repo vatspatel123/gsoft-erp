@@ -248,13 +248,21 @@ export function useDashboard() {
             .eq('balance_type', 'customer_pays')
           if (!exchErr && exch) dbExchangeIn = exch
           try {   // empty until EXCHANGE_SALESMAN.sql has been run
-            const { data: sx, error: sxe } = await supabase.from('exchange_bills').select('salesman_id, balance_amount')
-              .eq('balance_type', 'customer_pays').not('salesman_id', 'is', null)
-            if (!sxe && sx?.length) {
-              const { data: us } = await supabase.from('users').select('id, name, role').in('id', [...new Set(sx.map((r: any) => r.salesman_id))])
+            const [{ data: sx0, error: sxe }, ox] = await Promise.all([
+              // Maker gets the full value of the new pieces (owner, 23 Nov 2026; was only the top-up).
+              supabase.from('exchange_bills').select('salesman_id, new_sale_amount').not('salesman_id', 'is', null),
+              // Returned pieces come off the salesman who first sold them (empty until EXCHANGE_ORIGINAL_SALESMAN.sql).
+              supabase.from('exchange_bills').select('original_salesman_id, return_amount').not('original_salesman_id', 'is', null),
+            ])
+            const sx = sxe ? [] : sx0 || []
+            const orig = ox.error ? [] : ox.data || []
+            if (sx.length || orig.length) {
+              const ids = [...new Set([...sx.map((r: any) => r.salesman_id), ...orig.map((r: any) => r.original_salesman_id)])]
+              const { data: us } = await supabase.from('users').select('id, name, role').in('id', ids)
               const info = new Map((us || []).map((u: any) => [u.id, u]))
               const sum = new Map<string, number>()
-              sx.forEach((r: any) => sum.set(r.salesman_id, (sum.get(r.salesman_id) || 0) + (Number(r.balance_amount) || 0)))
+              sx.forEach((r: any) => sum.set(r.salesman_id, (sum.get(r.salesman_id) || 0) + (Number(r.new_sale_amount) || 0)))
+              orig.forEach((r: any) => sum.set(r.original_salesman_id, (sum.get(r.original_salesman_id) || 0) - (Number(r.return_amount) || 0)))
               dbExchBySalesman = [...sum].map(([id, amount]) => ({ id, amount, name: (info.get(id) as any)?.name || 'Cashier', role: (info.get(id) as any)?.role || 'Salesman' }))
             }
           } catch { /* leave the salesman credit out */ }
@@ -383,7 +391,7 @@ export function useDashboard() {
         salesmanMap[key].sales++
         salesmanMap[key].revenue += Number(s.net_amount || 0)
       })
-      dbExchBySalesman.forEach(x => {   // exchange top-ups count for the salesman who made the exchange
+      dbExchBySalesman.forEach(x => {   // exchanges: + new pieces for the maker, − returned pieces for the original salesman
         if (!salesmanMap[x.id]) salesmanMap[x.id] = { id: x.id, name: x.name, role: x.role, sales: 0, revenue: 0 }
         salesmanMap[x.id].revenue += x.amount
       })

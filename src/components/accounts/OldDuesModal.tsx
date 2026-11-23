@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, Printer } from 'lucide-react'
+import { printPaymentReceipt } from '../../utils/printBill'
 import { supabase } from '../../lib/supabase'
 import { S } from '../bills/billEditStyles'
 import { money } from '../../utils/billEdits'
 import { fmtDateTime } from '../../utils/date'
 
-interface Row { id: string; at: string; who: string; bill: string; tender: string; amount: number; kind: 'Customer' | 'Wholesale' }
+interface Row { id: string; at: string; who: string; bill: string; tender: string; amount: number; kind: 'Customer' | 'Wholesale'; name?: string; phone?: string | null }
 
 /**
  * Who paid what: every old pending amount collected between from and to (ISO times),
@@ -37,6 +38,7 @@ export function OldDuesModal({ from, to, title, onClose }: { from: string; to: s
           id: r.id, at: r.paid_at, kind: 'Customer', tender: String(r.tender || 'cash'), amount: Number(r.amount) || 0,
           who: [r.customers?.name, r.customers?.phone].filter(Boolean).join(' · ') || 'Customer',
           bill: r.sales?.invoice_no || r.exchange_bills?.exchange_no || '—',
+          name: r.customers?.name, phone: r.customers?.phone,
         })
       }
       // Empty until WHOLESALE_PAYMENTS.sql has been run.
@@ -83,7 +85,7 @@ export function OldDuesModal({ from, to, title, onClose }: { from: string; to: s
             <table style={S.table}>
               <thead><tr>
                 <th style={S.th}>When</th><th style={S.th}>Paid by</th><th style={S.th}>For bill</th>
-                <th style={S.th}>Method</th><th style={{ ...S.th, textAlign: 'right' }}>Amount</th>
+                <th style={S.th}>Method</th><th style={{ ...S.th, textAlign: 'right' }}>Amount</th><th style={S.th}></th>
               </tr></thead>
               <tbody>
                 {rows.map(r => (
@@ -93,6 +95,17 @@ export function OldDuesModal({ from, to, title, onClose }: { from: string; to: s
                     <td style={S.td}>{r.bill}</td>
                     <td style={{ ...S.td, textTransform: 'capitalize' }}>{r.tender}</td>
                     <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>{money(r.amount)}</td>
+                    <td style={S.td}>
+                      {r.kind === 'Customer' && (
+                        // Reprint: the balance left at that time isn't stored, so the receipt leaves it out.
+                        <button title="Print receipt" onClick={() => printPaymentReceipt({
+                          customerName: r.name || 'Customer', customerPhone: r.phone,
+                          lines: [{ no: r.bill, amount: r.amount }], total: r.amount, tender: r.tender, balanceLeft: null, paidAt: r.at,
+                        })} style={{ border: '1px solid #e5e7eb', background: 'white', borderRadius: 6, padding: '3px 6px', cursor: 'pointer', lineHeight: 0, color: '#64748b' }}>
+                          <Printer size={13} />
+                        </button>
+                      )}
+                    </td>
                   </tr>))}
               </tbody>
             </table>

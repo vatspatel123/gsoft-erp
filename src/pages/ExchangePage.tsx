@@ -87,9 +87,12 @@ export function ExchangePage() {
   const [phoneInput, setPhoneInput] = useState('')
   const [barcodeInput, setBarcodeInput] = useState('')
   const [phoneResults, setPhoneResults] = useState<any[]>([])
+  const [phoneItemFilter, setPhoneItemFilter] = useState('')   // barcode / design no to find the bill among the customer's bills
   // Who is making this exchange: the extra money and revenue are credited to them, not to whoever sold the original bill.
   const [salesmen, setSalesmen] = useState<any[]>([])
   const [salesmanId, setSalesmanId] = useState('')
+  // Who first sold the pieces coming back: their value comes off this salesman's sales. Starts as the bill's salesman.
+  const [origSalesmanId, setOrigSalesmanId] = useState('')
   const [barcodeResults, setBarcodeResults] = useState<any[]>([])   // every bill that sold the scanned product
   const [barcodeInfo, setBarcodeInfo] = useState('')                  // what the last barcode search found, shown under the box
   const [originalInvoice, setOriginalInvoice] = useState<any>(null)
@@ -303,10 +306,11 @@ export function ExchangePage() {
         .select('*, customers(*), sale_items(*, products(*))')
         .in('customer_id', customerIds)
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(50)   // was 10: older bills could not be found by the barcode filter
       if (!data || data.length === 0) {
         toast.error('No invoices found for this customer')
       }
+      setPhoneItemFilter('')
       setPhoneResults(data || [])
     } catch { toast.error('Search failed — check your connection') }
     finally { setLoadingInvoice(false) }
@@ -474,6 +478,8 @@ export function ExchangePage() {
 
   // ── Calculations ──────────────────────────────────────────────────────────
   const returnTotal = returnItems.reduce((s, i) => s + i.line_total, 0)
+  // A new bill picked: "Originally sold by" starts as that bill's salesman (can be changed).
+  useEffect(() => { setOrigSalesmanId(originalInvoice?.salesman_id || '') }, [originalInvoice?.id])
   const newTotal = newItems.reduce((s, i) => s + i.line_total, 0)
   const balance = newTotal - returnTotal // positive = customer pays, negative = store owes
 
@@ -555,10 +561,21 @@ export function ExchangePage() {
             status: 'completed',
             refund_mode: balance < 0 ? creditOption : null
           }
+        const fullRow: any = {
+          ...excRow,
+          ...(salesmanId ? { salesman_id: salesmanId } : {}),
+          ...(origSalesmanId ? { original_salesman_id: origSalesmanId } : {}),
+        }
         let { data: exchange, error: excErr } = await supabase
           .from('exchange_bills')
-          .insert(salesmanId ? { ...excRow, salesman_id: salesmanId } : excRow)
+          .insert(fullRow)
           .select().single()
+        // EXCHANGE_ORIGINAL_SALESMAN.sql not run yet: save without the original salesman rather than lose the exchange.
+        if (excErr && origSalesmanId && /original_salesman_id/.test(excErr.message || '')) {
+          toast('Exchange saved, but the original salesman was not recorded — run EXCHANGE_ORIGINAL_SALESMAN.sql in Supabase', { icon: '⚠️', duration: 7000 })
+          delete fullRow.original_salesman_id
+          ;({ data: exchange, error: excErr } = await supabase.from('exchange_bills').insert(fullRow).select().single())
+        }
         // EXCHANGE_SALESMAN.sql not run yet: save the exchange without the salesman rather than lose it.
         if (excErr && salesmanId && /salesman_id/.test(excErr.message || '')) {
           toast('Exchange saved, but the salesman was not recorded — run EXCHANGE_SALESMAN.sql in Supabase', { icon: '⚠️', duration: 7000 })
@@ -670,7 +687,7 @@ export function ExchangePage() {
 
   const resetAll = () => {
     setOriginalInvoice(null); setStep(1); setInvoiceInput(''); setPhoneInput('')
-    setBarcodeInput(''); setPhoneResults([]); setReturnItems([]); setNewItems([]); setSalesmanId('')
+    setBarcodeInput(''); setPhoneResults([]); setReturnItems([]); setNewItems([]); setSalesmanId(''); setOrigSalesmanId('')
     setReplSearch(''); setReplResults([]); setExchangeNotes('')
     setShowSuccessModal(false); setExchangeComplete(null)
     setSelectedItems({}); setReturnQtys({}); setReturnReasons({})
@@ -919,18 +936,43 @@ export function ExchangePage() {
                           {loadingInvoice ? '...' : 'Find Bills'}
                         </button>
                       </div>
-                      {phoneResults.map(inv => (
-                        <div key={inv.id} onClick={() => selectPhoneInvoice(inv)}
-                          style={{ padding: '12px', border: '1px solid #f3e8ff', borderRadius: '10px', cursor: 'pointer', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                          onMouseEnter={e => (e.currentTarget.style.background = '#fdf8ff')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
-                          <div>
-                            <div style={{ fontWeight: 600, color: '#9333ea', fontSize: '13px', fontFamily: 'DM Mono, monospace' }}>{inv.invoice_no}</div>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>{fmtDate(new Date(inv.created_at))} · ₹{inv.net_amount}</div>
-                          </div>
-                          <ChevronRight size={14} color="#9333ea" />
-                        </div>
-                      ))}
+                      {phoneResults.length > 0 && (() => {
+                        // Which of this customer's bills has the piece: filter by its barcode or design no.
+                        const q = phoneItemFilter.trim().toLowerCase()
+                        const itemHit = (si: any) => !!q && [si.barcode, si.product_name, si.products?.barcode, si.products?.sku,
+                          si.products?.design_no, si.products?.batch_no, si.products?.pcode, si.products?.name]
+                          .some(v => v != null && String(v).toLowerCase().includes(q))
+                        const shown = q ? phoneResults.filter(inv => (inv.sale_items || []).some(itemHit)) : phoneResults
+                        return (<>
+                          <input style={{ ...inputStyle, marginBottom: '10px' }} value={phoneItemFilter}
+                            onChange={e => setPhoneItemFilter(e.target.value)}
+                            data-enter="own" onKeyDown={e => { if (e.key === 'Enter' && shown.length === 1) selectPhoneInvoice(shown[0]) }}
+                            placeholder={`Scan barcode or type design no to find the bill (${phoneResults.length} bills)`} />
+                          {q && shown.length === 0 && (
+                            <div style={{ fontSize: '12px', color: '#94a3b8', padding: '6px 2px 10px' }}>None of this customer's bills has "{phoneItemFilter}"</div>
+                          )}
+                          {shown.map(inv => {
+                            const hits = q ? (inv.sale_items || []).filter(itemHit) : []
+                            return (
+                              <div key={inv.id} onClick={() => selectPhoneInvoice(inv)}
+                                style={{ padding: '12px', border: `1px solid ${hits.length ? '#c084fc' : '#f3e8ff'}`, borderRadius: '10px', cursor: 'pointer', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                                onMouseEnter={e => (e.currentTarget.style.background = '#fdf8ff')}
+                                onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#9333ea', fontSize: '13px', fontFamily: 'DM Mono, monospace' }}>{inv.invoice_no}</div>
+                                  <div style={{ fontSize: '11px', color: '#64748b' }}>{fmtDate(new Date(inv.created_at))} · ₹{inv.net_amount}</div>
+                                  {hits.length > 0 && (
+                                    <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '2px' }}>
+                                      ✓ {hits.map((si: any) => [si.product_name || si.products?.name, si.products?.size, si.products?.design_no && `D:${si.products.design_no}`].filter(Boolean).join(' ')).join(' · ')}
+                                    </div>
+                                  )}
+                                </div>
+                                <ChevronRight size={14} color="#9333ea" />
+                              </div>
+                            )
+                          })}
+                        </>)
+                      })()}
                     </div>
                   )}
 
@@ -1113,6 +1155,21 @@ export function ExchangePage() {
                       {salesmen.map((x: any) => <option key={x.id} value={x.id}>{x.name}{x.role ? ` — ${x.role}` : ''}</option>)}
                     </select>
                   </div>
+
+                  {/* Who first sold the returned pieces: their value comes off that salesman's sales today */}
+                  {salesmen.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '14px', border: '1px solid #fecaca', borderRadius: '10px', background: '#fff7f7' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Originally sold by</div>
+                      <select value={origSalesmanId} onChange={e => setOrigSalesmanId(e.target.value)}
+                        style={{ flex: 1, border: '1px solid #fecaca', borderRadius: '8px', padding: '7px 12px', fontSize: '13px', fontFamily: 'DM Sans, sans-serif', color: '#1a0a2e', background: 'white', outline: 'none', cursor: 'pointer' }}>
+                        <option value="">— Nobody (don't deduct) —</option>
+                        {salesmen.map((x: any) => <option key={x.id} value={x.id}>{x.name}{x.role ? ` — ${x.role}` : ''}</option>)}
+                      </select>
+                      {origSalesmanId && returnTotal > 0 && (
+                        <span style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 700, whiteSpace: 'nowrap' }}>−₹{returnTotal.toLocaleString('en-IN')} from their sales</span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Search replacement */}
                   <div style={{ position: 'relative', marginBottom: '14px' }}>

@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { saveCustomerToCache } from '../../utils/offlineCache';
 import toast from 'react-hot-toast';
 import { fmtDate } from '../../utils/date'
+import { printPaymentReceipt, type PaymentReceiptData } from '../../utils/printBill'
 
 interface OrderSummaryProps {
   customer: Customer | null;
@@ -22,6 +23,8 @@ interface OrderSummaryProps {
   activeCreditNotes?: CreditNote[];
   creditToApply?: number;
   setCreditToApply?: (amount: number) => void;
+  useMaxCredit?: () => void;      // back to automatic: use as much credit as the bill allows
+  creditAuto?: boolean;
   creditNoteDiscount?: number;
   /** Paid by credit note on this bill (a payment, shown under the discount). netAmount is what is left to pay. */
   creditNotePaid?: number;
@@ -64,7 +67,7 @@ interface OrderSummaryProps {
   billDate?: string;
   setBillDate?: (v: string) => void;
   customerDues?: { id: string; source: 'sale' | 'exchange'; no: string; date: string; pending: number }[];
-  collectDues?: (amount: number, tender: 'cash' | 'upi' | 'card') => Promise<boolean>;
+  collectDues?: (amount: number, tender: 'cash' | 'upi' | 'card') => Promise<false | PaymentReceiptData>;
   isSaving: boolean;
   clearCart: () => void;
   cartLength: number;
@@ -80,6 +83,8 @@ export function OrderSummary(props: OrderSummaryProps) {
   const [collectAmt, setCollectAmt] = useState('')
   const [collectTender, setCollectTender] = useState<'cash' | 'upi' | 'card'>('cash')
   const [collecting, setCollecting] = useState(false)
+  const [duesReceipt, setDuesReceipt] = useState<PaymentReceiptData | null>(null)   // last dues payment, for its receipt
+  useEffect(() => { setDuesReceipt(null) }, [props.customer?.id])   // a new customer: hide the last one's receipt
   const [customerResults, setCustomerResults] = useState<any[]>([])
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
   const [customerLoading, setCustomerLoading] = useState(false)
@@ -550,6 +555,23 @@ export function OrderSummary(props: OrderSummaryProps) {
               <Ticket size={12} /> Credit Control
             </div>
 
+            {/* Receipt for the dues just collected (stays even when every due is now cleared). */}
+            {duesReceipt && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '8px 10px', marginBottom: '8px', fontSize: '12px', flexWrap: 'wrap' }}>
+                <span style={{ color: '#15803d', fontWeight: 700 }}>
+                  ✔ ₹{duesReceipt.total.toLocaleString('en-IN')} received{(duesReceipt.balanceLeft || 0) > 0 ? ` · ₹${(duesReceipt.balanceLeft || 0).toLocaleString('en-IN')} still pending` : ' · dues cleared'}
+                </span>
+                <span style={{ display: 'flex', gap: '6px' }}>
+                  <button onClick={() => printPaymentReceipt(duesReceipt)}
+                    style={{ background: '#16a34a', color: 'white', border: 'none', borderRadius: '7px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                    Print receipt
+                  </button>
+                  <button onClick={() => setDuesReceipt(null)} aria-label="Close"
+                    style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}>✕</button>
+                </span>
+              </div>
+            )}
+
             {/* What the customer still OWES from earlier bills — shown so it can be collected now. */}
             {(props.customerDues?.length || 0) > 0 && (() => {
               const dues = props.customerDues || []
@@ -580,7 +602,7 @@ export function OrderSummary(props: OrderSummaryProps) {
                         setCollecting(true)
                         const ok = await props.collectDues?.(Math.min(Number(collectAmt) || 0, total), collectTender)
                         setCollecting(false)
-                        if (ok) setCollectOpen(false)
+                        if (ok) { setCollectOpen(false); setDuesReceipt(ok) }
                       }} style={{ background: '#16a34a', color: 'white', border: 'none', borderRadius: '7px', padding: '6px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
                         {collecting ? 'Saving…' : 'Receive'}
                       </button>
@@ -626,7 +648,7 @@ export function OrderSummary(props: OrderSummaryProps) {
                       }}
                     />
                     <button
-                      onClick={() => props.setCreditToApply?.(maxUsable)}
+                      onClick={() => props.useMaxCredit ? props.useMaxCredit() : props.setCreditToApply?.(maxUsable)}
                       style={{ background: '#9333ea', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                       Use max
                     </button>
@@ -641,7 +663,7 @@ export function OrderSummary(props: OrderSummaryProps) {
 
                   {applied > 0 && (
                     <div style={{ marginTop: '6px', fontSize: '11px', fontWeight: 700, color: '#9333ea', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Credit applied to this bill</span>
+                      <span>Credit applied to this bill{props.creditAuto ? ' (auto)' : ''}</span>
                       <span style={{ fontFamily: "'DM Mono', monospace" }}>-₹{applied.toFixed(2)}</span>
                     </div>
                   )}

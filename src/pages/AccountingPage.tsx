@@ -9,6 +9,8 @@ import { getSettings } from '../utils/settings'
 import { Wallet, TrendingUp, TrendingDown, Ticket, Download, MessageCircle, Check, ArrowRight } from 'lucide-react'
 import { fmtDate, fmtDayMonth } from '../utils/date'
 import { OldDuesModal } from '../components/accounts/OldDuesModal'
+import { printPaymentReceipt, paymentReceiptMessage, type PaymentReceiptData } from '../utils/printBill'
+import { Printer, Search } from 'lucide-react'
 
 const card: React.CSSProperties = {
   background: 'white', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '20px', marginBottom: '16px'
@@ -48,6 +50,30 @@ export function AccountingPage() {
   >(null)
   const [payAmount, setPayAmount] = useState<number | ''>('')
   const [payTender, setPayTender] = useState<'cash' | 'upi' | 'bank'>('cash')
+  const [receipt, setReceipt] = useState<PaymentReceiptData | null>(null)   // just-recorded customer payment, ready to print
+  const [search, setSearch] = useState('')
+
+  // Search by name, phone or bill number (Payables: supplier; Receivables: customer).
+  const qText = search.trim().toLowerCase()
+  const qDigits = search.replace(/\D/g, '')
+  const hit = (texts: (string | null | undefined)[], phone?: string | null) =>
+    !qText
+    || texts.some(t => (t || '').toLowerCase().includes(qText))
+    || (qDigits.length >= 3 && (phone || '').replace(/\D/g, '').includes(qDigits))
+  const payablesShown = a.payables.filter(p => hit([p.suppliers?.name, p.purchase_no, p.supplier_invoice_no], p.suppliers?.phone))
+  const receivablesShown = a.receivables.filter(r => hit([r.customers?.name, r.invoice_no], r.customers?.phone))
+
+  const searchBox = (count: number, total: number) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+        <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+        <input value={search} onChange={e => setSearch(e.target.value)} data-enter="own"
+          placeholder={tab === 'payables' ? 'Search supplier name, phone or bill no…' : 'Search customer name, phone or bill no…'}
+          style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '9px 12px 9px 30px', fontSize: '13px', outline: 'none' }} />
+      </div>
+      {qText && <span style={{ fontSize: '12px', color: '#64748b' }}>{count} bill{count === 1 ? '' : 's'} · <b>{INR(total)}</b> pending</span>}
+    </div>
+  )
 
   const openPayment = (p: NonNullable<typeof payFor>) => {
     setPayFor(p)
@@ -172,12 +198,15 @@ export function AccountingPage() {
           <div style={card}>
             <div style={{ fontSize: '15px', fontWeight: 600, color: '#1a0a2e' }}>Supplier Payables</div>
             <AgeingBar ageing={a.payableAgeing} total={a.payableTotal} />
+            {a.payables.length > 0 && searchBox(payablesShown.length, payablesShown.reduce((s, p) => s + payableOutstanding(p), 0))}
 
             {a.payables.length === 0 ? (
               <EmptyState icon="✅" title="Nothing owed to suppliers" subtitle="Every purchase bill is settled." />
+            ) : payablesShown.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#94a3b8', padding: '24px', fontSize: '13px' }}>No supplier bill matches "{search}"</div>
             ) : (
               <div style={{ marginTop: '14px' }}>
-                {a.payables.map(p => {
+                {payablesShown.map(p => {
                   const days = a.daysOld(p.created_at)
                   return (
                     <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '12px', border: '1px solid #f3e8ff', borderRadius: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
@@ -233,12 +262,15 @@ export function AccountingPage() {
               )}
             </div>
             <AgeingBar ageing={a.receivableAgeing} total={a.receivableTotal} />
+            {a.receivables.length > 0 && searchBox(receivablesShown.length, receivablesShown.reduce((s, r) => s + receivableOutstanding(r), 0))}
 
             {a.receivables.length === 0 ? (
               <EmptyState icon="✅" title="No pending payments" subtitle="Every credit sale has been settled." />
+            ) : receivablesShown.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#94a3b8', padding: '24px', fontSize: '13px' }}>No customer bill matches "{search}"</div>
             ) : (
               <div style={{ marginTop: '14px' }}>
-                {a.receivables.map(r => {
+                {receivablesShown.map(r => {
                   const days = a.daysOld(r.created_at)
                   const overdue = !!r.credit_due_date && r.credit_due_date < new Date().toISOString().slice(0, 10)
                   return (
@@ -429,7 +461,19 @@ export function AccountingPage() {
                 <button
                   onClick={async () => {
                     if (payFor.kind === 'payable') await a.settlePayable(payFor.row, capped, payTender)
-                    else await a.settleReceivable(payFor.row, capped, payTender)
+                    else {
+                      const row = payFor.row
+                      // What this customer still owes after this payment, across all their pending bills.
+                      const others = row.customer_id
+                        ? a.receivables.filter(r => r.id !== row.id && r.customer_id === row.customer_id).reduce((s, r) => s + receivableOutstanding(r), 0)
+                        : 0
+                      const ok = await a.settleReceivable(row, capped, payTender)
+                      if (ok) setReceipt({
+                        customerName: row.customers?.name || 'Customer', customerPhone: row.customers?.phone,
+                        lines: [{ no: row.invoice_no, amount: capped }], total: capped, tender: payTender,
+                        balanceLeft: Math.round((others + remainingAfter) * 100) / 100, paidAt: new Date().toISOString(),
+                      })
+                    }
                     setPayFor(null)
                     setPayAmount('')
                     setPayTender('cash')
@@ -442,6 +486,29 @@ export function AccountingPage() {
           </div>
         )
       })()}
+      {receipt && (
+        <div onClick={() => setReceipt(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', zIndex: 999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '24px 16px' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: '380px', background: 'white', borderRadius: '16px', padding: '24px', fontFamily: 'DM Sans, sans-serif', textAlign: 'center' }}>
+            <div style={{ fontSize: '30px' }}>✅</div>
+            <h2 style={{ margin: '6px 0 4px', fontSize: '17px', fontWeight: 700, color: '#1a0a2e' }}>
+              {INR(receipt.total)} received from {receipt.customerName}
+            </h2>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: (receipt.balanceLeft || 0) > 0 ? '#b45309' : '#16a34a', marginBottom: '16px' }}>
+              {(receipt.balanceLeft || 0) > 0 ? `Still pending: ${INR(receipt.balanceLeft || 0)}` : 'All dues cleared'}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button onClick={() => printPaymentReceipt(receipt)} style={btnPrimary}><Printer size={14} /> Print receipt</button>
+              {receipt.customerPhone && (
+                <button onClick={() => sendWhatsApp(receipt.customerPhone!, paymentReceiptMessage(receipt))}
+                  style={{ ...btnOutline, color: '#16a34a', borderColor: '#bbf7d0' }}><MessageCircle size={14} /> WhatsApp</button>
+              )}
+              <button onClick={() => setReceipt(null)} style={{ ...btnOutline, color: '#64748b', borderColor: '#e2e8f0' }}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
       {duesDay && (() => {
         const start = new Date(`${duesDay}T00:00:00.000Z`)
         return <OldDuesModal from={start.toISOString()} to={new Date(start.getTime() + 86400000).toISOString()}

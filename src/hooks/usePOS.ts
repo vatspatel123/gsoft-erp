@@ -140,6 +140,8 @@ export function usePOS(salesmanId: string | null = null) {
     let left = Math.round((Number(amount) || 0) * 100) / 100
     if (left <= 0) { toast.error('Enter the amount received'); return false }
     let collected = 0
+    const lines: { no: string; amount: number }[] = []
+    const pendingBefore = customerDues.reduce((s, r) => s + r.pending, 0)
     for (const r of customerDues) {
       if (left <= 0) break
       const pay = Math.min(left, r.pending)
@@ -151,12 +153,26 @@ export function usePOS(salesmanId: string | null = null) {
       if (error) { toast.error(`Could not record the payment on ${r.no}: ${error.message}`); break }
       void recordDuePayment({ sale_id: r.source === 'sale' ? r.id : null, exchange_id: r.source === 'exchange' ? r.id : null, customer_id: customer?.id, amount: pay, tender })
       collected += pay; left = Math.round((left - pay) * 100) / 100
+      lines.push({ no: r.no, amount: pay })
     }
     if (collected > 0) toast.success(`₹${collected.toLocaleString('en-IN')} of old dues collected (${tender.toUpperCase()})`)
     await loadDues(customer?.id)
-    return collected > 0
+    if (collected <= 0) return false as const
+    // Details for the payment receipt the counter can print.
+    return {
+      customerName: customer?.name || 'Customer', customerPhone: customer?.phone || null,
+      lines, total: Math.round(collected * 100) / 100, tender,
+      balanceLeft: Math.max(0, Math.round((pendingBefore - collected) * 100) / 100), paidAt: new Date().toISOString(),
+    }
   }, [customerDues, customer, loadDues])
   const [creditToApply, setCreditToApply] = useState(0)
+  const [creditAuto, setCreditAuto] = useState(true)   // use the customer's credit by itself until the biller changes it
+  const [editBill, setEditBill] = useState(false)      // a saved bill is open for editing (loadBill)
+  // The biller set the credit by hand: keep it. Asking for the full usable amount ("Use max") turns auto back on.
+  const setCreditByUser = useCallback((amount: number) => {
+    setCreditAuto(false)
+    setCreditToApply(amount)
+  }, [])
   // Edit mode: the credit note an already-saved bill was paid with (it stays as it was).
   const [fixedCreditNote, setFixedCreditNote] = useState(0)
   const [manualDiscount, setManualDiscount] = useState(0)
@@ -371,6 +387,12 @@ export function usePOS(salesmanId: string | null = null) {
   // Amounts come back from the database as text: add them as numbers.
   const availableCredit = activeCreditNotes.reduce((s, n) => s + (Number(n.balance_amount) || 0), 0)
   const maxApplicableCredit = Math.min(availableCredit, payableBeforeCredit)
+  // The customer's credit is used by itself, as much as the bill allows, and follows the bill as
+  // items change. Once the biller types an amount or presses Remove it stays as they set it
+  // (until the next customer). Never while editing a saved bill: its credit stays as it was.
+  useEffect(() => {
+    if (creditAuto && !editBill) setCreditToApply(prev => (prev === maxApplicableCredit ? prev : maxApplicableCredit))
+  }, [creditAuto, editBill, maxApplicableCredit])
   const creditNoteDiscount = Math.max(0, Math.min(creditToApply, maxApplicableCredit))
   const creditAllocations = (() => {
     let remaining = creditNoteDiscount
@@ -406,6 +428,7 @@ export function usePOS(salesmanId: string | null = null) {
   /** Edit mode only: put a saved bill on the screen exactly as it was billed (its own rates and discounts). */
   const loadBill = useCallback((b: { items: CartItem[]; discount: number; shipping: number; tenders: { cash: number; card: number; upi: number }; creditNote?: number }) => {
     setCart(b.items)
+    setEditBill(true); setCreditAuto(false); setCreditToApply(0)
     setFixedCreditNote(Math.max(0, Number(b.creditNote) || 0))
     setManualDiscountMode('flat'); setManualDiscount(b.discount)
     setShipping(b.shipping)
@@ -512,7 +535,7 @@ export function usePOS(salesmanId: string | null = null) {
     setSearchedPhone(cleanPhone)
     // Clear the previous customer's credit before looking up the next one.
     setActiveCreditNotes([])
-    setCreditToApply(0)
+    setCreditToApply(0); setCreditAuto(true)
 
     // Check local cache first
     const cached = findCachedCustomer(cleanPhone)
@@ -550,7 +573,7 @@ export function usePOS(salesmanId: string | null = null) {
   // otherwise the POS shows zero store credit for customers who actually have some.
   const selectCustomer = useCallback((cust: Customer | null) => {
     setCustomer(cust)
-    setCreditToApply(0)
+    setCreditToApply(0); setCreditAuto(true)
     if (!cust) {
       setActiveCreditNotes([])
       setCustomerDues([])
@@ -919,14 +942,14 @@ export function usePOS(salesmanId: string | null = null) {
     setLastSale(null)
     setCustomerNotFound(false)
     setSearchedPhone('')
-    setCreditToApply(0)
+    setCreditToApply(0); setCreditAuto(true); setEditBill(false)
     setManualDiscount(0)
     setManualDiscountMode('flat')
     setActiveCreditNotes([])
     setCustomerTier('New')
   }, [])
 
-  const clearCredit = useCallback(() => setCreditToApply(0), [])
+  const clearCredit = useCallback(() => { setCreditAuto(false); setCreditToApply(0) }, [])
 
   const skipCustomer = useCallback(() => {
     setCustomerNotFound(false)
@@ -988,7 +1011,8 @@ export function usePOS(salesmanId: string | null = null) {
     cart, addToCart, updateQty, updateDiscount, removeFromCart,
     customer, setCustomer, onCustomerFound: selectCustomer, selectCustomer, removeCustomer: () => selectCustomer(null), searchCustomer, customerNotFound, searchedPhone, addCustomer, skipCustomer,
     customerTier,
-    activeCreditNotes, creditToApply, setCreditToApply, clearCredit,
+    activeCreditNotes, creditToApply, setCreditToApply: setCreditByUser, clearCredit, creditAuto,
+    useMaxCredit: () => setCreditAuto(true),
     creditNoteDiscount, creditNotePaid, amountToPay, creditAllocations, availableCredit, maxApplicableCredit,
     customerDues, collectDues,
     manualDiscount, setManualDiscount, manualDiscountMode, setManualDiscountMode, manualDiscountAmount,
